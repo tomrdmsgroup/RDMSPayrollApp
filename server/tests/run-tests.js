@@ -4,6 +4,11 @@ const { generateRunWip, generateWfnWip } = require('../src/domain/exportService'
 const { isExcluded } = require('../src/domain/exclusionsService');
 const { RuleRegistry, numericParam } = require('../src/domain/rulesEngine');
 const { IdempotencyService } = require('../src/domain/idempotencyService');
+const {
+  testBuildsExpectedUrl,
+  testFetchesToastDataWithAuthAndMapping,
+  testFetchToastDataHandlesFailures,
+} = require('./providers/toastProvider.test');
 
 function testTokenLifecycle() {
   const token = issueToken({ action: 'approve', ttlMinutes: 0.001 });
@@ -49,12 +54,21 @@ function testIdempotency() {
   assert.equal(svc.check('email', 'k1'), true, 'key should be stored');
 }
 
-function runAll() {
-  const tests = [testTokenLifecycle, testExportContracts, testExclusions, testRuleValidation, testIdempotency];
-  tests.forEach((fn) => {
-    fn();
+async function runAll() {
+  const tests = [
+    testTokenLifecycle,
+    testExportContracts,
+    testExclusions,
+    testRuleValidation,
+    testIdempotency,
+    testBuildsExpectedUrl,
+    testFetchesToastDataWithAuthAndMapping,
+    testFetchToastDataHandlesFailures,
+  ];
+  for (const fn of tests) {
+    await fn();
     console.log(`✔ ${fn.name}`);
-  });
+  }
   console.log('All tests passed');
 }
 
