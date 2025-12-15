@@ -22,6 +22,19 @@ const {
   testFetchPayrollCalendarReadsFromAirtable,
   testPayrollCalendarMissingFieldFails,
 } = require('./providers/airtableProviders.test');
+const {
+  testCreateTaskSendsRequest,
+  testCreateTaskHandlesErrors,
+  testBuildTasksUrlUsesEnv,
+  testGetAccessTokenRequiresEnv,
+} = require('./providers/asanaProvider.test');
+const {
+  testResolveAsanaRouteUsesVitals,
+  testCreateAsanaTasksForFindingsSkipsSuccessesAndUsesIdempotency,
+  testCreateAsanaTasksReportsRoutingFailure,
+  testBuildIdempotencyKeyStable,
+  testIsFailureFindingOnlyErrors,
+} = require('./asanaTaskService.test');
 
 function testTokenLifecycle() {
   const token = issueToken({ action: 'approve', ttlMinutes: 0.001 });
@@ -86,6 +99,15 @@ async function runAll() {
     testVitalsMissingRequiredFieldFails,
     testFetchPayrollCalendarReadsFromAirtable,
     testPayrollCalendarMissingFieldFails,
+    testCreateTaskSendsRequest,
+    testCreateTaskHandlesErrors,
+    testBuildTasksUrlUsesEnv,
+    testGetAccessTokenRequiresEnv,
+    testResolveAsanaRouteUsesVitals,
+    testCreateAsanaTasksForFindingsSkipsSuccessesAndUsesIdempotency,
+    testCreateAsanaTasksReportsRoutingFailure,
+    testBuildIdempotencyKeyStable,
+    testIsFailureFindingOnlyErrors,
   ];
   for (const fn of tests) {
     await fn();
