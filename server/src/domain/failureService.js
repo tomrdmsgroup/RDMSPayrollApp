@@ -10,10 +10,17 @@ function buildFailurePayload({ clientLocation, period, step, error, runId }) {
 
 function notifyFailure(details, emailProvider = console) {
   const payload = buildFailurePayload(details);
-  if (emailProvider.sendEmail) {
-    emailProvider.sendEmail(payload);
-  } else {
-    console.error('FAILURE EMAIL', payload);
+  try {
+    if (emailProvider.sendEmail) {
+      const result = emailProvider.sendEmail(payload);
+      if (result && typeof result.catch === 'function') {
+        result.catch((err) => console.error('FAILURE EMAIL ERROR', err.message || err));
+      }
+    } else {
+      console.error('FAILURE EMAIL', payload);
+    }
+  } catch (err) {
+    console.error('FAILURE EMAIL ERROR', err.message || err);
   }
   return payload;
 }

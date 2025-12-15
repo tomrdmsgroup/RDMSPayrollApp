@@ -4,17 +4,24 @@ const { generateRunWip, generateWfnWip } = require('../src/domain/exportService'
 const { isExcluded } = require('../src/domain/exclusionsService');
 const { RuleRegistry, numericParam } = require('../src/domain/rulesEngine');
 const { IdempotencyService } = require('../src/domain/idempotencyService');
-  const {
-    testBuildsExpectedUrl,
-    testFetchesToastDataWithAuthAndMapping,
-    testFetchToastDataHandlesFailures,
-  } = require('./providers/toastProvider.test');
-  const {
-    testFetchVitalsReadsFromAirtable,
-    testVitalsMissingRequiredFieldFails,
-    testFetchPayrollCalendarReadsFromAirtable,
-    testPayrollCalendarMissingFieldFails,
-  } = require('./providers/airtableProviders.test');
+const {
+  testTokenStoreIsPersistent,
+  testApprovalFirstWriterWins,
+  testRerunCreatesNewRunAndTokens,
+  testInvalidTokenTriggersFailure,
+} = require('./approvalTokens.test');
+const { testEmailProviderUsesSmtpSettings } = require('./providers/emailProvider.test');
+const {
+  testBuildsExpectedUrl,
+  testFetchesToastDataWithAuthAndMapping,
+  testFetchToastDataHandlesFailures,
+} = require('./providers/toastProvider.test');
+const {
+  testFetchVitalsReadsFromAirtable,
+  testVitalsMissingRequiredFieldFails,
+  testFetchPayrollCalendarReadsFromAirtable,
+  testPayrollCalendarMissingFieldFails,
+} = require('./providers/airtableProviders.test');
 
 function testTokenLifecycle() {
   const token = issueToken({ action: 'approve', ttlMinutes: 0.001 });
@@ -67,6 +74,11 @@ async function runAll() {
     testExclusions,
     testRuleValidation,
     testIdempotency,
+    testTokenStoreIsPersistent,
+    testApprovalFirstWriterWins,
+    testRerunCreatesNewRunAndTokens,
+    testInvalidTokenTriggersFailure,
+    testEmailProviderUsesSmtpSettings,
     testBuildsExpectedUrl,
     testFetchesToastDataWithAuthAndMapping,
     testFetchToastDataHandlesFailures,

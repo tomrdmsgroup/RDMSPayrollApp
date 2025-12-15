@@ -1,32 +1,67 @@
 const crypto = require('crypto');
 
-function issueToken({ runId = null, periodStart = null, periodEnd = null, action, recipientEmail = null, ttlMinutes = 60 }) {
+// Module-scope token store to persist across requests
+const tokenStore = new Map();
+
+function issueToken({ runId = null, periodStart = null, periodEnd = null, action, ttlMinutes = 60 }) {
   if (!action) throw new Error('action required');
+
   const tokenId = crypto.randomBytes(12).toString('hex');
-  const expiresAt = new Date(Date.now() + ttlMinutes * 60000);
-  return {
+  const expiresAt = new Date(Date.now() + ttlMinutes * 60_000);
+
+  const token = {
     token_id: tokenId,
     run_id: runId,
     period_start: periodStart,
     period_end: periodEnd,
     action,
-    recipient_email: recipientEmail,
     expires_at: expiresAt,
+    issued_at: new Date(),
     status: 'issued',
+    click_count: 0,
   };
-}
 
-function validateToken(token, now = new Date()) {
-  if (!token) return { valid: false, reason: 'missing' };
-  if (token.status !== 'issued') return { valid: false, reason: `status:${token.status}` };
-  if (token.expires_at <= now) return { valid: false, reason: 'expired' };
-  return { valid: true };
-}
-
-function markTokenClicked(token) {
-  token.status = 'consumed';
-  token.clicked_at = new Date();
+  tokenStore.set(tokenId, token);
   return token;
 }
 
-module.exports = { issueToken, validateToken, markTokenClicked };
+function getToken(tokenId) {
+  if (!tokenId) return null;
+  return tokenStore.get(tokenId) || null;
+}
+
+function validateToken(tokenOrId, now = new Date()) {
+  const token = typeof tokenOrId === 'string' ? getToken(tokenOrId) : tokenOrId;
+  if (!token) return { valid: false, reason: 'missing' };
+  if (token.status !== 'issued') return { valid: false, reason: `status:${token.status}` };
+  if (token.expires_at <= now) return { valid: false, reason: 'expired' };
+  return { valid: true, token };
+}
+
+function markTokenClicked(tokenOrId) {
+  const token = typeof tokenOrId === 'string' ? getToken(tokenOrId) : tokenOrId;
+  if (!token) return null;
+  token.click_count = (token.click_count || 0) + 1;
+  token.clicked_at = new Date();
+  if (token.status === 'issued') token.status = 'consumed';
+  tokenStore.set(token.token_id, token);
+  return token;
+}
+
+function listTokens() {
+  return Array.from(tokenStore.values());
+}
+
+function clearTokens() {
+  tokenStore.clear();
+}
+
+module.exports = {
+  issueToken,
+  getToken,
+  validateToken,
+  markTokenClicked,
+  listTokens,
+  clearTokens,
+  tokenStore,
+};

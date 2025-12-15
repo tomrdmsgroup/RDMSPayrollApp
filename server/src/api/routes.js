@@ -1,8 +1,9 @@
 const { authenticate, seedAdmin } = require('../domain/authService');
-const { issueToken, validateToken } = require('../domain/tokenService');
+const { issueToken } = require('../domain/tokenService');
 const { createRunRecord, appendEvent, failRun } = require('../domain/runManager');
-const { generateRunWip, generateWfnWip } = require('../domain/exportService');
+const { approveAction, rerunAction } = require('../domain/approvalService');
 const { IdempotencyService } = require('../domain/idempotencyService');
+const { notifyFailure } = require('../domain/failureService');
 
 const idempotency = new IdempotencyService();
 
@@ -26,15 +27,16 @@ function parseBody(req) {
 }
 
 function router(req, res) {
-  if (req.url === '/health') return json(res, 200, { ok: true });
-  if (req.url === '/auth/seed' && req.method === 'POST') {
+  const url = new URL(req.url, 'http://localhost');
+  if (url.pathname === '/health') return json(res, 200, { ok: true });
+  if (url.pathname === '/auth/seed' && req.method === 'POST') {
     parseBody(req).then((body) => {
       seedAdmin(body.email, body.password);
       json(res, 200, { status: 'seeded' });
     });
     return;
   }
-  if (req.url === '/auth/login' && req.method === 'POST') {
+  if (url.pathname === '/auth/login' && req.method === 'POST') {
     parseBody(req).then((body) => {
       const user = authenticate(body.email, body.password);
       if (!user) return json(res, 401, { error: 'invalid_credentials' });
@@ -42,10 +44,10 @@ function router(req, res) {
     });
     return;
   }
-  if (req.url === '/tokens/issue' && req.method === 'POST') {
+  if (url.pathname === '/tokens/issue' && req.method === 'POST') {
     parseBody(req).then((body) => {
       try {
-        const token = issueToken({ action: body.action, runId: body.runId, periodStart: body.periodStart, periodEnd: body.periodEnd, recipientEmail: body.recipientEmail, ttlMinutes: body.ttlMinutes || 60 });
+        const token = issueToken({ action: body.action, runId: body.runId, periodStart: body.periodStart, periodEnd: body.periodEnd, ttlMinutes: body.ttlMinutes || 60 });
         json(res, 200, { token });
       } catch (e) {
         json(res, 400, { error: e.message });
@@ -53,17 +55,20 @@ function router(req, res) {
     });
     return;
   }
-  if (req.url === '/runs/manual' && req.method === 'POST') {
+  if (url.pathname === '/runs/manual' && req.method === 'POST') {
     parseBody(req).then((body) => {
       const run = createRunRecord({ clientLocationId: body.clientLocationId, periodStart: body.periodStart, periodEnd: body.periodEnd });
       appendEvent(run, 'manual_start');
       try {
         const toastMetadata = { count: 0 };
         appendEvent(run, 'toast_fetch', toastMetadata);
-        const exportLines = generateRunWip([]);
+        const exportLines = require('../domain/exportService').generateRunWip([]);
         appendEvent(run, 'export_generated', { length: exportLines.length });
+        const approveToken = issueToken({ action: 'approve', runId: run.id, periodStart: run.period_start, periodEnd: run.period_end });
+        const rerunToken = issueToken({ action: 'rerun', runId: run.id, periodStart: run.period_start, periodEnd: run.period_end });
+        appendEvent(run, 'tokens_issued', { approve: approveToken.token_id, rerun: rerunToken.token_id });
         run.status = 'completed';
-        json(res, 200, { run });
+        json(res, 200, { run, tokens: { approve: approveToken.token_id, rerun: rerunToken.token_id } });
       } catch (e) {
         failRun(run, 'manual_run', e.message);
         json(res, 500, { error: e.message, run });
@@ -71,7 +76,7 @@ function router(req, res) {
     });
     return;
   }
-  if (req.url === '/idempotency/check' && req.method === 'POST') {
+  if (url.pathname === '/idempotency/check' && req.method === 'POST') {
     parseBody(req).then((body) => {
       const exists = idempotency.check(body.scope, body.key);
       if (exists) return json(res, 200, { reused: true });
@@ -79,6 +84,26 @@ function router(req, res) {
       json(res, 200, { reused: false });
     });
     return;
+  }
+  if (url.pathname === '/approve' && req.method === 'GET') {
+    const tokenId = url.searchParams.get('token');
+    if (!tokenId) {
+      notifyFailure({ step: 'approve', error: 'missing_token', runId: null });
+      return json(res, 400, { error: 'missing_token' });
+    }
+    const result = approveAction(tokenId);
+    const statusCode = result.status === 'invalid' || result.status === 'missing_run' ? 400 : 200;
+    return json(res, statusCode, result);
+  }
+  if (url.pathname === '/rerun' && req.method === 'GET') {
+    const tokenId = url.searchParams.get('token');
+    if (!tokenId) {
+      notifyFailure({ step: 'rerun', error: 'missing_token', runId: null });
+      return json(res, 400, { error: 'missing_token' });
+    }
+    const result = rerunAction(tokenId);
+    const statusCode = result.status === 'invalid' || result.status === 'missing_run' ? 400 : 200;
+    return json(res, statusCode, result);
   }
 
   json(res, 404, { error: 'not_found' });
