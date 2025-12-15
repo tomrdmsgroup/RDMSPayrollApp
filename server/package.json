@@ -8,5 +8,8 @@
     "start": "node src/index.js",
     "test": "node tests/run-tests.js"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "nodemailer": "^6.9.12"
+  }
 }
