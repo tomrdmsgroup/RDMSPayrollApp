@@ -9,11 +9,23 @@ function resolveAsanaRoute(clientLocationId, vitalsSnapshot) {
     (record) => `${record.client_location_id}` === `${clientLocationId}` || `${record.id}` === `${clientLocationId}`,
   );
   if (!match) return null;
-  const projectGid =
-    match.asana_project_gid || match.asana_project_id || match.asana_project || match.asana_projectid || match.asana_project;
-  const sectionGid = match.asana_section_gid || match.asana_section_id || match.asana_section || match.asana_sectionid;
+    const projectGid =
+    match['PR Asana Project GUID'] ||
+    match.asana_project_gid ||
+    match.asana_project_id ||
+    match.asana_project ||
+    match.asana_projectid;
+
+  const sectionGid =
+    match['PR Asana Inbox Section GUID'] ||
+    match.asana_section_gid ||
+    match.asana_section_id ||
+    match.asana_section ||
+    match.asana_sectionid;
+
   if (!projectGid) return null;
-  return { projectGid, sectionGid: sectionGid || null };
+  return { projectGid: `${projectGid}`.trim(), sectionGid: sectionGid ? `${sectionGid}`.trim() : null };
+
 }
 
 function buildIdempotencyKey({ runId, projectGid, sectionGid, finding }) {
