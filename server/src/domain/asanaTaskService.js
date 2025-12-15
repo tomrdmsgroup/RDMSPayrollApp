@@ -33,10 +33,8 @@ function buildIdempotencyKey({ runId, projectGid, sectionGid, finding }) {
   return [runId || 'unknown', projectGid, sectionGid || '', code].join('|');
 }
 
-function isFailureFinding(finding) {
-  const status = (finding?.status || '').toLowerCase();
-  if (!status) return false;
-  return status === 'failure' || status === 'error';
+function shouldCreateClientAsanaTask(finding) {
+  return finding?.emit_asana_alert === true;
 }
 
 function buildTaskPayload({ finding, run, route }) {
@@ -77,7 +75,7 @@ async function createAsanaTasksForFindings({
 
   const results = [];
   for (const finding of findings) {
-    if (!isFailureFinding(finding)) continue;
+    if (!shouldCreateClientAsanaTask(finding)) continue;
     const key = buildIdempotencyKey({ runId: run.id, projectGid: route.projectGid, sectionGid: route.sectionGid, finding });
     const recorded = idempotencyService.record('asana_task', key);
     if (!recorded) continue;
@@ -106,4 +104,5 @@ async function createAsanaTasksForFindings({
   return results;
 }
 
-module.exports = { resolveAsanaRoute, createAsanaTasksForFindings, isFailureFinding, buildIdempotencyKey, buildTaskPayload };
+module.exports = { resolveAsanaRoute, createAsanaTasksForFindings, shouldCreateClientAsanaTask, buildIdempotencyKey, buildTaskPayload };
+
