@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>RDMS Payroll Console</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script crossorigin src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .card { border: 1px solid #ddd; padding: 12px; margin-bottom: 12px; border-radius: 6px; }
+    label { display: block; margin-bottom: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Internal Payroll Ops Console (Stub)</h1>
+  <div id="app"></div>
+  <script type="text/babel">
+    const { useState } = React;
+    function Login({ onLogin }) {
+      const [email, setEmail] = useState('admin@example.com');
+      const [password, setPassword] = useState('changeme');
+      const submit = async () => {
+        const res = await fetch('/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
+        const data = await res.json();
+        if (data.user) onLogin(data.user);
+        else alert('Login failed');
+      };
+      return (
+        <div className="card">
+          <h2>Login</h2>
+          <label>Email <input value={email} onChange={(e) => setEmail(e.target.value)} /></label>
+          <label>Password <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
+          <button onClick={submit}>Sign in</button>
+        </div>
+      );
+    }
+
+    function ManualRun() {
+      const [clientLocationId, setClientLocationId] = useState('loc-1');
+      const [periodStart, setPeriodStart] = useState('2024-01-01');
+      const [periodEnd, setPeriodEnd] = useState('2024-01-07');
+      const run = async () => {
+        const res = await fetch('/runs/manual', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientLocationId, periodStart, periodEnd }) });
+        const data = await res.json();
+        if (data.run) alert('Run created with status ' + data.run.status);
+        else alert('Run failed: ' + data.error);
+      };
+      return (
+        <div className="card">
+          <h2>Manual Actions</h2>
+          <label>Client/Location <input value={clientLocationId} onChange={(e) => setClientLocationId(e.target.value)} /></label>
+          <label>Period Start <input value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} /></label>
+          <label>Period End <input value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} /></label>
+          <button onClick={run}>Run payroll validation</button>
+        </div>
+      );
+    }
+
+    function Dashboard() {
+      const [logs, setLogs] = useState([]);
+      const [scope, setScope] = useState('email');
+      const [key, setKey] = useState('demo');
+      const check = async () => {
+        const res = await fetch('/idempotency/check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope, key }) });
+        const data = await res.json();
+        setLogs((prev) => [...prev, JSON.stringify(data)]);
+      };
+      return (
+        <div className="card">
+          <h2>Dashboards</h2>
+          <label>Idempotency scope <input value={scope} onChange={(e) => setScope(e.target.value)} /></label>
+          <label>Key <input value={key} onChange={(e) => setKey(e.target.value)} /></label>
+          <button onClick={check}>Check/Re-use</button>
+          <pre>{logs.join('\n')}</pre>
+        </div>
+      );
+    }
+
+    function App() {
+      const [user, setUser] = useState(null);
+      if (!user) return <Login onLogin={setUser} />;
+      return (
+        <>
+          <div className="card">Signed in as {user.email} ({user.role})</div>
+          <ManualRun />
+          <Dashboard />
+        </>
+      );
+    }
+
+    ReactDOM.render(<App />, document.getElementById('app'));
+  </script>
+</body>
+</html>

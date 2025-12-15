@@ -1,0 +1,12 @@
+{
+  "name": "rdms-payroll-server",
+  "version": "1.0.0",
+  "description": "Internal payroll automation server (stubbed for closed-world binder)",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node tests/run-tests.js"
+  },
+  "license": "MIT"
+}
