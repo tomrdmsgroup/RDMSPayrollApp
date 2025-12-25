@@ -58,13 +58,15 @@ function router(req, res) {
     return;
   }
   if (url.pathname === '/runs/manual' && req.method === 'POST') {
-    parseBody(req).then((body) => {
+    parseBody(req).then(async (body) => {
       const run = createRunRecord({ clientLocationId: body.clientLocationId, periodStart: body.periodStart, periodEnd: body.periodEnd });
       appendEvent(run, 'manual_start');
       try {
         const toastMetadata = { count: 0 };
         appendEvent(run, 'toast_fetch', toastMetadata);
-        const exportLines = require('../domain/exportService').generateRunWip([]);
+        const validation = await runValidation({ run, context: { clientLocationId: body.clientLocationId, periodStart: body.periodStart, periodEnd: body.periodEnd } });
+        appendEvent(run, 'validation_completed', { findings_count: validation.findings.length });
+        const exportLines = require('../domain/exportService').generateRunWip(validation.findings);
         appendEvent(run, 'export_generated', { length: exportLines.length });
         const approveToken = issueToken({ action: 'approve', runId: run.id, periodStart: run.period_start, periodEnd: run.period_end });
         const rerunToken = issueToken({ action: 'rerun', runId: run.id, periodStart: run.period_start, periodEnd: run.period_end });
@@ -79,7 +81,7 @@ function router(req, res) {
     return;
   }
   if (url.pathname === '/idempotency/check' && req.method === 'POST') {
-    parseBody(req).then((body) => {
+    parseBody(req).then(async (body) => {
       const exists = idempotency.check(body.scope, body.key);
       if (exists) return json(res, 200, { reused: true });
       idempotency.record(body.scope, body.key);
