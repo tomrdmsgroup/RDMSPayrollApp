@@ -5,6 +5,8 @@ const { approveAction, rerunAction } = require('../domain/approvalService');
 const { IdempotencyService } = require('../domain/idempotencyService');
 const { notifyFailure } = require('../domain/failureService');
 const { runValidation } = require('../domain/validationEngine');
+const { buildExcludedEmployeeSet } = require('../domain/exclusionsService');
+
 
 
 const idempotency = new IdempotencyService();
@@ -64,7 +66,16 @@ function router(req, res) {
       try {
         const toastMetadata = { count: 0 };
         appendEvent(run, 'toast_fetch', toastMetadata);
-        const validation = await runValidation({ run, context: { clientLocationId: body.clientLocationId, periodStart: body.periodStart, periodEnd: body.periodEnd } });
+        const validation = await runValidation({
+          run,
+          context: {
+            clientLocationId: body.clientLocationId,
+            periodStart: body.periodStart,
+            periodEnd: body.periodEnd,
+          },
+          exclusions: [],
+        });
+
         appendEvent(run, 'validation_completed', { findings_count: validation.findings.length });
         const exportLines = require('../domain/exportService').generateRunWip([]);
         appendEvent(run, 'export_generated', { length: exportLines.length });
