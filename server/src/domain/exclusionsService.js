@@ -11,7 +11,7 @@ function isExcluded(exclusions, employeeId, targetDate = new Date(), scopeFlag =
   });
 }
 
-function buildExcludedEmployeeSet(exclusions, periodStart, periodEnd) {
+function buildExcludedEmployeeSet(exclusions, periodStart, periodEnd, scopeFlag = null) {
   const excluded = new Set();
   const start = new Date(periodStart);
   const end = new Date(periodEnd);
@@ -24,6 +24,9 @@ function buildExcludedEmployeeSet(exclusions, periodStart, periodEnd) {
     if (from && end < from) return;
     if (to && start > to) return;
 
+    // respect scope flag (exclude_wip / exclude_tips / exclude_validation)
+    if (scopeFlag && ex.scope_flags && ex.scope_flags[scopeFlag] === false) return;
+
     excluded.add(ex.toast_employee_id);
   });
 
@@ -31,4 +34,3 @@ function buildExcludedEmployeeSet(exclusions, periodStart, periodEnd) {
 }
 
 module.exports = { isExcluded, buildExcludedEmployeeSet };
-
