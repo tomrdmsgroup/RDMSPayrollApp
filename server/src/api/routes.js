@@ -5,9 +5,6 @@ const { approveAction, rerunAction } = require('../domain/approvalService');
 const { IdempotencyService } = require('../domain/idempotencyService');
 const { notifyFailure } = require('../domain/failureService');
 const { runValidation } = require('../domain/validationEngine');
-const { buildExcludedEmployeeSet } = require('../domain/exclusionsService');
-
-
 
 const idempotency = new IdempotencyService();
 
@@ -59,38 +56,8 @@ function router(req, res) {
     });
     return;
   }
-  if (url.pathname === '/runs/manual' && req.method === 'POST') {
-    parseBody(req).then(async (body) => {
-      const run = createRunRecord({ clientLocationId: body.clientLocationId, periodStart: body.periodStart, periodEnd: body.periodEnd });
-      appendEvent(run, 'manual_start');
-      try {
-        const toastMetadata = { count: 0 };
-        appendEvent(run, 'toast_fetch', toastMetadata);
-        const validation = await runValidation({
-          run,
-          context: {
-            clientLocationId: body.clientLocationId,
-            periodStart: body.periodStart,
-            periodEnd: body.periodEnd,
-          },
-          exclusions: [],
-        });
 
-        appendEvent(run, 'validation_completed', { findings_count: validation.findings.length });
-        const exportLines = require('../domain/exportService').generateRunWip([]);
-        appendEvent(run, 'export_generated', { length: exportLines.length });
-        const approveToken = issueToken({ action: 'approve', runId: run.id, periodStart: run.period_start, periodEnd: run.period_end });
-        const rerunToken = issueToken({ action: 'rerun', runId: run.id, periodStart: run.period_start, periodEnd: run.period_end });
-        appendEvent(run, 'tokens_issued', { approve: approveToken.token_id, rerun: rerunToken.token_id });
-        run.status = 'completed';
-        json(res, 200, { run, tokens: { approve: approveToken.token_id, rerun: rerunToken.token_id } });
-      } catch (e) {
-        failRun(run, 'manual_run', e.message);
-        json(res, 500, { error: e.message, run });
-      }
-    });
-    return;
-  }
+  
 
     if (url.pathname === '/runs/validate' && req.method === 'POST') {
     parseBody(req).then(async (body) => {
@@ -112,7 +79,77 @@ function router(req, res) {
     return;
   }
 
-  
+  if (url.pathname === '/runs/manual' && req.method === 'POST') {
+  parseBody(req).then(async (body) => {
+    const run = createRunRecord({
+      clientLocationId: body.clientLocationId,
+      periodStart: body.periodStart,
+      periodEnd: body.periodEnd,
+    });
+
+    appendEvent(run, 'manual_start');
+
+    try {
+      const toastMetadata = { count: 0 };
+      appendEvent(run, 'toast_fetch', toastMetadata);
+
+      // Exclusions are explicitly passed, even if empty.
+      // This freezes the validation contract.
+      const exclusions = [];
+
+      const validation = await runValidation({
+        run,
+        context: {
+          clientLocationId: body.clientLocationId,
+          periodStart: body.periodStart,
+          periodEnd: body.periodEnd,
+        },
+        exclusions,
+      });
+
+      appendEvent(run, 'validation_completed', {
+        findings_count: validation.findings.length,
+      });
+
+      const exportLines = require('../domain/exportService').generateRunWip([]);
+      appendEvent(run, 'export_generated', { length: exportLines.length });
+
+      const approveToken = issueToken({
+        action: 'approve',
+        runId: run.id,
+        periodStart: run.period_start,
+        periodEnd: run.period_end,
+      });
+
+      const rerunToken = issueToken({
+        action: 'rerun',
+        runId: run.id,
+        periodStart: run.period_start,
+        periodEnd: run.period_end,
+      });
+
+      appendEvent(run, 'tokens_issued', {
+        approve: approveToken.token_id,
+        rerun: rerunToken.token_id,
+      });
+
+      run.status = 'completed';
+
+      json(res, 200, {
+        run,
+        tokens: {
+          approve: approveToken.token_id,
+          rerun: rerunToken.token_id,
+        },
+      });
+    } catch (e) {
+      failRun(run, 'manual_run', e.message);
+      json(res, 500, { error: e.message, run });
+    }
+  });
+  return;
+}
+
   if (url.pathname === '/idempotency/check' && req.method === 'POST') {
     parseBody(req).then(async (body) => {
       const exists = idempotency.check(body.scope, body.key);
