@@ -89,7 +89,7 @@ function router(req, res) {
       try {
         const validation = await runValidation({
           run,
-          context: { clientLocationId: run.client_location_id, periodStart: run.period_start, periodEnd: run.period_end },
+          context: { clientLocationId: run.client_location_id, periodStart: run.period_start, periodEnd: run.period_end, demo: true },
         });
         appendEvent(run, 'validation_completed', { findings_count: validation.findings.length });
         return json(res, 200, { run_id: run.id, findings: validation.findings });
