@@ -40,7 +40,7 @@ function getRuleCatalog() {
 }
 
 // Demo behavior: returns one finding only when context.demo === true
-async function runValidation({ run, context, ruleCatalog = getRuleCatalog() }) {
+async function runValidation({ run, context, exclusions = [], ruleCatalog = getRuleCatalog() }) {
   const findings = [];
 
   return {
