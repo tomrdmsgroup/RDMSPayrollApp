@@ -39,11 +39,26 @@ function getRuleCatalog() {
   return [];
 }
 
-// Placeholder: later we will dispatch to per-rule handlers here.
+// Demo behavior: returns one finding only when context.demo === true
 async function runValidation({ run, context, ruleCatalog = getRuleCatalog() }) {
+  const findings = [];
+
+  if (context?.demo === true) {
+    findings.push(
+      makeFinding({
+        code: 'DEMO_RULE',
+        message: 'Demo finding: validation engine is wired.',
+        details: { note: 'Remove after real rule catalog is added.' },
+        severity: 'warn',
+        status: 'warning',
+        emit_asana_alert: true,
+      }),
+    );
+  }
+
   return {
     run_id: run?.id || null,
-    findings: [],
+    findings,
   };
 }
 
