@@ -31,7 +31,9 @@ CREATE TABLE IF NOT EXISTS rule_configs (
 CREATE TABLE IF NOT EXISTS exclusions (
   id SERIAL PRIMARY KEY,
   client_location_id INTEGER REFERENCES client_locations(id),
+  employee_name TEXT,
   toast_employee_id TEXT NOT NULL,
+  reason TEXT,
   effective_from DATE,
   effective_to DATE,
   scope_flags JSONB DEFAULT '{}'::JSONB,
@@ -39,6 +41,7 @@ CREATE TABLE IF NOT EXISTS exclusions (
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
 
 CREATE TABLE IF NOT EXISTS runs (
   id SERIAL PRIMARY KEY,
