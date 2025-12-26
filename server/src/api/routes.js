@@ -8,6 +8,29 @@ const { IdempotencyService } = require('../domain/idempotencyService');
 const { notifyFailure } = require('../domain/failureService');
 const { runValidation } = require('../domain/validationEngine');
 
+const {
+  createClientLocation,
+  getClientLocation,
+  listClientLocations,
+  updateClientLocation,
+  deleteClientLocation,
+} = require('../domain/clientLocationService');
+
+const {
+  listExclusionsForLocation,
+  createExclusion,
+  getExclusion,
+  updateExclusion,
+  deleteExclusion,
+} = require('../domain/exclusionConfigService');
+
+const {
+  getRuleConfigsForLocation,
+  getRuleConfig,
+  setRuleConfig,
+  deleteRuleConfig,
+} = require('../domain/ruleConfigService');
+
 const idempotency = new IdempotencyService();
 
 function json(res, status, body) {
@@ -34,6 +57,9 @@ function router(req, res) {
 
   if (url.pathname === '/health') return json(res, 200, { ok: true });
 
+  // -----------------------
+  // Auth (stubbed)
+  // -----------------------
   if (url.pathname === '/auth/seed' && req.method === 'POST') {
     parseBody(req).then((body) => {
       seedAdmin(body.email, body.password);
@@ -51,6 +77,9 @@ function router(req, res) {
     return;
   }
 
+  // -----------------------
+  // Tokens
+  // -----------------------
   if (url.pathname === '/tokens/issue' && req.method === 'POST') {
     parseBody(req).then((body) => {
       try {
@@ -69,8 +98,137 @@ function router(req, res) {
     return;
   }
 
+  // -----------------------
+  // Client Locations (in-memory)
+  // -----------------------
+  if (url.pathname === '/client-locations' && req.method === 'GET') {
+    const activeOnly = url.searchParams.get('activeOnly');
+    const rows = listClientLocations({ activeOnly: activeOnly === null ? true : activeOnly !== 'false' });
+    return json(res, 200, { client_locations: rows });
+  }
+
+  if (url.pathname === '/client-locations' && req.method === 'POST') {
+    parseBody(req).then((body) => {
+      try {
+        const row = createClientLocation(body);
+        return json(res, 201, { client_location: row });
+      } catch (e) {
+        return json(res, 400, { error: e.message });
+      }
+    });
+    return;
+  }
+
+  if (url.pathname.startsWith('/client-locations/') && req.method === 'PUT') {
+    const id = url.pathname.split('/')[2];
+    parseBody(req).then((body) => {
+      try {
+        const row = updateClientLocation(id, body);
+        if (!row) return json(res, 404, { error: 'not_found' });
+        return json(res, 200, { client_location: row });
+      } catch (e) {
+        return json(res, 400, { error: e.message });
+      }
+    });
+    return;
+  }
+
+  if (url.pathname.startsWith('/client-locations/') && req.method === 'DELETE') {
+    const id = url.pathname.split('/')[2];
+    const ok = deleteClientLocation(id);
+    return json(res, 200, { deleted: ok === true });
+  }
+
+  // -----------------------
+  // Rule Configs (in-memory)
+  // -----------------------
+  // GET /rule-configs?clientLocationId=#
+  if (url.pathname === '/rule-configs' && req.method === 'GET') {
+    const clientLocationId = url.searchParams.get('clientLocationId');
+    if (!clientLocationId) return json(res, 400, { error: 'clientLocationId_required' });
+    const rows = getRuleConfigsForLocation(clientLocationId);
+    return json(res, 200, { rule_configs: rows });
+  }
+
+  // PUT /rule-configs?clientLocationId=#&ruleCode=CODE
+  if (url.pathname === '/rule-configs' && req.method === 'PUT') {
+    const clientLocationId = url.searchParams.get('clientLocationId');
+    const ruleCode = url.searchParams.get('ruleCode');
+    if (!clientLocationId) return json(res, 400, { error: 'clientLocationId_required' });
+    if (!ruleCode) return json(res, 400, { error: 'ruleCode_required' });
+
+    parseBody(req).then((body) => {
+      try {
+        const row = setRuleConfig(clientLocationId, ruleCode, body);
+        return json(res, 200, { rule_config: row });
+      } catch (e) {
+        return json(res, 400, { error: e.message });
+      }
+    });
+    return;
+  }
+
+  // DELETE /rule-configs?clientLocationId=#&ruleCode=CODE
+  if (url.pathname === '/rule-configs' && req.method === 'DELETE') {
+    const clientLocationId = url.searchParams.get('clientLocationId');
+    const ruleCode = url.searchParams.get('ruleCode');
+    if (!clientLocationId) return json(res, 400, { error: 'clientLocationId_required' });
+    if (!ruleCode) return json(res, 400, { error: 'ruleCode_required' });
+    const ok = deleteRuleConfig(clientLocationId, ruleCode);
+    return json(res, 200, { deleted: ok === true });
+  }
+
+  // -----------------------
+  // Exclusions (in-memory)
+  // -----------------------
+  // GET /exclusions?clientLocationId=#
+  if (url.pathname === '/exclusions' && req.method === 'GET') {
+    const clientLocationId = url.searchParams.get('clientLocationId');
+    if (!clientLocationId) return json(res, 400, { error: 'clientLocationId_required' });
+    const rows = listExclusionsForLocation(clientLocationId);
+    return json(res, 200, { exclusions: rows });
+  }
+
+  // POST /exclusions
+  if (url.pathname === '/exclusions' && req.method === 'POST') {
+    parseBody(req).then((body) => {
+      try {
+        const row = createExclusion(body);
+        return json(res, 201, { exclusion: row });
+      } catch (e) {
+        return json(res, 400, { error: e.message });
+      }
+    });
+    return;
+  }
+
+  // PUT /exclusions/:id
+  if (url.pathname.startsWith('/exclusions/') && req.method === 'PUT') {
+    const id = url.pathname.split('/')[2];
+    parseBody(req).then((body) => {
+      try {
+        const row = updateExclusion(id, body);
+        if (!row) return json(res, 404, { error: 'not_found' });
+        return json(res, 200, { exclusion: row });
+      } catch (e) {
+        return json(res, 400, { error: e.message });
+      }
+    });
+    return;
+  }
+
+  // DELETE /exclusions/:id
+  if (url.pathname.startsWith('/exclusions/') && req.method === 'DELETE') {
+    const id = url.pathname.split('/')[2];
+    const ok = deleteExclusion(id);
+    return json(res, 200, { deleted: ok === true });
+  }
+
+  // -----------------------
+  // Runs
+  // -----------------------
   // Manual run: creates a run record and executes validation.
-  // IMPORTANT: always pass exclusions (even empty) to freeze the contract.
+  // IMPORTANT: always pass exclusions (now pulled from store) to freeze the contract.
   if (url.pathname === '/runs/manual' && req.method === 'POST') {
     parseBody(req).then(async (body) => {
       const run = createRunRecord({
@@ -85,7 +243,7 @@ function router(req, res) {
         const toastMetadata = { count: 0 };
         appendEvent(run, 'toast_fetch', toastMetadata);
 
-        const exclusions = [];
+        const exclusions = listExclusionsForLocation(body.clientLocationId);
 
         const validation = await runValidation({
           run,
@@ -123,6 +281,7 @@ function router(req, res) {
         json(res, 200, {
           run,
           tokens: { approve: approveToken.token_id, rerun: rerunToken.token_id },
+          exclusion_decisions: validation.exclusion_decisions || null,
         });
       } catch (e) {
         failRun(run, 'manual_run', e.message);
@@ -133,22 +292,18 @@ function router(req, res) {
   }
 
   // Validate an existing run: executes validation against the stored run record.
-  // IMPORTANT: always pass exclusions (even empty) to freeze the contract.
+  // IMPORTANT: always pass exclusions (now pulled from store) to freeze the contract.
   if (url.pathname === '/runs/validate' && req.method === 'POST') {
     parseBody(req).then(async (body) => {
       const run = getRun(body.runId);
       if (!run) return json(res, 404, { error: 'run_not_found' });
 
       try {
-        const exclusions = [];
+        const exclusions = listExclusionsForLocation(run.client_location_id);
 
         const validation = await runValidation({
           run,
-          context: {
-            clientLocationId: run.client_location_id,
-            periodStart: run.period_start,
-            periodEnd: run.period_end,
-          },
+          context: { clientLocationId: run.client_location_id, periodStart: run.period_start, periodEnd: run.period_end },
           exclusions,
         });
 
@@ -167,6 +322,9 @@ function router(req, res) {
     return;
   }
 
+  // -----------------------
+  // Idempotency
+  // -----------------------
   if (url.pathname === '/idempotency/check' && req.method === 'POST') {
     parseBody(req).then(async (body) => {
       const exists = idempotency.check(body.scope, body.key);
@@ -177,6 +335,9 @@ function router(req, res) {
     return;
   }
 
+  // -----------------------
+  // Approve / Rerun
+  // -----------------------
   if (url.pathname === '/approve' && req.method === 'GET') {
     const tokenId = url.searchParams.get('token');
     if (!tokenId) {
