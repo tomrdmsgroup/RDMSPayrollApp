@@ -134,7 +134,6 @@ function router(req, res) {
 
   // Validate an existing run: executes validation against the stored run record.
   // IMPORTANT: always pass exclusions (even empty) to freeze the contract.
-  // NOTE: no demo behavior (binder prohibits demo rules).
   if (url.pathname === '/runs/validate' && req.method === 'POST') {
     parseBody(req).then(async (body) => {
       const run = getRun(body.runId);
