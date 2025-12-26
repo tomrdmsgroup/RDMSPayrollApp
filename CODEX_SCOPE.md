@@ -1,13 +1,11 @@
-CODEX SCOPE LOCK (RDMSPayrollApp)
+# CODEX SCOPE LOCK (RDMSPayrollApp)
 
 Codex must NOT restructure the app.
 Codex must ONLY implement features inside explicitly listed files/paths per step.
 
-Authoritative contract: see Google Doc “RDMSPayrollApp Build Contract” (paste into Codex prompt when running).
-
 Step ordering:
-1) Validation Findings Contract + Asana gating (emit_asana_alert) + Exclusion decision contract
-2) Rule catalog + per-location rule configs + exclusions per location
+1) Findings contract + Asana gating (emit_asana_alert) + exclusion decision contract
+2) Rule configs + exclusions per location + CRUD routes (no Airtable yet)
 3) WIP XLSX + Tips XLSX generation (no email)
 4) Run Center actions (audit no email, export no email, send email separate)
 5) Airtable read-only providers for locations/calendar/vitals routing
