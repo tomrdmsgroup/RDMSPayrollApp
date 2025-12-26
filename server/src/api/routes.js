@@ -10,7 +10,6 @@ const { runValidation } = require('../domain/validationEngine');
 
 const {
   createClientLocation,
-  getClientLocation,
   listClientLocations,
   updateClientLocation,
   deleteClientLocation,
@@ -19,23 +18,35 @@ const {
 const {
   listExclusionsForLocation,
   createExclusion,
-  getExclusion,
   updateExclusion,
   deleteExclusion,
 } = require('../domain/exclusionConfigService');
 
 const {
   getRuleConfigsForLocation,
-  getRuleConfig,
   setRuleConfig,
   deleteRuleConfig,
 } = require('../domain/ruleConfigService');
+
+const {
+  generateRunWipXlsxBuffer,
+  buildWipFilename,
+  buildTipsFilename,
+} = require('../domain/exportService');
 
 const idempotency = new IdempotencyService();
 
 function json(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(body));
+}
+
+function sendXlsx(res, filename, buffer) {
+  res.writeHead(200, {
+    'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'Content-Disposition': `attachment; filename="${filename}"`,
+  });
+  res.end(buffer);
 }
 
 function parseBody(req) {
@@ -227,8 +238,6 @@ function router(req, res) {
   // -----------------------
   // Runs
   // -----------------------
-  // Manual run: creates a run record and executes validation.
-  // IMPORTANT: always pass exclusions (now pulled from store) to freeze the contract.
   if (url.pathname === '/runs/manual' && req.method === 'POST') {
     parseBody(req).then(async (body) => {
       const run = createRunRecord({
@@ -257,30 +266,11 @@ function router(req, res) {
 
         appendEvent(run, 'validation_completed', { findings_count: validation.findings.length });
 
-        const exportLines = require('../domain/exportService').generateRunWip([]);
-        appendEvent(run, 'export_generated', { length: exportLines.length });
-
-        const approveToken = issueToken({
-          action: 'approve',
-          runId: run.id,
-          periodStart: run.period_start,
-          periodEnd: run.period_end,
-        });
-
-        const rerunToken = issueToken({
-          action: 'rerun',
-          runId: run.id,
-          periodStart: run.period_start,
-          periodEnd: run.period_end,
-        });
-
-        appendEvent(run, 'tokens_issued', { approve: approveToken.token_id, rerun: rerunToken.token_id });
-
         run.status = 'completed';
 
         json(res, 200, {
           run,
-          tokens: { approve: approveToken.token_id, rerun: rerunToken.token_id },
+          findings: validation.findings,
           exclusion_decisions: validation.exclusion_decisions || null,
         });
       } catch (e) {
@@ -291,8 +281,6 @@ function router(req, res) {
     return;
   }
 
-  // Validate an existing run: executes validation against the stored run record.
-  // IMPORTANT: always pass exclusions (now pulled from store) to freeze the contract.
   if (url.pathname === '/runs/validate' && req.method === 'POST') {
     parseBody(req).then(async (body) => {
       const run = getRun(body.runId);
@@ -317,6 +305,108 @@ function router(req, res) {
       } catch (e) {
         failRun(run, 'validate_run', e.message);
         return json(res, 500, { error: e.message, run_id: run.id });
+      }
+    });
+    return;
+  }
+
+  // -----------------------
+  // Exports (no email) — Step 3
+  // -----------------------
+  // POST /exports/wip
+  // Body: { clientLocationId, periodStart, periodEnd, locationName, rows: [...] }
+  // Notes:
+  // - rows are caller-provided (Toast wiring comes later)
+  // - applies exclusion decisions BEFORE writing rows
+  if (url.pathname === '/exports/wip' && req.method === 'POST') {
+    parseBody(req).then(async (body) => {
+      try {
+        if (!body.clientLocationId) return json(res, 400, { error: 'clientLocationId_required' });
+        if (!body.periodStart) return json(res, 400, { error: 'periodStart_required' });
+        if (!body.periodEnd) return json(res, 400, { error: 'periodEnd_required' });
+        if (!body.locationName) return json(res, 400, { error: 'locationName_required' });
+
+        const run = createRunRecord({
+          clientLocationId: body.clientLocationId,
+          periodStart: body.periodStart,
+          periodEnd: body.periodEnd,
+        });
+        appendEvent(run, 'wip_export_start');
+
+        const exclusions = listExclusionsForLocation(body.clientLocationId);
+
+        const validation = await runValidation({
+          run,
+          context: { clientLocationId: body.clientLocationId, periodStart: body.periodStart, periodEnd: body.periodEnd },
+          exclusions,
+        });
+
+        const excludedWipIds = validation?.exclusion_decisions?.wip || [];
+
+        const buf = await generateRunWipXlsxBuffer({
+          rows: Array.isArray(body.rows) ? body.rows : [],
+          excludedEmployeeIds: excludedWipIds,
+        });
+
+        appendEvent(run, 'wip_export_generated', {
+          rows_in: Array.isArray(body.rows) ? body.rows.length : 0,
+          rows_excluded: excludedWipIds.length,
+        });
+
+        const filename = buildWipFilename(body.locationName, body.periodEnd);
+        return sendXlsx(res, filename, buf);
+      } catch (e) {
+        return json(res, 500, { error: e.message });
+      }
+    });
+    return;
+  }
+
+  // POST /exports/tips
+  // Body: { clientLocationId, periodStart, periodEnd, locationName, rows: [...] }
+  // Placeholder: We still return an XLSX file with a single sheet + minimal columns.
+  // Tip formats vary by provider; binder allows multiple types later. This is foundation only.
+  if (url.pathname === '/exports/tips' && req.method === 'POST') {
+    parseBody(req).then(async (body) => {
+      try {
+        if (!body.clientLocationId) return json(res, 400, { error: 'clientLocationId_required' });
+        if (!body.periodStart) return json(res, 400, { error: 'periodStart_required' });
+        if (!body.periodEnd) return json(res, 400, { error: 'periodEnd_required' });
+        if (!body.locationName) return json(res, 400, { error: 'locationName_required' });
+
+        const run = createRunRecord({
+          clientLocationId: body.clientLocationId,
+          periodStart: body.periodStart,
+          periodEnd: body.periodEnd,
+        });
+        appendEvent(run, 'tips_export_start');
+
+        const exclusions = listExclusionsForLocation(body.clientLocationId);
+
+        const validation = await runValidation({
+          run,
+          context: { clientLocationId: body.clientLocationId, periodStart: body.periodStart, periodEnd: body.periodEnd },
+          exclusions,
+        });
+
+        const excludedTipIds = validation?.exclusion_decisions?.tips || [];
+
+        // For now reuse WIP XLSX generator shape; tips-specific mapping comes later.
+        const buf = await generateRunWipXlsxBuffer({
+          rows: Array.isArray(body.rows) ? body.rows : [],
+          excludedEmployeeIds: excludedTipIds,
+          sheetName: 'Tips',
+        });
+
+        appendEvent(run, 'tips_export_generated', {
+          rows_in: Array.isArray(body.rows) ? body.rows.length : 0,
+          rows_excluded: excludedTipIds.length,
+        });
+
+        const filename = buildTipsFilename(body.locationName, body.periodEnd);
+        return sendXlsx(res, filename, buf);
+      } catch (e) {
+        return json(res, 500, { error: e.message });
       }
     });
     return;
