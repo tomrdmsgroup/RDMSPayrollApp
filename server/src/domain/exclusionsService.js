@@ -1,36 +1,86 @@
-function isExcluded(exclusions, employeeId, targetDate = new Date(), scopeFlag = null) {
-  const day = new Date(targetDate.toISOString().slice(0, 10));
-  return exclusions.some((ex) => {
-    if (ex.toast_employee_id !== employeeId) return false;
-    if (scopeFlag && ex.scope_flags && ex.scope_flags[scopeFlag] === false) return false;
-    const from = ex.effective_from ? new Date(ex.effective_from) : null;
-    const to = ex.effective_to ? new Date(ex.effective_to) : null;
-    if (from && day < from) return false;
-    if (to && day > to) return false;
-    return true;
-  });
-}
+// server/src/domain/exclusionsService.js
+// Exclusions Decision Engine
+//
+// Purpose:
+// - Compute excluded employees ONCE per run (location + period)
+// - Produce per-surface exclusion decisions
+// - Downstream consumers (validation, WIP, tips) must NOT re-evaluate logic
+//
+// Scope flags supported on exclusion records:
+// - audit
+// - wip
+// - tips
+//
+// Exclusion records are expected to include:
+// - toast_employee_id
+// - effective_from (optional)
+// - effective_to (optional)
+// - scope_flags (object with boolean flags per surface)
 
-function buildExcludedEmployeeSet(exclusions, periodStart, periodEnd, scopeFlag = null) {
-  const excluded = new Set();
+function overlapsPeriod(exclusion, periodStart, periodEnd) {
   const start = new Date(periodStart);
   const end = new Date(periodEnd);
 
-  exclusions.forEach((ex) => {
-    const from = ex.effective_from ? new Date(ex.effective_from) : null;
-    const to = ex.effective_to ? new Date(ex.effective_to) : null;
+  const from = exclusion.effective_from ? new Date(exclusion.effective_from) : null;
+  const to = exclusion.effective_to ? new Date(exclusion.effective_to) : null;
 
-    // check if exclusion overlaps the run period
-    if (from && end < from) return;
-    if (to && start > to) return;
-
-    // respect scope flag (exclude_wip / exclude_tips / exclude_validation)
-    if (scopeFlag && ex.scope_flags && ex.scope_flags[scopeFlag] === false) return;
-
-    excluded.add(ex.toast_employee_id);
-  });
-
-  return excluded;
+  if (from && end < from) return false;
+  if (to && start > to) return false;
+  return true;
 }
 
-module.exports = { isExcluded, buildExcludedEmployeeSet };
+function isScopeExcluded(exclusion, scope) {
+  if (!exclusion.scope_flags) return true;
+  if (exclusion.scope_flags[scope] === false) return false;
+  return true;
+}
+
+/**
+ * buildExcludedEmployeeDecisions
+ *
+ * Inputs:
+ * - exclusions: array of exclusion records for a client/location
+ * - periodStart: YYYY-MM-DD
+ * - periodEnd: YYYY-MM-DD
+ *
+ * Output:
+ * {
+ *   audit: Set<string>,
+ *   wip:   Set<string>,
+ *   tips:  Set<string>
+ * }
+ */
+function buildExcludedEmployeeDecisions(exclusions = [], periodStart, periodEnd) {
+  const decisions = {
+    audit: new Set(),
+    wip: new Set(),
+    tips: new Set(),
+  };
+
+  if (!periodStart || !periodEnd) {
+    return decisions;
+  }
+
+  exclusions.forEach((ex) => {
+    if (!ex.toast_employee_id) return;
+    if (!overlapsPeriod(ex, periodStart, periodEnd)) return;
+
+    if (isScopeExcluded(ex, 'audit')) {
+      decisions.audit.add(ex.toast_employee_id);
+    }
+
+    if (isScopeExcluded(ex, 'wip')) {
+      decisions.wip.add(ex.toast_employee_id);
+    }
+
+    if (isScopeExcluded(ex, 'tips')) {
+      decisions.tips.add(ex.toast_employee_id);
+    }
+  });
+
+  return decisions;
+}
+
+module.exports = {
+  buildExcludedEmployeeDecisions,
+};
