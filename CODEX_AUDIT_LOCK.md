@@ -1,7 +1,8 @@
-# CODEX_AUDIT_LOCK (AUTHORITATIVE FOR CODEX BEHAVIOR)
+# CODEX_AUDIT_LOCK (NON-AUTHORITATIVE MARKER)
 
-This file exists ONLY to constrain Codex behavior in this repo.
-If Codex behavior conflicts with this file, Codex must obey this file.
+This file is NOT a spec and must NOT introduce requirements.
+It only marks “do not widen scope / do not refactor boundaries” unless CODEX_ENTRYPOINT.md and CODEX_BUILD_CONTRACT.md are updated.
+
 
 ## 0) CLOSED WORLD + AUTHORITY
 - The authoritative system contract is the Payroll App Binder.
