@@ -3,12 +3,16 @@
 
 const { readStore, writeStore, nextId } = require('./persistenceStore');
 
-function normalizeScopeFlags(flags = {}) {
-  if (!flags || typeof flags !== 'object') return {};
+function normalizeScopeFlags(flags) {
+  // Preserve legacy semantics:
+  // - null/undefined => treated by exclusionsService as exclude-all
+  // - object => only explicit true flags exclude
+  if (flags == null) return null;
+  if (typeof flags !== 'object') return {};
   const normalized = {};
   ['audit', 'wip', 'tips'].forEach((key) => {
     if (Object.prototype.hasOwnProperty.call(flags, key)) {
-      normalized[key] = !!flags[key];
+      normalized[key] = flags[key] === true;
     }
   });
   return normalized;
@@ -49,12 +53,14 @@ function createExclusion(input = {}) {
   const data = readStore();
   const normalized = normalize(input);
   const now = new Date().toISOString();
+
   const row = {
-    id: nextId(data.exclusions),
     ...normalized,
+    id: nextId(data.exclusions),
     created_at: now,
     updated_at: now,
   };
+
   data.exclusions.push(row);
   writeStore(data);
   return row;
@@ -71,7 +77,15 @@ function updateExclusion(id, input = {}) {
   if (idx === -1) return null;
 
   const existing = data.exclusions[idx];
-  const merged = { ...existing, ...input, id: existing.id, client_location_id: existing.client_location_id };
+
+  // client_location_id is immutable on update
+  const sanitizedInput = { ...input };
+  delete sanitizedInput.client_location_id;
+  delete sanitizedInput.id;
+  delete sanitizedInput.created_at;
+  delete sanitizedInput.updated_at;
+
+  const merged = { ...existing, ...sanitizedInput, client_location_id: existing.client_location_id };
   const normalized = normalize(merged);
 
   const row = {
