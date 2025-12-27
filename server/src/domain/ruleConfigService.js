@@ -4,7 +4,7 @@
 const { readStore, writeStore, nextId } = require('./persistenceStore');
 
 function normalizeRuleConfig(ruleCode, input = {}) {
-  const code = `${ruleCode || input.rule_code || ''}`.trim();
+  const code = `${ruleCode || ''}`.trim();
   if (!code) throw new Error('rule_code_required');
 
   const enabled = input.enabled !== false;
@@ -16,9 +16,7 @@ function normalizeRuleConfig(ruleCode, input = {}) {
 
 function getRuleConfigsForLocation(clientLocationId) {
   const data = readStore();
-  const rows = data.rule_configs.filter(
-    (r) => Number(r.client_location_id) === Number(clientLocationId)
-  );
+  const rows = data.rule_configs.filter((r) => Number(r.client_location_id) === Number(clientLocationId));
   rows.sort((a, b) => `${a.rule_code}`.localeCompare(`${b.rule_code}`));
   return rows;
 }
@@ -27,9 +25,7 @@ function getRuleConfig(clientLocationId, ruleCode) {
   const data = readStore();
   return (
     data.rule_configs.find(
-      (r) =>
-        Number(r.client_location_id) === Number(clientLocationId) &&
-        `${r.rule_code}` === `${ruleCode}`
+      (r) => Number(r.client_location_id) === Number(clientLocationId) && `${r.rule_code}` === `${ruleCode}`
     ) || null
   );
 }
@@ -40,9 +36,7 @@ function setRuleConfig(clientLocationId, ruleCode, input = {}) {
   const now = new Date().toISOString();
 
   const idx = data.rule_configs.findIndex(
-    (r) =>
-      Number(r.client_location_id) === Number(clientLocationId) &&
-      `${r.rule_code}` === `${normalized.rule_code}`
+    (r) => Number(r.client_location_id) === Number(clientLocationId) && `${r.rule_code}` === `${normalized.rule_code}`
   );
 
   if (idx !== -1) {
@@ -60,9 +54,9 @@ function setRuleConfig(clientLocationId, ruleCode, input = {}) {
   }
 
   const row = {
+    ...normalized,
     id: nextId(data.rule_configs),
     client_location_id: Number(clientLocationId),
-    ...normalized,
     created_at: now,
     updated_at: now,
   };
@@ -76,9 +70,7 @@ function deleteRuleConfig(clientLocationId, ruleCode) {
   const data = readStore();
   const before = data.rule_configs.length;
   data.rule_configs = data.rule_configs.filter(
-    (r) =>
-      Number(r.client_location_id) !== Number(clientLocationId) ||
-      `${r.rule_code}` !== `${ruleCode}`
+    (r) => Number(r.client_location_id) !== Number(clientLocationId) || `${r.rule_code}` !== `${ruleCode}`
   );
   writeStore(data);
   return data.rule_configs.length < before;
