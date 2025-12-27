@@ -1,21 +1,10 @@
 // server/src/domain/exclusionsService.js
-// Exclusions Decision Engine
-//
-// Purpose:
-// - Compute excluded employees ONCE per run (location + period)
-// - Produce per-surface exclusion decisions
-// - Downstream consumers (validation, WIP, tips) must NOT re-evaluate logic
-//
-// Scope flags supported on exclusion records:
-// - audit
-// - wip
-// - tips
 //
 // Exclusion records are expected to include:
 // - toast_employee_id
 // - effective_from (optional)
 // - effective_to (optional)
-// - scope_flags (object with boolean flags per surface)
+// - scope_flags (optional object with boolean flags per surface)
 
 function overlapsPeriod(exclusion, periodStart, periodEnd) {
   const start = new Date(periodStart);
@@ -29,10 +18,13 @@ function overlapsPeriod(exclusion, periodStart, periodEnd) {
   return true;
 }
 
+// Semantics:
+// - scope_flags missing/null => legacy exclude-all (backward compatible)
+// - scope_flags present      => exclude only where flag === true
 function isScopeExcluded(exclusion, scope) {
-  if (!exclusion.scope_flags) return true;
-  if (exclusion.scope_flags[scope] === false) return false;
-  return true;
+  if (exclusion.scope_flags == null) return true;
+  if (typeof exclusion.scope_flags !== 'object') return false;
+  return exclusion.scope_flags[scope] === true;
 }
 
 /**
@@ -82,17 +74,9 @@ function buildExcludedEmployeeDecisions(exclusions = [], periodStart, periodEnd)
     if (!ex.toast_employee_id) return;
     if (!overlapsPeriod(ex, periodStart, periodEnd)) return;
 
-    if (isScopeExcluded(ex, 'audit')) {
-      decisions.audit.add(ex.toast_employee_id);
-    }
-
-    if (isScopeExcluded(ex, 'wip')) {
-      decisions.wip.add(ex.toast_employee_id);
-    }
-
-    if (isScopeExcluded(ex, 'tips')) {
-      decisions.tips.add(ex.toast_employee_id);
-    }
+    if (isScopeExcluded(ex, 'audit')) decisions.audit.add(ex.toast_employee_id);
+    if (isScopeExcluded(ex, 'wip')) decisions.wip.add(ex.toast_employee_id);
+    if (isScopeExcluded(ex, 'tips')) decisions.tips.add(ex.toast_employee_id);
   });
 
   return decisions;
