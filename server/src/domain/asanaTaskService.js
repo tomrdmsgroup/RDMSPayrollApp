@@ -1,3 +1,5 @@
+// server/src/domain/asanaTaskService.js
+
 const { createTask } = require('../providers/asanaProvider');
 const { notifyFailure } = require('./failureService');
 const { IdempotencyService } = require('./idempotencyService');
@@ -5,7 +7,7 @@ const { appendEvent } = require('./runManager');
 
 /**
  * Resolve Asana routing from vitals snapshot.
- * Missing routing is NOT a system failure — it results in no-op task creation.
+ * Routing is required ONLY if we have findings that require Asana tasks.
  */
 function resolveAsanaRoute(clientLocationId, vitalsSnapshot) {
   if (!vitalsSnapshot?.data || !clientLocationId) return null;
@@ -76,9 +78,10 @@ function buildTaskPayload({ finding, run, route }) {
 /**
  * Create Asana tasks for findings.
  *
- * IMPORTANT BINDER RULES:
- * - Missing Asana routing is NOT a system failure.
- * - Findings without emit_asana_alert === true are ignored.
+ * Rules:
+ * - Only findings with emit_asana_alert === true are eligible.
+ * - If ANY eligible finding exists and routing is missing -> this is a system failure (failureService).
+ * - If NO eligible findings exist -> routing may be missing with no failure.
  * - Idempotency prevents duplicate task creation.
  */
 async function createAsanaTasksForFindings({
@@ -90,21 +93,31 @@ async function createAsanaTasksForFindings({
 }) {
   if (!run || !findings.length) return [];
 
+  const eligibleFindings = findings.filter(shouldCreateClientAsanaTask);
+  if (!eligibleFindings.length) return [];
+
   const route = resolveAsanaRoute(run.client_location_id, vitalsSnapshot);
 
-  // Missing routing = no-op (NOT a failure)
+  // Routing missing is a failure ONLY because we have eligible findings that require Asana tasks.
   if (!route) {
-    appendEvent(run, 'asana_skipped_no_route', {
+    appendEvent(run, 'asana_routing_missing', {
       client_location_id: run.client_location_id,
     });
+
+    notifyFailure({
+      step: 'asana_routing',
+      error: 'asana_routing_missing',
+      runId: run.id,
+      clientLocation: run.client_location_id,
+      period: `${run.period_start} - ${run.period_end}`,
+    });
+
     return [];
   }
 
   const results = [];
 
-  for (const finding of findings) {
-    if (!shouldCreateClientAsanaTask(finding)) continue;
-
+  for (const finding of eligibleFindings) {
     const key = buildIdempotencyKey({
       runId: run.id,
       projectGid: route.projectGid,
@@ -112,7 +125,6 @@ async function createAsanaTasksForFindings({
       finding,
     });
 
-    // Explicit check-then-record semantics
     const recorded = idempotencyService.record('asana_task', key);
     if (!recorded) continue;
 
