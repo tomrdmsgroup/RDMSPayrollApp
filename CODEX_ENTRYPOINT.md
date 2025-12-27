@@ -18,6 +18,8 @@ Anything not explicitly stated in the binders does not exist.
 Do not infer workflows, UI, computations, or failure behaviors.
 
 ## Repo contracts that must not be reinterpreted
+CODEX_AUDIT_LOCK.md is a non-authoritative freeze marker; ignore it for requirements.
+
 ### Findings contract
 server/src/domain/validationEngine.js produces Findings with EXACT keys:
 - code
