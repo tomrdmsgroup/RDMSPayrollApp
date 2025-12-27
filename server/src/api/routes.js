@@ -49,6 +49,17 @@ function parseBody(req) {
   });
 }
 
+function handleError(res, err) {
+  if (err && err.message === 'persistence_store_corrupt') {
+    // System failure: persistence store unreadable. Do not silently reset.
+    return json(res, 500, {
+      error: 'persistence_store_corrupt',
+      backup: err.backup || null,
+    });
+  }
+  return json(res, 500, { error: err?.message || 'unknown_error' });
+}
+
 function router(req, res) {
   const url = new URL(req.url, 'http://localhost');
 
@@ -96,14 +107,18 @@ function router(req, res) {
   }
 
   // -----------------------
-  // Client Locations (in-memory)
+  // Client Locations (persistence-backed)
   // -----------------------
   if (url.pathname === '/client-locations' && req.method === 'GET') {
-    const activeOnly = url.searchParams.get('activeOnly');
-    const rows = listClientLocations({
-      activeOnly: activeOnly === null ? true : activeOnly !== 'false',
-    });
-    return json(res, 200, { client_locations: rows });
+    try {
+      const activeOnly = url.searchParams.get('activeOnly');
+      const rows = listClientLocations({
+        activeOnly: activeOnly === null ? true : activeOnly !== 'false',
+      });
+      return json(res, 200, { client_locations: rows });
+    } catch (e) {
+      return handleError(res, e);
+    }
   }
 
   if (url.pathname === '/client-locations' && req.method === 'POST') {
@@ -112,6 +127,7 @@ function router(req, res) {
         const row = createClientLocation(body);
         return json(res, 201, { client_location: row });
       } catch (e) {
+        if (e && e.message === 'persistence_store_corrupt') return handleError(res, e);
         return json(res, 400, { error: e.message });
       }
     });
@@ -126,6 +142,7 @@ function router(req, res) {
         if (!row) return json(res, 404, { error: 'not_found' });
         return json(res, 200, { client_location: row });
       } catch (e) {
+        if (e && e.message === 'persistence_store_corrupt') return handleError(res, e);
         return json(res, 400, { error: e.message });
       }
     });
@@ -133,20 +150,28 @@ function router(req, res) {
   }
 
   if (url.pathname.startsWith('/client-locations/') && req.method === 'DELETE') {
-    const id = url.pathname.split('/')[2];
-    const ok = deleteClientLocation(id);
-    return json(res, 200, { deleted: ok === true });
+    try {
+      const id = url.pathname.split('/')[2];
+      const ok = deleteClientLocation(id);
+      return json(res, 200, { deleted: ok === true });
+    } catch (e) {
+      return handleError(res, e);
+    }
   }
 
   // -----------------------
-  // Rule Configs (in-memory)
+  // Rule Configs (persistence-backed)
   // -----------------------
   // GET /rule-configs?clientLocationId=#
   if (url.pathname === '/rule-configs' && req.method === 'GET') {
-    const clientLocationId = url.searchParams.get('clientLocationId');
-    if (!clientLocationId) return json(res, 400, { error: 'clientLocationId_required' });
-    const rows = getRuleConfigsForLocation(clientLocationId);
-    return json(res, 200, { rule_configs: rows });
+    try {
+      const clientLocationId = url.searchParams.get('clientLocationId');
+      if (!clientLocationId) return json(res, 400, { error: 'clientLocationId_required' });
+      const rows = getRuleConfigsForLocation(clientLocationId);
+      return json(res, 200, { rule_configs: rows });
+    } catch (e) {
+      return handleError(res, e);
+    }
   }
 
   // PUT /rule-configs?clientLocationId=#&ruleCode=CODE
@@ -161,6 +186,7 @@ function router(req, res) {
         const row = setRuleConfig(clientLocationId, ruleCode, body);
         return json(res, 200, { rule_config: row });
       } catch (e) {
+        if (e && e.message === 'persistence_store_corrupt') return handleError(res, e);
         return json(res, 400, { error: e.message });
       }
     });
@@ -169,23 +195,31 @@ function router(req, res) {
 
   // DELETE /rule-configs?clientLocationId=#&ruleCode=CODE
   if (url.pathname === '/rule-configs' && req.method === 'DELETE') {
-    const clientLocationId = url.searchParams.get('clientLocationId');
-    const ruleCode = url.searchParams.get('ruleCode');
-    if (!clientLocationId) return json(res, 400, { error: 'clientLocationId_required' });
-    if (!ruleCode) return json(res, 400, { error: 'ruleCode_required' });
-    const ok = deleteRuleConfig(clientLocationId, ruleCode);
-    return json(res, 200, { deleted: ok === true });
+    try {
+      const clientLocationId = url.searchParams.get('clientLocationId');
+      const ruleCode = url.searchParams.get('ruleCode');
+      if (!clientLocationId) return json(res, 400, { error: 'clientLocationId_required' });
+      if (!ruleCode) return json(res, 400, { error: 'ruleCode_required' });
+      const ok = deleteRuleConfig(clientLocationId, ruleCode);
+      return json(res, 200, { deleted: ok === true });
+    } catch (e) {
+      return handleError(res, e);
+    }
   }
 
   // -----------------------
-  // Exclusions (in-memory)
+  // Exclusions (persistence-backed)
   // -----------------------
   // GET /exclusions?clientLocationId=#
   if (url.pathname === '/exclusions' && req.method === 'GET') {
-    const clientLocationId = url.searchParams.get('clientLocationId');
-    if (!clientLocationId) return json(res, 400, { error: 'clientLocationId_required' });
-    const rows = listExclusionsForLocation(clientLocationId);
-    return json(res, 200, { exclusions: rows });
+    try {
+      const clientLocationId = url.searchParams.get('clientLocationId');
+      if (!clientLocationId) return json(res, 400, { error: 'clientLocationId_required' });
+      const rows = listExclusionsForLocation(clientLocationId);
+      return json(res, 200, { exclusions: rows });
+    } catch (e) {
+      return handleError(res, e);
+    }
   }
 
   // POST /exclusions
@@ -195,6 +229,7 @@ function router(req, res) {
         const row = createExclusion(body);
         return json(res, 201, { exclusion: row });
       } catch (e) {
+        if (e && e.message === 'persistence_store_corrupt') return handleError(res, e);
         return json(res, 400, { error: e.message });
       }
     });
@@ -210,6 +245,7 @@ function router(req, res) {
         if (!row) return json(res, 404, { error: 'not_found' });
         return json(res, 200, { exclusion: row });
       } catch (e) {
+        if (e && e.message === 'persistence_store_corrupt') return handleError(res, e);
         return json(res, 400, { error: e.message });
       }
     });
@@ -218,9 +254,13 @@ function router(req, res) {
 
   // DELETE /exclusions/:id
   if (url.pathname.startsWith('/exclusions/') && req.method === 'DELETE') {
-    const id = url.pathname.split('/')[2];
-    const ok = deleteExclusion(id);
-    return json(res, 200, { deleted: ok === true });
+    try {
+      const id = url.pathname.split('/')[2];
+      const ok = deleteExclusion(id);
+      return json(res, 200, { deleted: ok === true });
+    } catch (e) {
+      return handleError(res, e);
+    }
   }
 
   // -----------------------
