@@ -1,10 +1,18 @@
 // server/src/domain/exclusionConfigService.js
-// In-memory exclusions CRUD per client_location_id.
-// NOTE: "exclusionsService.js" remains the pure logic layer.
-// This file is storage only.
+// Persistence-backed exclusions CRUD per client_location_id.
 
-const store = new Map(); // id -> exclusion row
-let counter = 1;
+const { readStore, writeStore, nextId } = require('./persistenceStore');
+
+function normalizeScopeFlags(flags = {}) {
+  if (!flags || typeof flags !== 'object') return {};
+  const normalized = {};
+  ['audit', 'wip', 'tips'].forEach((key) => {
+    if (Object.prototype.hasOwnProperty.call(flags, key)) {
+      normalized[key] = !!flags[key];
+    }
+  });
+  return normalized;
+}
 
 function normalize(input = {}) {
   const client_location_id = Number(input.client_location_id);
@@ -18,20 +26,16 @@ function normalize(input = {}) {
     employee_name: input.employee_name ? `${input.employee_name}`.trim() : null,
     reason: input.reason ? `${input.reason}`.trim() : null,
     toast_employee_id,
-    effective_from: input.effective_from ? `${input.effective_from}`.trim() : null, // "YYYY-MM-DD"
-    effective_to: input.effective_to ? `${input.effective_to}`.trim() : null, // "YYYY-MM-DD"
-    scope_flags: input.scope_flags && typeof input.scope_flags === 'object' ? input.scope_flags : {},
+    effective_from: input.effective_from ? `${input.effective_from}`.trim() : null,
+    effective_to: input.effective_to ? `${input.effective_to}`.trim() : null,
+    scope_flags: normalizeScopeFlags(input.scope_flags),
     notes: input.notes ? `${input.notes}`.trim() : null,
   };
 }
 
 function listExclusionsForLocation(clientLocationId) {
-  const cid = Number(clientLocationId);
-  const rows = [];
-  for (const ex of store.values()) {
-    if (Number(ex.client_location_id) === cid) rows.push(ex);
-  }
-  // stable ordering for UI: employee_name then toast_employee_id
+  const data = readStore();
+  const rows = data.exclusions.filter((ex) => Number(ex.client_location_id) === Number(clientLocationId));
   rows.sort((a, b) => {
     const an = `${a.employee_name || ''}`.toLowerCase();
     const bn = `${b.employee_name || ''}`.toLowerCase();
@@ -42,30 +46,54 @@ function listExclusionsForLocation(clientLocationId) {
 }
 
 function createExclusion(input = {}) {
+  const data = readStore();
   const normalized = normalize(input);
-  const id = counter++;
-  const row = { id, ...normalized };
-  store.set(id, row);
+  const now = new Date().toISOString();
+  const row = {
+    id: nextId(data.exclusions),
+    ...normalized,
+    created_at: now,
+    updated_at: now,
+  };
+  data.exclusions.push(row);
+  writeStore(data);
   return row;
 }
 
 function getExclusion(id) {
-  return store.get(Number(id)) || null;
+  const data = readStore();
+  return data.exclusions.find((ex) => Number(ex.id) === Number(id)) || null;
 }
 
 function updateExclusion(id, input = {}) {
-  const existing = getExclusion(id);
-  if (!existing) return null;
+  const data = readStore();
+  const idx = data.exclusions.findIndex((ex) => Number(ex.id) === Number(id));
+  if (idx === -1) return null;
 
+  const existing = data.exclusions[idx];
   const merged = { ...existing, ...input, id: existing.id, client_location_id: existing.client_location_id };
   const normalized = normalize(merged);
-  const row = { id: existing.id, ...normalized };
-  store.set(existing.id, row);
+
+  const row = {
+    ...existing,
+    ...normalized,
+    id: existing.id,
+    client_location_id: existing.client_location_id,
+    created_at: existing.created_at,
+    updated_at: new Date().toISOString(),
+  };
+
+  data.exclusions[idx] = row;
+  writeStore(data);
   return row;
 }
 
 function deleteExclusion(id) {
-  return store.delete(Number(id));
+  const data = readStore();
+  const before = data.exclusions.length;
+  data.exclusions = data.exclusions.filter((ex) => Number(ex.id) !== Number(id));
+  writeStore(data);
+  return data.exclusions.length < before;
 }
 
 module.exports = {

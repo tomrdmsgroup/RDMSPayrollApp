@@ -36,6 +36,23 @@ function isScopeExcluded(exclusion, scope) {
 }
 
 /**
+ * isExcluded
+ *
+ * Predicate helper (legacy/tests). Prefer buildExcludedEmployeeDecisions
+ * for per-run computation.
+ */
+function isExcluded(exclusions = [], employeeId, targetDate, scopeFlag) {
+  if (!employeeId || !scopeFlag) return false;
+  if (!targetDate) return false;
+  return exclusions.some(
+    (ex) =>
+      `${ex.toast_employee_id}` === `${employeeId}` &&
+      overlapsPeriod(ex, targetDate, targetDate) &&
+      isScopeExcluded(ex, scopeFlag)
+  );
+}
+
+/**
  * buildExcludedEmployeeDecisions
  *
  * Inputs:
@@ -82,5 +99,6 @@ function buildExcludedEmployeeDecisions(exclusions = [], periodStart, periodEnd)
 }
 
 module.exports = {
+  isExcluded,
   buildExcludedEmployeeDecisions,
 };
