@@ -25,8 +25,8 @@ function createClientLocation(input = {}) {
   const now = new Date().toISOString();
 
   const row = {
-    id: nextId(data.client_locations),
     ...normalized,
+    id: nextId(data.client_locations),
     created_at: now,
     updated_at: now,
   };
@@ -54,8 +54,14 @@ function updateClientLocation(id, input = {}) {
   if (idx === -1) return null;
 
   const existing = data.client_locations[idx];
-  const merged = { ...existing, ...input, id: existing.id };
+  const sanitizedInput = { ...input };
+  delete sanitizedInput.id;
+  delete sanitizedInput.created_at;
+  delete sanitizedInput.updated_at;
+
+  const merged = { ...existing, ...sanitizedInput, id: existing.id };
   const normalized = normalize(merged);
+
   const row = {
     ...existing,
     ...normalized,
@@ -82,23 +88,24 @@ function seedClientLocations(rows = []) {
   let changed = false;
 
   rows.forEach((row) => {
-    const name = `${row.name || ''}`.trim();
-    if (!name) return;
-    const existing = data.client_locations.find(
-      (r) => `${r.name}`.toLowerCase() === name.toLowerCase()
-    );
-    if (existing) return;
-    const now = new Date().toISOString();
-    data.client_locations.push({
-      id: nextId(data.client_locations),
-      name,
-      vitals_record_id: row.vitals_record_id ? `${row.vitals_record_id}`.trim() : '',
-      timezone: row.timezone ? `${row.timezone}`.trim() : null,
-      active: row.active !== false,
-      created_at: now,
-      updated_at: now,
-    });
-    changed = true;
+    try {
+      const normalized = normalize(row);
+      const exists = data.client_locations.find(
+        (r) => `${r.name}`.toLowerCase() === `${normalized.name}`.toLowerCase()
+      );
+      if (exists) return;
+
+      const now = new Date().toISOString();
+      data.client_locations.push({
+        ...normalized,
+        id: nextId(data.client_locations),
+        created_at: now,
+        updated_at: now,
+      });
+      changed = true;
+    } catch (_) {
+      // ignore invalid seed rows
+    }
   });
 
   if (changed) writeStore(data);
