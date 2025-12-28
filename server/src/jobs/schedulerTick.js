@@ -7,10 +7,11 @@ const { IdempotencyService } = require('../domain/idempotencyService');
 const { createRun, appendEvent, updateRun } = require('../domain/runManager');
 const { buildOutcome, saveOutcome, updateOutcome } = require('../domain/outcomeService');
 const { composeEmail } = require('../domain/emailComposer');
+const { buildArtifacts } = require('../domain/artifactService');
 
 /**
  * Placeholder: load policy snapshots.
- * Step 3 assumes policy snapshots exist. This function returns an array.
+ * Step 6 still assumes policy snapshots exist. This function returns an array.
  * In later steps, this will be wired to Airtable reads.
  */
 async function loadPolicySnapshots() {
@@ -33,8 +34,7 @@ function actionKey(action) {
 
 /**
  * Execute a planned RUN_AUDIT action.
- * Step 3: we persist the run + create an outcome skeleton.
- * Validations/artifacts are not implemented here (provider work).
+ * Step 6: persist run + create an outcome skeleton, now including artifacts.
  */
 async function executeRunAudit(action) {
   const run = createRun({
@@ -48,9 +48,9 @@ async function executeRunAudit(action) {
   appendEvent(run, 'scheduler_run_created', { planned_at: action.planned_at });
   updateRun(run.id, { events: run.events });
 
-  // Step 3: placeholder findings/artifacts; later steps fill these in.
+  // Step 6: validations still placeholders; artifacts attach to outcome.
   const findings = [];
-  const artifacts = [];
+  const artifacts = buildArtifacts({ run, policySnapshot: action.policy_snapshot || {} });
 
   const outcome = buildOutcome(run, findings, artifacts, action.policy_snapshot || null);
 
@@ -67,7 +67,7 @@ async function executeRunAudit(action) {
 
 /**
  * Execute a planned SEND_EMAIL action.
- * Step 3: compose and store rendered bodies; actual sending is future work.
+ * Step 6: compose and store rendered bodies; actual sending is handled elsewhere.
  */
 async function executeSendEmail(action) {
   const store = readStore();
