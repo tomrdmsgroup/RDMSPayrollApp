@@ -43,6 +43,14 @@ function resolveAsanaRoute(clientLocationId, vitalsSnapshot) {
 }
 
 /**
+ * Treat only failures/errors as actionable findings.
+ */
+function isFailureFinding(finding) {
+  const status = (finding?.status || '').toString().toLowerCase().trim();
+  return status === 'failure' || status === 'error';
+}
+
+/**
  * Idempotency key is stable per:
  * run + project + section + finding identity
  */
@@ -51,12 +59,8 @@ function buildIdempotencyKey({ runId, projectGid, sectionGid, finding }) {
   return [runId || 'unknown', projectGid, sectionGid || '', code].join('|');
 }
 
-/**
- * Binder-correct gating:
- * Only create Asana tasks when explicitly requested by the finding.
- */
 function shouldCreateClientAsanaTask(finding) {
-  return finding?.emit_asana_alert === true;
+  return isFailureFinding(finding);
 }
 
 function buildTaskPayload({ finding, run, route }) {
@@ -67,7 +71,7 @@ function buildTaskPayload({ finding, run, route }) {
     finding.message || 'Validation issue detected.',
     finding.details ? `Details: ${finding.details}` : null,
     run ? `Client/Location: ${run.client_location_id}` : null,
-    route.sectionGid ? `Section: ${route.sectionGid}` : null,
+    route?.sectionGid ? `Section: ${route.sectionGid}` : null,
   ]
     .filter(Boolean)
     .join('\n');
@@ -79,9 +83,8 @@ function buildTaskPayload({ finding, run, route }) {
  * Create Asana tasks for findings.
  *
  * Rules:
- * - Only findings with emit_asana_alert === true are eligible.
- * - If ANY eligible finding exists and routing is missing -> this is a system failure (failureService).
- * - If NO eligible findings exist -> routing may be missing with no failure.
+ * - Only findings with status "failure" or "error" are eligible.
+ * - If ANY eligible finding exists and routing is missing -> notify failure.
  * - Idempotency prevents duplicate task creation.
  */
 async function createAsanaTasksForFindings({
@@ -90,21 +93,21 @@ async function createAsanaTasksForFindings({
   vitalsSnapshot,
   idempotencyService = new IdempotencyService(),
   asanaProvider = { createTask },
+  failureNotifier = notifyFailure,
 }) {
-  if (!run || !findings.length) return [];
+  if (!run || !Array.isArray(findings) || findings.length === 0) return [];
 
   const eligibleFindings = findings.filter(shouldCreateClientAsanaTask);
-  if (!eligibleFindings.length) return [];
+  if (eligibleFindings.length === 0) return [];
 
   const route = resolveAsanaRoute(run.client_location_id, vitalsSnapshot);
 
-  // Routing missing is a failure ONLY because we have eligible findings that require Asana tasks.
   if (!route) {
     appendEvent(run, 'asana_routing_missing', {
       client_location_id: run.client_location_id,
     });
 
-    notifyFailure({
+    failureNotifier({
       step: 'asana_routing',
       error: 'asana_routing_missing',
       runId: run.id,
@@ -142,10 +145,9 @@ async function createAsanaTasksForFindings({
       appendEvent(run, 'asana_task_created', { key, task });
       results.push(task);
     } catch (err) {
-      // Task creation failure IS a system failure
-      notifyFailure({
+      failureNotifier({
         step: 'asana_task',
-        error: err.message || 'asana_task_failed',
+        error: err?.message || 'asana_task_failed',
         runId: run.id,
         clientLocation: run.client_location_id,
         period: `${run.period_start} - ${run.period_end}`,
@@ -159,7 +161,8 @@ async function createAsanaTasksForFindings({
 module.exports = {
   resolveAsanaRoute,
   createAsanaTasksForFindings,
-  shouldCreateClientAsanaTask,
   buildIdempotencyKey,
   buildTaskPayload,
+  shouldCreateClientAsanaTask,
+  isFailureFinding,
 };
