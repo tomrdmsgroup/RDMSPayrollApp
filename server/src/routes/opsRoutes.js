@@ -65,8 +65,8 @@ async function handleRun(req, res) {
   const findings = [];
   const artifacts = buildArtifacts({ run, policySnapshot: policy_snapshot || {} });
 
+  // KEY: buildOutcome now seeds outcome.delivery from policy_snapshot.delivery if present.
   const outcome = buildOutcome(run, findings, artifacts, policy_snapshot);
-  outcome.delivery.mode = outcome.delivery.mode || 'internal_only';
 
   const savedOutcome = saveOutcome(run.id, outcome);
 
@@ -101,8 +101,8 @@ async function handleRerun(req, res, runId) {
   const findings = [];
   const artifacts = buildArtifacts({ run, policySnapshot: policySnapshot || {} });
 
+  // KEY: buildOutcome now seeds outcome.delivery from policy_snapshot.delivery if present.
   const outcome = buildOutcome(run, findings, artifacts, policySnapshot);
-  outcome.delivery.mode = outcome.delivery.mode || 'internal_only';
 
   const savedOutcome = saveOutcome(run.id, outcome);
 
