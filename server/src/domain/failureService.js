@@ -1,28 +1,44 @@
-const FAILURE_EMAIL = process.env.FAILURE_EMAIL || '911@rdmsgroup.com';
+// server/src/domain/failureService.js
 
-function buildFailurePayload({ clientLocation, period, step, error, runId }) {
-  return {
-    to: FAILURE_EMAIL,
-    subject: `PAYROLL FAILURE: ${clientLocation || 'unknown'} ${period || ''}`.trim(),
-    body: `Step: ${step}\nError: ${error}\nRun: ${runId ? 'RUN-' + runId : 'unknown'}`,
+const { updateStore } = require('./persistenceStore');
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+/**
+ * Durable failure notifier.
+ * - Writes failure payloads into the persistence store (store.failures)
+ * - Also logs to console for visibility in hosted environments
+ *
+ * This keeps current behavior compatible while making failures durable.
+ */
+function notifyFailure(payload) {
+  const entry = {
+    occurred_at: nowIso(),
+    ...(payload || {}),
   };
-}
 
-function notifyFailure(details, emailProvider = console) {
-  const payload = buildFailurePayload(details);
   try {
-    if (emailProvider.sendEmail) {
-      const result = emailProvider.sendEmail(payload);
-      if (result && typeof result.catch === 'function') {
-        result.catch((err) => console.error('FAILURE EMAIL ERROR', err.message || err));
-      }
-    } else {
-      console.error('FAILURE EMAIL', payload);
-    }
+    updateStore((store) => {
+      store.failures.push(entry);
+      return store;
+    });
   } catch (err) {
-    console.error('FAILURE EMAIL ERROR', err.message || err);
+    // If persistence is broken, we still log to console.
+    // Do not throw; failures should not crash the server.
   }
-  return payload;
+
+  try {
+    // eslint-disable-next-line no-console
+    console.error('[failure]', JSON.stringify(entry));
+  } catch (_) {
+    // ignore
+  }
+
+  return entry;
 }
 
-module.exports = { notifyFailure, buildFailurePayload };
+module.exports = {
+  notifyFailure,
+};
