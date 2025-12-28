@@ -21,7 +21,7 @@ function computeFindingCounts(findings) {
   };
 
   for (const f of findings) {
-    const status = (f?.status || '').toString().toLowerCase().trim();
+    const status = (f?.status || '').toLowerCase();
     if (!status) continue;
 
     counts.total += 1;
@@ -30,18 +30,16 @@ function computeFindingCounts(findings) {
     else if (status === 'warning') counts.warning += 1;
     else if (status === 'failure') counts.failure += 1;
     else if (status === 'error') counts.error += 1;
-    else counts.total += 0;
   }
 
   return counts;
 }
 
 function needsAttentionFromFindings(findings) {
-  for (const f of findings) {
-    const status = (f?.status || '').toString().toLowerCase().trim();
-    if (status === 'failure' || status === 'error') return true;
-  }
-  return false;
+  return findings.some((f) => {
+    const s = (f?.status || '').toLowerCase();
+    return s === 'failure' || s === 'error';
+  });
 }
 
 function buildActions(runId) {
@@ -71,14 +69,11 @@ function defaultDelivery() {
 
 function normalizeDelivery(delivery) {
   const base = defaultDelivery();
-  if (!delivery || typeof delivery !== 'object' || Array.isArray(delivery)) return base;
-
-  const mode = `${delivery.mode || base.mode}`.trim();
+  if (!delivery || typeof delivery !== 'object') return base;
 
   return {
     ...base,
     ...delivery,
-    mode,
     recipients: Array.isArray(delivery.recipients) ? delivery.recipients : base.recipients,
   };
 }
@@ -88,15 +83,13 @@ function buildOutcome(run, findings, artifacts, policySnapshot) {
   const counts = computeFindingCounts(safeFindings);
   const needsAttention = needsAttentionFromFindings(safeFindings);
 
-  const status = needsAttention ? 'needs_attention' : 'completed';
-
-  const outcome = {
-    run_id: Number(run?.id),
+  return {
+    run_id: Number(run.id),
     version: 1,
     created_at: nowIso(),
     updated_at: nowIso(),
 
-    status,
+    status: needsAttention ? 'needs_attention' : 'completed',
 
     summary: {
       finding_counts: counts,
@@ -108,37 +101,29 @@ function buildOutcome(run, findings, artifacts, policySnapshot) {
 
     delivery: defaultDelivery(),
 
-    actions: buildActions(Number(run?.id)),
+    actions: buildActions(run.id),
 
     policy_snapshot: policySnapshot || null,
   };
-
-  return outcome;
 }
 
 function saveOutcome(runId, outcome) {
-  if (!runId || !outcome) return null;
-
-  const id = Number(runId);
   let saved = null;
 
   updateStore((store) => {
     if (!Array.isArray(store.outcomes)) store.outcomes = [];
 
-    const idx = store.outcomes.findIndex((o) => Number(o.run_id) === id);
+    const idx = store.outcomes.findIndex((o) => o.run_id === runId);
     const now = nowIso();
 
     if (idx >= 0) {
       const merged = {
         ...store.outcomes[idx],
         ...outcome,
-        run_id: id,
+        run_id: runId,
         updated_at: now,
       };
 
-      if (!merged.created_at) merged.created_at = now;
-
-      // Ensure delivery object has the known stable shape.
       merged.delivery = normalizeDelivery(merged.delivery);
 
       store.outcomes[idx] = merged;
@@ -146,17 +131,17 @@ function saveOutcome(runId, outcome) {
       return store;
     }
 
-    const toInsert = {
+    const inserted = {
       ...outcome,
-      run_id: id,
-      created_at: outcome.created_at || now,
+      run_id: runId,
+      created_at: now,
       updated_at: now,
     };
 
-    toInsert.delivery = normalizeDelivery(toInsert.delivery);
+    inserted.delivery = normalizeDelivery(inserted.delivery);
 
-    store.outcomes.push(toInsert);
-    saved = toInsert;
+    store.outcomes.push(inserted);
+    saved = inserted;
     return store;
   });
 
@@ -164,58 +149,41 @@ function saveOutcome(runId, outcome) {
 }
 
 function getOutcome(runId) {
-  if (!runId) return null;
-
-  const id = Number(runId);
   let found = null;
 
   updateStore((store) => {
-    found = Array.isArray(store.outcomes)
-      ? store.outcomes.find((o) => Number(o.run_id) === id) || null
-      : null;
+    found = store.outcomes.find((o) => o.run_id === runId) || null;
     return store;
   });
 
-  if (found && found.delivery) {
-    found.delivery = normalizeDelivery(found.delivery);
-  }
-
+  if (found) found.delivery = normalizeDelivery(found.delivery);
   return found;
 }
 
 function updateOutcome(runId, patch) {
-  if (!runId || !patch) return null;
-
-  const id = Number(runId);
   let updated = null;
 
   updateStore((store) => {
-    if (!Array.isArray(store.outcomes)) store.outcomes = [];
+    const idx = store.outcomes.findIndex((o) => o.run_id === runId);
+    if (idx < 0) return store;
 
-    const idx = store.outcomes.findIndex((o) => Number(o.run_id) === id);
-    if (idx < 0) {
-      updated = null;
-      return store;
-    }
-
+    const existing = store.outcomes[idx];
     const now = nowIso();
 
+    let status = existing.status;
+    if (patch.delivery?.sent_at) status = 'delivered';
+
     const merged = {
-      ...store.outcomes[idx],
+      ...existing,
       ...patch,
-      run_id: id,
+      status,
       updated_at: now,
     };
 
-    // Delivery is a nested object; preserve existing fields unless explicitly overridden.
-    if (patch.delivery && typeof patch.delivery === 'object' && !Array.isArray(patch.delivery)) {
-      merged.delivery = normalizeDelivery({
-        ...store.outcomes[idx].delivery,
-        ...patch.delivery,
-      });
-    } else {
-      merged.delivery = normalizeDelivery(merged.delivery);
-    }
+    merged.delivery = normalizeDelivery({
+      ...existing.delivery,
+      ...patch.delivery,
+    });
 
     store.outcomes[idx] = merged;
     updated = merged;
