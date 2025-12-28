@@ -7,6 +7,7 @@ const { readStore } = require('../domain/persistenceStore');
 const { createRun, appendEvent, updateRun } = require('../domain/runManager');
 const { buildOutcome, saveOutcome, getOutcome, updateOutcome } = require('../domain/outcomeService');
 const { composeEmail } = require('../domain/emailComposer');
+const { sendOutcomeEmail } = require('../domain/emailService');
 
 function json(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -18,7 +19,6 @@ function parseBody(req) {
     let data = '';
     req.on('data', (chunk) => {
       data += chunk;
-      // prevent accidental huge payloads
       if (data.length > 2_000_000) {
         data = '';
         resolve(null);
@@ -60,12 +60,10 @@ async function handleRun(req, res) {
   appendEvent(run, 'ops_run_created', {});
   updateRun(run.id, { events: run.events });
 
-  // Step 4: validations/artifacts may still be placeholders in current repo state.
   const findings = [];
   const artifacts = [];
 
   const outcome = buildOutcome(run, findings, artifacts, policy_snapshot);
-  // Do not assume email delivery; ops can render-email only if mode is email.
   outcome.delivery.mode = outcome.delivery.mode || 'internal_only';
 
   const savedOutcome = saveOutcome(run.id, outcome);
@@ -164,8 +162,59 @@ async function handleRenderEmail(req, res, runId) {
   });
 }
 
-async function handleSendEmailStub(req, res) {
-  return json(res, 501, { ok: false, error: 'email_send_not_implemented' });
+async function handleSendEmail(req, res, runId) {
+  const id = Number(runId);
+  if (!id) return json(res, 400, { ok: false, error: 'invalid_run_id' });
+
+  const store = readStore();
+  const run = (store.runs || []).find((r) => Number(r.id) === id);
+  let outcome = getOutcome(id);
+
+  if (!run || !outcome) {
+    return json(res, 404, { ok: false, error: 'run_or_outcome_not_found' });
+  }
+
+  if (!outcome.delivery || outcome.delivery.mode !== 'email') {
+    return json(res, 400, { ok: false, error: 'delivery_mode_not_email' });
+  }
+
+  // Ensure rendered content exists; render first if needed.
+  if (!outcome.delivery.subject || (!outcome.delivery.rendered_text && !outcome.delivery.rendered_html)) {
+    const rendered = composeEmail(outcome, run);
+    outcome = updateOutcome(id, {
+      delivery: {
+        subject: rendered.subject,
+        rendered_text: rendered.text,
+        rendered_html: rendered.html,
+      },
+    });
+
+    appendEvent(run, 'ops_email_rendered', { implicit: true });
+    updateRun(run.id, { events: run.events });
+  }
+
+  const sendResult = await sendOutcomeEmail({ run, outcome });
+
+  if (sendResult.ok) {
+    appendEvent(run, sendResult.already_sent ? 'ops_email_already_sent' : 'ops_email_sent', {
+      message_id: sendResult.message_id || null,
+    });
+    updateRun(run.id, { events: run.events });
+
+    const latest = getOutcome(id);
+
+    return json(res, 200, {
+      ok: true,
+      already_sent: !!sendResult.already_sent,
+      message_id: sendResult.message_id || null,
+      outcome: latest,
+    });
+  }
+
+  appendEvent(run, 'ops_email_send_failed', { error: sendResult.error });
+  updateRun(run.id, { events: run.events });
+
+  return json(res, 500, { ok: false, error: sendResult.error || 'email_send_failed' });
 }
 
 /**
@@ -175,27 +224,20 @@ async function handleSendEmailStub(req, res) {
 async function opsRouter(req, res, url) {
   const pathname = url.pathname || '';
 
-  // /ops/status
   if (pathname === '/ops/status' && req.method === 'GET') return handleStatus(req, res);
-
-  // /ops/run
   if (pathname === '/ops/run' && req.method === 'POST') return handleRun(req, res);
 
-  // /ops/rerun/:runId
   const rerunMatch = pathname.match(/^\/ops\/rerun\/(\d+)$/);
   if (rerunMatch && req.method === 'POST') return handleRerun(req, res, rerunMatch[1]);
 
-  // /ops/run/:runId
   const inspectMatch = pathname.match(/^\/ops\/run\/(\d+)$/);
   if (inspectMatch && req.method === 'GET') return handleInspect(req, res, inspectMatch[1]);
 
-  // /ops/render-email/:runId
   const renderMatch = pathname.match(/^\/ops\/render-email\/(\d+)$/);
   if (renderMatch && req.method === 'POST') return handleRenderEmail(req, res, renderMatch[1]);
 
-  // /ops/send-email/:runId
   const sendMatch = pathname.match(/^\/ops\/send-email\/(\d+)$/);
-  if (sendMatch && req.method === 'POST') return handleSendEmailStub(req, res);
+  if (sendMatch && req.method === 'POST') return handleSendEmail(req, res, sendMatch[1]);
 
   return json(res, 404, { ok: false, error: 'not_found' });
 }
