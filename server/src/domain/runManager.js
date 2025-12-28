@@ -1,54 +1,108 @@
-const { notifyFailure } = require('./failureService');
+// server/src/domain/runManager.js
 
-const runStore = new Map();
-let runCounter = 1;
+const { updateStore, nextCounter } = require('./persistenceStore');
 
-function createRunRecord({ clientLocationId, periodStart, periodEnd }) {
-  const run = {
-    id: runCounter++,
-    client_location_id: clientLocationId,
-    period_start: periodStart,
-    period_end: periodEnd,
-    status: 'created',
-    events: [],
-    locked: false,
-  };
-  runStore.set(run.id, run);
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function ensureEvents(run) {
+  if (!run.events || !Array.isArray(run.events)) run.events = [];
   return run;
 }
 
-function appendEvent(run, eventType, payload = {}) {
-  if (!run) return;
-  run.events.push({ event_type: eventType, payload, occurred_at: new Date() });
+function appendEvent(run, type, data) {
+  if (!run) return run;
+  ensureEvents(run);
+  run.events.push({
+    occurred_at: nowIso(),
+    type,
+    data: data || null,
+  });
+  return run;
 }
 
-function getRun(runId) {
-  return runStore.get(runId) || null;
+function createRun({
+  client_location_id,
+  period_start,
+  period_end,
+  payload = null,
+  status = 'created',
+}) {
+  let createdRun = null;
+
+  updateStore((store) => {
+    const id = nextCounter(store, 'run_id');
+
+    createdRun = {
+      id,
+      client_location_id,
+      period_start,
+      period_end,
+      status,
+      created_at: nowIso(),
+      updated_at: nowIso(),
+      payload,
+      events: [],
+    };
+
+    store.runs.push(createdRun);
+    return store;
+  });
+
+  return createdRun;
 }
 
-function lockRun(run, reason = {}) {
-  if (!run) return { locked: false, reason: 'missing_run' };
-  if (run.locked) return { locked: false, reason: 'already_locked', run };
-  run.locked = true;
-  run.locked_at = new Date();
-  run.lock_reason = reason;
-  run.status = 'locked';
-  appendEvent(run, 'locked', { reason });
-  return { locked: true, run };
+function getRunById(runId) {
+  const id = Number(runId);
+  let found = null;
+
+  updateStore((store) => {
+    found = store.runs.find((r) => Number(r.id) === id) || null;
+    return store;
+  });
+
+  return found;
 }
 
-function failRun(run, step, error) {
-  if (run) {
-    run.status = 'failed';
-    run.error_message = error;
-    appendEvent(run, 'failure', { step, error });
-  }
-  notifyFailure({ clientLocation: run ? run.client_location_id : null, period: run ? `${run.period_start} - ${run.period_end}` : '', step, error, runId: run ? run.id : null });
+function updateRun(runId, patch) {
+  const id = Number(runId);
+  let updated = null;
+
+  updateStore((store) => {
+    const run = store.runs.find((r) => Number(r.id) === id);
+    if (!run) {
+      updated = null;
+      return store;
+    }
+
+    Object.assign(run, patch || {});
+    run.updated_at = nowIso();
+
+    updated = run;
+    return store;
+  });
+
+  return updated;
 }
 
-function resetRuns() {
-  runStore.clear();
-  runCounter = 1;
+function listRuns({ limit = 50 } = {}) {
+  let rows = [];
+
+  updateStore((store) => {
+    const sorted = [...store.runs].sort((a, b) => Number(b.id) - Number(a.id));
+    rows = sorted.slice(0, Number(limit) || 50);
+    return store;
+  });
+
+  return rows;
 }
 
-module.exports = { createRunRecord, appendEvent, failRun, getRun, lockRun, resetRuns, runStore };
+module.exports = {
+  nowIso,
+  createRun,
+  getRunById,
+  updateRun,
+  listRuns,
+  appendEvent,
+};
