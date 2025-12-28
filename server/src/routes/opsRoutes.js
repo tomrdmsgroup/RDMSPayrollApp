@@ -8,6 +8,7 @@ const { createRun, appendEvent, updateRun } = require('../domain/runManager');
 const { buildOutcome, saveOutcome, getOutcome, updateOutcome } = require('../domain/outcomeService');
 const { composeEmail } = require('../domain/emailComposer');
 const { sendOutcomeEmail } = require('../domain/emailService');
+const { buildArtifacts } = require('../domain/artifactService');
 
 function json(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -60,8 +61,9 @@ async function handleRun(req, res) {
   appendEvent(run, 'ops_run_created', {});
   updateRun(run.id, { events: run.events });
 
+  // Step 6: validations still placeholders; artifacts now attach to outcome.
   const findings = [];
-  const artifacts = [];
+  const artifacts = buildArtifacts({ run, policySnapshot: policy_snapshot || {} });
 
   const outcome = buildOutcome(run, findings, artifacts, policy_snapshot);
   outcome.delivery.mode = outcome.delivery.mode || 'internal_only';
@@ -83,6 +85,8 @@ async function handleRerun(req, res, runId) {
 
   if (!previousRun) return json(res, 404, { ok: false, error: 'run_not_found' });
 
+  const policySnapshot = previousRun.payload?.policy_snapshot || null;
+
   const run = createRun({
     client_location_id: previousRun.client_location_id,
     period_start: previousRun.period_start,
@@ -95,9 +99,9 @@ async function handleRerun(req, res, runId) {
   updateRun(run.id, { events: run.events });
 
   const findings = [];
-  const artifacts = [];
+  const artifacts = buildArtifacts({ run, policySnapshot: policySnapshot || {} });
 
-  const outcome = buildOutcome(run, findings, artifacts, previousRun.payload?.policy_snapshot || null);
+  const outcome = buildOutcome(run, findings, artifacts, policySnapshot);
   outcome.delivery.mode = outcome.delivery.mode || 'internal_only';
 
   const savedOutcome = saveOutcome(run.id, outcome);
