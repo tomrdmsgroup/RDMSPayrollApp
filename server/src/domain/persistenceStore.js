@@ -1,5 +1,5 @@
 // server/src/domain/persistenceStore.js
-// Minimal JSON-file persistence for binder-scoped config tables + run/token/idempotency/failure durability.
+// Minimal JSON-file persistence for binder-scoped config tables + run/token/idempotency/failure/outcome durability.
 
 const fs = require('fs');
 const path = require('path');
@@ -14,8 +14,9 @@ function defaultData() {
     rule_configs: [],
     exclusions: [],
 
-    // Durable operational state (audits 3/4)
+    // Durable operational state
     runs: [],
+    outcomes: [],
     tokens: [],
     idempotency: {}, // { [scope: string]: string[] }
     failures: [], // [{ occurred_at, ...payload }]
@@ -53,6 +54,7 @@ function safeParseOrThrow(raw, file) {
     merged.exclusions = Array.isArray(parsed.exclusions) ? parsed.exclusions : [];
 
     merged.runs = Array.isArray(parsed.runs) ? parsed.runs : [];
+    merged.outcomes = Array.isArray(parsed.outcomes) ? parsed.outcomes : [];
     merged.tokens = Array.isArray(parsed.tokens) ? parsed.tokens : [];
     merged.failures = Array.isArray(parsed.failures) ? parsed.failures : [];
 
