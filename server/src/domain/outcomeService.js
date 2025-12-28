@@ -30,7 +30,7 @@ function computeFindingCounts(findings) {
     else if (status === 'warning') counts.warning += 1;
     else if (status === 'failure') counts.failure += 1;
     else if (status === 'error') counts.error += 1;
-    else counts.total += 0; // ignore unknown statuses beyond total
+    else counts.total += 0;
   }
 
   return counts;
@@ -51,6 +51,35 @@ function buildActions(runId) {
   return {
     approve_url: approve ? `/approve?token=${approve.token}` : null,
     rerun_url: rerun ? `/rerun?token=${rerun.token}` : null,
+  };
+}
+
+function defaultDelivery() {
+  return {
+    mode: 'internal_only',
+    scheduled_send_at: null,
+    sent_at: null,
+    provider_message_id: null,
+    recipients: [],
+    from: null,
+    reply_to: null,
+    subject: null,
+    rendered_html: null,
+    rendered_text: null,
+  };
+}
+
+function normalizeDelivery(delivery) {
+  const base = defaultDelivery();
+  if (!delivery || typeof delivery !== 'object' || Array.isArray(delivery)) return base;
+
+  const mode = `${delivery.mode || base.mode}`.trim();
+
+  return {
+    ...base,
+    ...delivery,
+    mode,
+    recipients: Array.isArray(delivery.recipients) ? delivery.recipients : base.recipients,
   };
 }
 
@@ -77,18 +106,7 @@ function buildOutcome(run, findings, artifacts, policySnapshot) {
     findings: safeFindings,
     artifacts: Array.isArray(artifacts) ? artifacts : [],
 
-    delivery: {
-      mode: 'internal_only',
-      scheduled_send_at: null,
-      sent_at: null,
-      provider_message_id: null,
-      recipients: [],
-      from: null,
-      reply_to: null,
-      subject: null,
-      rendered_html: null,
-      rendered_text: null,
-    },
+    delivery: defaultDelivery(),
 
     actions: buildActions(Number(run?.id)),
 
@@ -120,6 +138,9 @@ function saveOutcome(runId, outcome) {
 
       if (!merged.created_at) merged.created_at = now;
 
+      // Ensure delivery object has the known stable shape.
+      merged.delivery = normalizeDelivery(merged.delivery);
+
       store.outcomes[idx] = merged;
       saved = merged;
       return store;
@@ -131,6 +152,8 @@ function saveOutcome(runId, outcome) {
       created_at: outcome.created_at || now,
       updated_at: now,
     };
+
+    toInsert.delivery = normalizeDelivery(toInsert.delivery);
 
     store.outcomes.push(toInsert);
     saved = toInsert;
@@ -153,6 +176,10 @@ function getOutcome(runId) {
     return store;
   });
 
+  if (found && found.delivery) {
+    found.delivery = normalizeDelivery(found.delivery);
+  }
+
   return found;
 }
 
@@ -172,12 +199,23 @@ function updateOutcome(runId, patch) {
     }
 
     const now = nowIso();
+
     const merged = {
       ...store.outcomes[idx],
       ...patch,
       run_id: id,
       updated_at: now,
     };
+
+    // Delivery is a nested object; preserve existing fields unless explicitly overridden.
+    if (patch.delivery && typeof patch.delivery === 'object' && !Array.isArray(patch.delivery)) {
+      merged.delivery = normalizeDelivery({
+        ...store.outcomes[idx].delivery,
+        ...patch.delivery,
+      });
+    } else {
+      merged.delivery = normalizeDelivery(merged.delivery);
+    }
 
     store.outcomes[idx] = merged;
     updated = merged;
