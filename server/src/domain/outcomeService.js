@@ -83,6 +83,8 @@ function buildOutcome(run, findings, artifacts, policySnapshot) {
   const counts = computeFindingCounts(safeFindings);
   const needsAttention = needsAttentionFromFindings(safeFindings);
 
+  const deliveryFromPolicy = policySnapshot && typeof policySnapshot === 'object' ? policySnapshot.delivery : null;
+
   return {
     run_id: Number(run.id),
     version: 1,
@@ -99,7 +101,8 @@ function buildOutcome(run, findings, artifacts, policySnapshot) {
     findings: safeFindings,
     artifacts: Array.isArray(artifacts) ? artifacts : [],
 
-    delivery: defaultDelivery(),
+    // KEY CHANGE: seed outcome.delivery from policy snapshot (merge into defaults)
+    delivery: normalizeDelivery(deliveryFromPolicy),
 
     actions: buildActions(run.id),
 
@@ -198,6 +201,4 @@ module.exports = {
   saveOutcome,
   getOutcome,
   updateOutcome,
-  computeFindingCounts,
-  needsAttentionFromFindings,
 };
