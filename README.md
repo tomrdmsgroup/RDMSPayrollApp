@@ -1,37 +1,72 @@
-# RDMS Payroll App (stub)
+RDMS Payroll App (stub)
 
-This repository contains a skeleton implementation of the internal payroll automation platform described in the Payroll App Binder (V1.0–V1.2). The code is designed for offline environments and uses lightweight Node.js modules without external dependencies.
+This repository contains a skeleton implementation of the internal payroll automation platform described in the Payroll App Binder (V1.0–V1.2).
 
-## Structure
-- `server/` – Node.js backend with domain services, provider stubs, HTTP endpoints, SQL migration, and unit tests.
-- `web/` – Minimal React-in-the-browser console for login and manual actions.
-- `docs/` – Binder documents provided for reference (closed-world contract).
+The code is intended as a closed-world reference implementation:
 
-## Backend
-The backend avoids external packages and implements required domains with in-memory and file-based stubs. Production deployments should replace provider stubs with real integrations and wire a PostgreSQL client to the SQL schema.
+it reflects the contracts described in the binder,
 
-### Running
-```
+it is not feature-complete,
+
+and it is meant to be stabilized before additional functionality is layered on.
+
+Runtime Requirements
+
+Node.js 18 or newer
+Required because several providers rely on the built-in fetch API.
+
+Structure
+
+server/ – Node.js backend with domain services, provider stubs, HTTP endpoints, SQL migration, and unit tests.
+
+web/ – Minimal React-in-the-browser console for login and manual actions.
+
+docs/ – Binder documents provided for reference (closed-world contract).
+
+CODEX_*.md – Contract and instruction files used for AI-assisted development.
+
+Backend
+
+The backend implements required domains using a mix of in-memory logic and file-based persistence.
+
+External integrations (Toast, Airtable, email, Asana) are present as providers with real interfaces, but may operate in stub mode depending on configuration.
+
+Production deployments are expected to wire a real database client to the provided SQL schema and supply provider credentials via environment variables.
+
+Running
+
 cd server
+npm install
 node src/index.js
-```
 
-### Tests
-```
+Tests
+
 cd server
 npm test
-```
 
-### Environment
-Populate a `.env` file based on `.env.example` to configure defaults (admin credentials, provider tokens, etc.).
+Tests validate current contract behavior and are intentionally lightweight.
 
-## Database
-SQL migrations live under `server/prisma/migrations/000_init/migration.sql`, expressing the minimum schema from the binder: users, client_locations, rule_configs, exclusions, runs, run_events, artifacts, tokens, approvals, and idempotency_keys.
+Environment
 
-## Frontend
-The `web/index.html` page loads React from a CDN and provides stub login, manual run creation, and idempotency dashboard calls to the backend. Serve the `web/` directory with any static server while the backend is running on the same origin.
+Populate a .env file based on server/.env.example.
+The server loads environment variables only from server/.env.
 
-## Notes
-- Toast, Airtable, email, and Asana providers are intentionally stubbed but maintain required interfaces and failure semantics.
-- Failures call the 911 protocol via `failureService` to avoid silent errors.
-- Export generation enforces ADP RUN/WFN WIP column contracts and fails loudly if mandatory fields (e.g., WFN CO CODE) are absent.
+Database
+
+SQL migrations live under:
+
+server/prisma/migrations/000_init/migration.sql
+
+This schema reflects the minimum entities defined in the binder.
+
+Frontend
+
+The web/index.html page provides a minimal internal console for login, manual run creation, and idempotency inspection. Serve it from the same origin as the backend.
+
+Notes
+
+Providers maintain required interfaces and failure semantics.
+
+System failures are routed through the 911 protocol via failureService.
+
+Export generation enforces ADP RUN / WFN WIP column contracts and fails loudly when mandatory fields are missing.
