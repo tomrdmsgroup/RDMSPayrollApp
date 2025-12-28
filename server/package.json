@@ -10,6 +10,7 @@
   },
   "license": "MIT",
   "dependencies": {
-    "nodemailer": "^6.9.12"
+    "nodemailer": "^6.9.12",
+    "exceljs": "^4.4.0"
   }
 }
