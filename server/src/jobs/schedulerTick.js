@@ -52,10 +52,8 @@ async function executeRunAudit(action) {
   const findings = [];
   const artifacts = buildArtifacts({ run, policySnapshot: action.policy_snapshot || {} });
 
+  // KEY: buildOutcome now seeds outcome.delivery from action.policy_snapshot.delivery if present.
   const outcome = buildOutcome(run, findings, artifacts, action.policy_snapshot || null);
-
-  // Delivery mode will be set by future policy wiring. Default internal_only for now.
-  outcome.delivery.mode = 'internal_only';
 
   const saved = saveOutcome(run.id, outcome);
 
