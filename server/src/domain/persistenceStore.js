@@ -1,5 +1,5 @@
 // server/src/domain/persistenceStore.js
-// Minimal JSON-file persistence for binder-scoped config tables.
+// Minimal JSON-file persistence for binder-scoped config tables + run/token/idempotency/failure durability.
 
 const fs = require('fs');
 const path = require('path');
@@ -9,9 +9,21 @@ const dataFilePath = () =>
 
 function defaultData() {
   return {
+    // Binder-scoped config tables
     client_locations: [],
     rule_configs: [],
     exclusions: [],
+
+    // Durable operational state (audits 3/4)
+    runs: [],
+    tokens: [],
+    idempotency: {}, // { [scope: string]: string[] }
+    failures: [], // [{ occurred_at, ...payload }]
+
+    // Simple counters for stable incremental IDs
+    counters: {
+      run_id: 1,
+    },
   };
 }
 
@@ -29,13 +41,36 @@ function ensureDataFile() {
 function safeParseOrThrow(raw, file) {
   try {
     const parsed = JSON.parse(raw || '{}');
-    return {
-      ...defaultData(),
+    const base = defaultData();
+
+    const merged = {
+      ...base,
       ...parsed,
-      client_locations: Array.isArray(parsed.client_locations) ? parsed.client_locations : [],
-      rule_configs: Array.isArray(parsed.rule_configs) ? parsed.rule_configs : [],
-      exclusions: Array.isArray(parsed.exclusions) ? parsed.exclusions : [],
     };
+
+    merged.client_locations = Array.isArray(parsed.client_locations) ? parsed.client_locations : [];
+    merged.rule_configs = Array.isArray(parsed.rule_configs) ? parsed.rule_configs : [];
+    merged.exclusions = Array.isArray(parsed.exclusions) ? parsed.exclusions : [];
+
+    merged.runs = Array.isArray(parsed.runs) ? parsed.runs : [];
+    merged.tokens = Array.isArray(parsed.tokens) ? parsed.tokens : [];
+    merged.failures = Array.isArray(parsed.failures) ? parsed.failures : [];
+
+    merged.idempotency =
+      parsed && typeof parsed.idempotency === 'object' && !Array.isArray(parsed.idempotency)
+        ? parsed.idempotency
+        : {};
+
+    merged.counters =
+      parsed && typeof parsed.counters === 'object' && !Array.isArray(parsed.counters)
+        ? { ...base.counters, ...parsed.counters }
+        : { ...base.counters };
+
+    if (!Number.isFinite(Number(merged.counters.run_id)) || Number(merged.counters.run_id) < 1) {
+      merged.counters.run_id = 1;
+    }
+
+    return merged;
   } catch (err) {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const backup = `${file}.corrupt-${stamp}.bak`;
@@ -73,6 +108,12 @@ function writeStore(store) {
   return store;
 }
 
+function updateStore(mutator) {
+  const current = readStore();
+  const next = mutator ? mutator(current) : current;
+  return writeStore(next || current);
+}
+
 function resetStore() {
   return writeStore(defaultData());
 }
@@ -87,10 +128,21 @@ function nextId(collection = []) {
   );
 }
 
+function nextCounter(store, counterName) {
+  if (!store || typeof store !== 'object') return 1;
+  if (!store.counters || typeof store.counters !== 'object') store.counters = {};
+  const current = Number(store.counters[counterName] || 1);
+  const safe = Number.isFinite(current) && current >= 1 ? current : 1;
+  store.counters[counterName] = safe + 1;
+  return safe;
+}
+
 module.exports = {
   dataFilePath,
   readStore,
   writeStore,
+  updateStore,
   resetStore,
   nextId,
+  nextCounter,
 };
