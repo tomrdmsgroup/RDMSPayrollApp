@@ -1,67 +1,98 @@
+// server/src/domain/tokenService.js
+
 const crypto = require('crypto');
+const { updateStore } = require('./persistenceStore');
 
-// Module-scope token store to persist across requests
-const tokenStore = new Map();
-
-function issueToken({ runId = null, periodStart = null, periodEnd = null, action, ttlMinutes = 60 }) {
-  if (!action) throw new Error('action required');
-
-  const tokenId = crypto.randomBytes(12).toString('hex');
-  const expiresAt = new Date(Date.now() + ttlMinutes * 60_000);
-
-  const token = {
-    token_id: tokenId,
-    run_id: runId,
-    period_start: periodStart,
-    period_end: periodEnd,
-    action,
-    expires_at: expiresAt,
-    issued_at: new Date(),
-    status: 'issued',
-    click_count: 0,
-  };
-
-  tokenStore.set(tokenId, token);
-  return token;
+function nowIso() {
+  return new Date().toISOString();
 }
 
-function getToken(tokenId) {
-  if (!tokenId) return null;
-  return tokenStore.get(tokenId) || null;
+function randomToken() {
+  return crypto.randomBytes(24).toString('hex');
 }
 
-function validateToken(tokenOrId, now = new Date()) {
-  const token = typeof tokenOrId === 'string' ? getToken(tokenOrId) : tokenOrId;
-  if (!token) return { valid: false, reason: 'missing' };
-  if (token.status !== 'issued') return { valid: false, reason: `status:${token.status}` };
-  if (token.expires_at <= now) return { valid: false, reason: 'expired' };
-  return { valid: true, token };
+function createToken({
+  run_id,
+  type = 'approval',
+  ttl_seconds = 60 * 60 * 24 * 7, // 7 days default
+  meta = null,
+} = {}) {
+  if (!run_id) return null;
+
+  const token = randomToken();
+  const createdAt = nowIso();
+  const expiresAt = new Date(Date.now() + Number(ttl_seconds) * 1000).toISOString();
+
+  let created = null;
+
+  updateStore((store) => {
+    created = {
+      token,
+      run_id: Number(run_id),
+      type,
+      created_at: createdAt,
+      expires_at: expiresAt,
+      used_at: null,
+      meta,
+    };
+
+    store.tokens.push(created);
+    return store;
+  });
+
+  return created;
 }
 
-function markTokenClicked(tokenOrId) {
-  const token = typeof tokenOrId === 'string' ? getToken(tokenOrId) : tokenOrId;
+function getToken(token) {
   if (!token) return null;
-  token.click_count = (token.click_count || 0) + 1;
-  token.clicked_at = new Date();
-  if (token.status === 'issued') token.status = 'consumed';
-  tokenStore.set(token.token_id, token);
-  return token;
+
+  let found = null;
+
+  updateStore((store) => {
+    found = store.tokens.find((t) => t.token === token) || null;
+    return store;
+  });
+
+  return found;
 }
 
-function listTokens() {
-  return Array.from(tokenStore.values());
+function isExpired(tokenRow) {
+  if (!tokenRow?.expires_at) return false;
+  return Date.now() > new Date(tokenRow.expires_at).getTime();
 }
 
-function clearTokens() {
-  tokenStore.clear();
+function markTokenUsed(token) {
+  if (!token) return null;
+
+  let updated = null;
+
+  updateStore((store) => {
+    const row = store.tokens.find((t) => t.token === token);
+    if (!row) {
+      updated = null;
+      return store;
+    }
+    row.used_at = nowIso();
+    updated = row;
+    return store;
+  });
+
+  return updated;
+}
+
+function validateToken(token, { type = null, allow_used = false } = {}) {
+  const row = getToken(token);
+  if (!row) return { ok: false, reason: 'token_not_found' };
+  if (type && row.type !== type) return { ok: false, reason: 'token_wrong_type' };
+  if (!allow_used && row.used_at) return { ok: false, reason: 'token_used' };
+  if (isExpired(row)) return { ok: false, reason: 'token_expired' };
+  return { ok: true, token: row };
 }
 
 module.exports = {
-  issueToken,
+  createToken,
   getToken,
+  markTokenUsed,
   validateToken,
-  markTokenClicked,
-  listTokens,
-  clearTokens,
-  tokenStore,
+  isExpired,
 };
