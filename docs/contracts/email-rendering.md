@@ -102,3 +102,76 @@ Within each status group:
 - then by `message` ascending
 
 ### Format example (text)
+Audit Findings
+
+ERROR
+
+[RULE_X] Something failed hard
+Details: ...
+
+FAILURE
+
+[RULE_Y] Missing data for employee A
+
+WARNING
+
+[RULE_Z] Rounded minutes detected
+
+SUCCESS
+
+[RULE_OK] All checks passed for tips
+
+
+### Format example (HTML)
+Use a simple structure:
+- headings for each group
+- unordered list for findings
+- optional details in smaller text
+
+No CSS framework required.
+
+---
+
+## Action buttons (HTML)
+
+Buttons should be plain HTML links styled minimally with inline attributes.
+
+Example:
+- APPROVE PAYROLL → `<a href="...">APPROVE PAYROLL</a>`
+- RERUN AUDIT → `<a href="...">RERUN AUDIT</a>`
+
+---
+
+## Storage back onto Outcome
+
+After composing email, store on `outcome.delivery`:
+
+- `subject`
+- `rendered_html`
+- `rendered_text`
+
+After sending successfully (Step 3+):
+- `sent_at`
+- `provider_message_id`
+- outcome status transitions to `delivered`
+
+---
+
+## Delivery modes
+
+- `outcome.delivery.mode = "email"` means the email is the delivery channel.
+- `outcome.delivery.mode = "internal_only"` means no email should be generated or sent.
+
+---
+
+## Non-goals (not in Step 2)
+
+Step 2 does NOT:
+- send email via SMTP/provider
+- schedule email sends
+- implement cron
+- implement UI
+
+Step 2 only locks rendering and storage.
+
+---
