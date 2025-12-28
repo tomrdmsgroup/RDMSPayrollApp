@@ -44,10 +44,24 @@ function resolveAsanaRoute(clientLocationId, vitalsSnapshot) {
 
 /**
  * Treat only failures/errors as actionable findings.
+ * (Kept for compatibility; Asana task gating is controlled by emit_asana_alert.)
  */
 function isFailureFinding(finding) {
   const status = (finding?.status || '').toString().toLowerCase().trim();
   return status === 'failure' || status === 'error';
+}
+
+function normalizeBoolean(value) {
+  if (value === true) return true;
+  if (value === false || value == null) return false;
+
+  if (typeof value === 'number') return value === 1;
+  if (typeof value === 'string') {
+    const v = value.trim().toLowerCase();
+    return v === 'true' || v === '1' || v === 'yes' || v === 'y';
+  }
+
+  return false;
 }
 
 /**
@@ -59,8 +73,12 @@ function buildIdempotencyKey({ runId, projectGid, sectionGid, finding }) {
   return [runId || 'unknown', projectGid, sectionGid || '', code].join('|');
 }
 
+/**
+ * CODEX contract:
+ * Whether a finding should create an Asana task is controlled by emit_asana_alert.
+ */
 function shouldCreateClientAsanaTask(finding) {
-  return isFailureFinding(finding);
+  return normalizeBoolean(finding?.emit_asana_alert);
 }
 
 function buildTaskPayload({ finding, run, route }) {
@@ -83,7 +101,7 @@ function buildTaskPayload({ finding, run, route }) {
  * Create Asana tasks for findings.
  *
  * Rules:
- * - Only findings with status "failure" or "error" are eligible.
+ * - Only findings with emit_asana_alert === true are eligible.
  * - If ANY eligible finding exists and routing is missing -> notify failure.
  * - Idempotency prevents duplicate task creation.
  */
