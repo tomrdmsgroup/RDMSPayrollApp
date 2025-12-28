@@ -43,8 +43,8 @@ If `outcome.delivery.mode !== "email"`, email content MUST NOT be rendered or st
 ## Email subject
 
 Default subject format:
-Payroll Validation Results — {client_location_id} — {period_start} to {period_end}
 
+Payroll Validation Results — {client_location_id} — {period_start} to {period_end}
 
 If `client_location_id` is unavailable, omit it.
 
@@ -71,7 +71,6 @@ Buttons link to:
 ### 3) Results Section
 Heading:
 Audit Findings
-
 
 Then a list of findings:
 - grouped by status in this order:
@@ -110,7 +109,6 @@ Within each status group:
 
 ## Format example (text)
 
-```text
 Audit Findings
 
 ERROR
@@ -126,64 +124,56 @@ WARNING
 SUCCESS
 - [RULE_OK] All checks passed for tips
 
-Format example (HTML)
+---
 
-Headings for each status group
+## Format example (HTML)
 
-Unordered list for findings
+- Headings for each status group
+- Unordered list for findings
+- Optional details rendered in smaller text
+- No CSS framework required
 
-Optional details rendered in smaller text
+---
 
-No CSS framework required
-
-Action buttons (HTML)
+## Action buttons (HTML)
 
 Buttons should be plain HTML links with minimal inline styling.
 
 Examples:
+- APPROVE PAYROLL → <a href="...">APPROVE PAYROLL</a>
+- RERUN AUDIT → <a href="...">RERUN AUDIT</a>
 
-APPROVE PAYROLL → <a href="...">APPROVE PAYROLL</a>
+---
 
-RERUN AUDIT → <a href="...">RERUN AUDIT</a>
+## Storage back onto Outcome
 
-Storage back onto Outcome
-
-After composing the email, store on outcome.delivery:
-
-subject
-
-rendered_html
-
-rendered_text
+After composing the email, store on `outcome.delivery`:
+- `subject`
+- `rendered_html`
+- `rendered_text`
 
 After a successful send (future step):
+- `sent_at`
+- `provider_message_id`
+- outcome status transitions to `delivered`
 
-sent_at
+---
 
-provider_message_id
+## Delivery modes
 
-outcome status transitions to delivered
+- `outcome.delivery.mode = "email"`
+  - Email content is rendered and (later) sent
+- `outcome.delivery.mode = "internal_only"`
+  - No email is rendered or sent
 
-Delivery modes
+---
 
-outcome.delivery.mode = "email"
-
-Email content is rendered and (later) sent
-
-outcome.delivery.mode = "internal_only"
-
-No email is rendered or sent
-
-Non-goals (Step 2 scope)
+## Non-goals (Step 2 scope)
 
 Step 2 does NOT:
-
-send email via SMTP or provider
-
-schedule email sends
-
-implement cron
-
-implement UI
+- send email via SMTP or provider
+- schedule email sends
+- implement cron
+- implement UI
 
 Step 2 only locks rendering behavior and storage contracts.
