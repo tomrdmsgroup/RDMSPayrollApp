@@ -8,22 +8,25 @@ function getAirtableConfig() {
   const baseId = process.env.AIRTABLE_VITALS_BASE;
   const apiKey = process.env.AIRTABLE_VITALS_API_KEY || process.env.AIRTABLE_API_KEY;
 
-  // IMPORTANT:
-  // This must match your Airtable TABLE name EXACTLY.
-  // Your base screenshot strongly suggests the table is "Client Vitals Database".
+  // Must match the Airtable TABLE name exactly
   const tableName = process.env.AIRTABLE_VITALS_TABLE || 'Vitals';
 
-  return { baseId, apiKey, tableName };
+  // Your decision: "Name" is the permanent human-friendly identifier
+  const locationField = process.env.AIRTABLE_VITALS_LOCATION_FIELD || 'Name';
+
+  return { baseId, apiKey, tableName, locationField };
 }
 
 async function fetchVitalsSnapshot(clientLocationId) {
-  const { baseId, apiKey, tableName } = getAirtableConfig();
+  const { baseId, apiKey, tableName, locationField } = getAirtableConfig();
 
-  const filterByFormula = clientLocationId ? `{client_location_id} = '${clientLocationId}'` : undefined;
+  // Filter by the configured location field (ex: Name)
+  const filterByFormula = clientLocationId ? `{${locationField}} = '${String(clientLocationId).replace(/'/g, "\\'")}'` : undefined;
 
   const { records, endpoint } = await fetchAirtableRecords({ baseId, tableName, apiKey, filterByFormula });
 
-  const requiredFields = ['client_location_id'];
+  // Require the configured location field (ex: Name) to exist on returned records
+  const requiredFields = [locationField];
 
   const data = records.map((record) => {
     enforceRequiredFields(record, requiredFields);
@@ -35,16 +38,17 @@ async function fetchVitalsSnapshot(clientLocationId) {
 
   return {
     fetched_at: new Date().toISOString(),
-    client_location_id: clientLocationId || null,
+    location_field: locationField,
+    client_location_id: clientLocationId || null, // keep API param name stable even though it maps to "Name"
     endpoint,
     count: data.length,
     data,
   };
 }
 
-// NEW: Fetch Airtable schema (tables + fields) so we can confirm exact table names.
+// Fetch Airtable schema (tables + fields) so we can confirm exact table/field names.
 async function fetchVitalsSchema() {
-  const { baseId, apiKey } = getAirtableConfig();
+  const { baseId, apiKey, tableName, locationField } = getAirtableConfig();
 
   if (!baseId) throw new Error('airtable_base_required');
   if (!apiKey) throw new Error('airtable_api_key_required');
@@ -76,6 +80,10 @@ async function fetchVitalsSchema() {
   return {
     fetched_at: new Date().toISOString(),
     base_id: baseId,
+    configured: {
+      table_name: tableName,
+      location_field: locationField,
+    },
     table_names: tables.map((t) => t.name),
     tables: tables.map((t) => ({
       id: t.id,
