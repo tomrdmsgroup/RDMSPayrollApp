@@ -9,6 +9,7 @@ const { buildOutcome, saveOutcome, getOutcome, updateOutcome } = require('../dom
 const { composeEmail } = require('../domain/emailComposer');
 const { sendOutcomeEmail } = require('../domain/emailService');
 const { buildArtifacts } = require('../domain/artifactService');
+const { fetchVitalsSnapshot } = require('../providers/vitalsProvider');
 
 function json(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -38,6 +39,18 @@ function parseBody(req) {
 
 async function handleStatus(req, res) {
   return json(res, 200, { ok: true });
+}
+
+// NEW: Read-only Airtable vitals snapshot test endpoint.
+// GET /ops/airtable/vitals?client_location_id=XYZ
+async function handleAirtableVitals(req, res, url) {
+  try {
+    const clientLocationId = url.searchParams.get('client_location_id') || null;
+    const snapshot = await fetchVitalsSnapshot(clientLocationId);
+    return json(res, 200, { ok: true, snapshot });
+  } catch (err) {
+    return json(res, 500, { ok: false, error: String(err && err.message ? err.message : err) });
+  }
 }
 
 async function handleRun(req, res) {
@@ -229,6 +242,7 @@ async function opsRouter(req, res, url) {
   const pathname = url.pathname || '';
 
   if (pathname === '/ops/status' && req.method === 'GET') return handleStatus(req, res);
+  if (pathname === '/ops/airtable/vitals' && req.method === 'GET') return handleAirtableVitals(req, res, url);
   if (pathname === '/ops/run' && req.method === 'POST') return handleRun(req, res);
 
   const rerunMatch = pathname.match(/^\/ops\/rerun\/(\d+)$/);
