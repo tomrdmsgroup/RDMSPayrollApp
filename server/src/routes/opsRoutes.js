@@ -47,6 +47,12 @@ function readQuery(url) {
   return q;
 }
 
+function enforceOpsToken(req, res, url) {
+  // opsAuth handles "OPS_TOKEN unset => allow"
+  const r = requireOpsToken(req, res, url);
+  return !!(r && r.ok);
+}
+
 async function handleStatus(req, res) {
   return json(res, 200, { ok: true });
 }
@@ -54,7 +60,9 @@ async function handleStatus(req, res) {
 /**
  * Airtable introspection
  */
-async function handleAirtableSchema(req, res) {
+async function handleAirtableSchema(req, res, url) {
+  if (!enforceOpsToken(req, res, url)) return;
+
   try {
     const schema = await fetchVitalsSchema();
     return json(res, 200, { ok: true, schema });
@@ -64,11 +72,19 @@ async function handleAirtableSchema(req, res) {
 }
 
 async function handleAirtableVitals(req, res, url) {
+  if (!enforceOpsToken(req, res, url)) return;
+
   const q = readQuery(url);
   const client_location_id = q.client_location_id || null;
 
+  if (!client_location_id) {
+    return json(res, 400, { ok: false, error: 'missing_required_fields' });
+  }
+
   try {
-    const snapshot = await fetchVitalsSnapshot({ client_location_id });
+    // IMPORTANT: vitalsProvider expects a STRING clientLocationId (the Name field),
+    // not an object. Passing an object yields "[object Object]" and breaks Airtable filtering.
+    const snapshot = await fetchVitalsSnapshot(client_location_id);
     return json(res, 200, { ok: true, snapshot });
   } catch (e) {
     return json(res, 500, { ok: false, error: e.message || 'airtable_vitals_failed' });
@@ -83,11 +99,11 @@ function validateYmd(s) {
 }
 
 async function handleToastTimeEntries(req, res, url) {
+  if (!enforceOpsToken(req, res, url)) return;
+
   const q = readQuery(url);
 
   try {
-    requireOpsToken(q.ops_token);
-
     const client_location_id = q.client_location_id || null;
     const period_start = q.period_start || null;
     const period_end = q.period_end || null;
@@ -99,7 +115,7 @@ async function handleToastTimeEntries(req, res, url) {
       return json(res, 400, { ok: false, error: 'toast_invalid_dates' });
     }
 
-    const vitals = await fetchVitalsSnapshot({ client_location_id });
+    const vitals = await fetchVitalsSnapshot(client_location_id);
 
     // vitals.data is an array of Airtable row-like objects
     const record = (vitals && vitals.data && vitals.data[0]) || null;
@@ -111,21 +127,28 @@ async function handleToastTimeEntries(req, res, url) {
       periodEnd: period_end,
     });
 
-    if (!toast.ok) return json(res, 500, { ok: false, error: toast.error, details: toast.details || null, status: toast.status || null, config: toast.config || null });
+    if (!toast.ok) {
+      return json(res, 500, {
+        ok: false,
+        error: toast.error,
+        details: toast.details || null,
+        status: toast.status || null,
+        config: toast.config || null,
+      });
+    }
 
     return json(res, 200, { ok: true, toast });
   } catch (e) {
-    if (String(e.message || '').startsWith('ops_')) return json(res, 401, { ok: false, error: e.message });
     return json(res, 500, { ok: false, error: e.message || 'toast_time_entries_failed' });
   }
 }
 
 async function handleToastAnalyticsJobs(req, res, url) {
+  if (!enforceOpsToken(req, res, url)) return;
+
   const q = readQuery(url);
 
   try {
-    requireOpsToken(q.ops_token);
-
     const client_location_id = q.client_location_id || null;
     const period_start = q.period_start || null;
     const period_end = q.period_end || null;
@@ -137,7 +160,7 @@ async function handleToastAnalyticsJobs(req, res, url) {
       return json(res, 400, { ok: false, error: 'toast_invalid_dates' });
     }
 
-    const vitals = await fetchVitalsSnapshot({ client_location_id });
+    const vitals = await fetchVitalsSnapshot(client_location_id);
     const record = (vitals && vitals.data && vitals.data[0]) || null;
     if (!record) return json(res, 404, { ok: false, error: 'vitals_not_found' });
 
@@ -159,7 +182,6 @@ async function handleToastAnalyticsJobs(req, res, url) {
 
     return json(res, 200, { ok: true, toast });
   } catch (e) {
-    if (String(e.message || '').startsWith('ops_')) return json(res, 401, { ok: false, error: e.message });
     return json(res, 500, { ok: false, error: e.message || 'toast_analytics_failed' });
   }
 }
@@ -167,7 +189,9 @@ async function handleToastAnalyticsJobs(req, res, url) {
 /**
  * Core ops routes
  */
-async function handleRun(req, res) {
+async function handleRun(req, res, url) {
+  if (!enforceOpsToken(req, res, url)) return;
+
   const body = await parseBody(req);
   if (body === null) return json(res, 400, { ok: false, error: 'invalid_json' });
 
@@ -203,7 +227,9 @@ async function handleRun(req, res) {
   return json(res, 200, { ok: true, run, outcome: savedOutcome });
 }
 
-async function handleRerun(req, res, runId) {
+async function handleRerun(req, res, url, runId) {
+  if (!enforceOpsToken(req, res, url)) return;
+
   const id = Number(runId);
   if (!id) return json(res, 400, { ok: false, error: 'invalid_run_id' });
 
@@ -238,7 +264,9 @@ async function handleRerun(req, res, runId) {
   return json(res, 200, { ok: true, previous_run_id: id, run, outcome: savedOutcome });
 }
 
-async function handleInspect(req, res, runId) {
+async function handleInspect(req, res, url, runId) {
+  if (!enforceOpsToken(req, res, url)) return;
+
   const id = Number(runId);
   if (!id) return json(res, 400, { ok: false, error: 'invalid_run_id' });
 
@@ -252,7 +280,9 @@ async function handleInspect(req, res, runId) {
   return json(res, 200, { ok: true, run, outcome });
 }
 
-async function handleRenderEmail(req, res, runId) {
+async function handleRenderEmail(req, res, url, runId) {
+  if (!enforceOpsToken(req, res, url)) return;
+
   const id = Number(runId);
   if (!id) return json(res, 400, { ok: false, error: 'invalid_run_id' });
 
@@ -292,7 +322,9 @@ async function handleRenderEmail(req, res, runId) {
   });
 }
 
-async function handleSendEmail(req, res, runId) {
+async function handleSendEmail(req, res, url, runId) {
+  if (!enforceOpsToken(req, res, url)) return;
+
   const id = Number(runId);
   if (!id) return json(res, 400, { ok: false, error: 'invalid_run_id' });
 
@@ -357,7 +389,7 @@ async function opsRouter(req, res, url) {
   if (pathname === '/ops/status' && req.method === 'GET') return handleStatus(req, res);
 
   // Airtable helpers
-  if (pathname === '/ops/airtable/schema' && req.method === 'GET') return handleAirtableSchema(req, res);
+  if (pathname === '/ops/airtable/schema' && req.method === 'GET') return handleAirtableSchema(req, res, url);
   if (pathname === '/ops/airtable/vitals' && req.method === 'GET') return handleAirtableVitals(req, res, url);
 
   // Toast proof endpoints
@@ -370,19 +402,19 @@ async function opsRouter(req, res, url) {
   if (pathname === '/ops/toast/era/jobs' && req.method === 'GET') return handleToastAnalyticsJobs(req, res, url);
 
   // Core ops flow
-  if (pathname === '/ops/run' && req.method === 'POST') return handleRun(req, res);
+  if (pathname === '/ops/run' && req.method === 'POST') return handleRun(req, res, url);
 
   const rerunMatch = pathname.match(/^\/ops\/rerun\/(\d+)$/);
-  if (rerunMatch && req.method === 'POST') return handleRerun(req, res, rerunMatch[1]);
+  if (rerunMatch && req.method === 'POST') return handleRerun(req, res, url, rerunMatch[1]);
 
   const inspectMatch = pathname.match(/^\/ops\/run\/(\d+)$/);
-  if (inspectMatch && req.method === 'GET') return handleInspect(req, res, inspectMatch[1]);
+  if (inspectMatch && req.method === 'GET') return handleInspect(req, res, url, inspectMatch[1]);
 
   const renderMatch = pathname.match(/^\/ops\/render-email\/(\d+)$/);
-  if (renderMatch && req.method === 'POST') return handleRenderEmail(req, res, renderMatch[1]);
+  if (renderMatch && req.method === 'POST') return handleRenderEmail(req, res, url, renderMatch[1]);
 
   const sendMatch = pathname.match(/^\/ops\/send-email\/(\d+)$/);
-  if (sendMatch && req.method === 'POST') return handleSendEmail(req, res, sendMatch[1]);
+  if (sendMatch && req.method === 'POST') return handleSendEmail(req, res, url, sendMatch[1]);
 
   return json(res, 404, { ok: false, error: 'not_found' });
 }
