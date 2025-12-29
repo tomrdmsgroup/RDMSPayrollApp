@@ -2,7 +2,7 @@
 //
 // Step 3: Read-only Toast proof.
 // - Pull Toast config from an Airtable vitals record.
-// - OAuth login (clientId/clientSecret) to get a bearer token.
+// - OAuth login (clientId/clientSecret/userAccessType) to get a bearer token.
 // - Call labor time entries for a period.
 // - Never return secrets or tokens.
 
@@ -20,7 +20,9 @@ function getToastConfigFromVitals(vitalsRecord) {
     vitalsRecord['Toast API Client Secret - ANALYTICS'] ||
     null;
 
-  // Toast expects Restaurant GUID header (a.k.a. Restaurant External ID header usage in many examples)
+  const userAccessType = vitalsRecord['Toast API User Access Type'] || null;
+
+  // Header scoping (we use GUID value here)
   const restaurantGuid =
     vitalsRecord['Toast API Restaurant GUID'] ||
     vitalsRecord['Toast API Restaurant External ID'] ||
@@ -28,7 +30,7 @@ function getToastConfigFromVitals(vitalsRecord) {
 
   const oauthUrl = vitalsRecord['Toast API OAuth URL'] || null;
 
-  return { hostname, clientId, clientSecret, restaurantGuid, oauthUrl };
+  return { hostname, clientId, clientSecret, userAccessType, restaurantGuid, oauthUrl };
 }
 
 async function safeJson(res) {
@@ -39,15 +41,16 @@ async function safeJson(res) {
   }
 }
 
-async function toastLogin({ oauthUrl, clientId, clientSecret }) {
+async function toastLogin({ oauthUrl, clientId, clientSecret, userAccessType }) {
   if (!oauthUrl) throw new Error('toast_missing:oauth_url');
   if (!clientId) throw new Error('toast_missing:client_id');
   if (!clientSecret) throw new Error('toast_missing:client_secret');
+  if (!userAccessType) throw new Error('toast_missing:user_access_type');
 
   const res = await fetch(oauthUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ clientId, clientSecret }),
+    body: JSON.stringify({ clientId, clientSecret, userAccessType }),
   });
 
   if (!res.ok) {
@@ -77,7 +80,6 @@ async function fetchTimeEntries({ hostname, restaurantGuid, token, periodStart, 
   const base = buildToastBase(hostname);
   const url = new URL('/labor/v1/timeEntries', base);
 
-  // Toast typically expects ISO timestamps; we’ll send inclusive date boundaries.
   const start = new Date(periodStart);
   const end = new Date(periodEnd);
 
@@ -93,7 +95,6 @@ async function fetchTimeEntries({ hostname, restaurantGuid, token, periodStart, 
     headers: {
       Accept: 'application/json',
       Authorization: `Bearer ${token}`,
-      // Toast restaurant scoping header
       'Toast-Restaurant-External-ID': restaurantGuid,
     },
   });
@@ -110,14 +111,14 @@ async function fetchTimeEntries({ hostname, restaurantGuid, token, periodStart, 
   return {
     endpoint: url.toString(),
     count: rows.length,
-    sample: rows.slice(0, 3), // tiny sample to prove shape; remove later if desired
+    sample: rows.slice(0, 3),
   };
 }
 
 async function fetchToastTimeEntriesFromVitals({ vitalsRecord, periodStart, periodEnd }) {
-  const { hostname, clientId, clientSecret, restaurantGuid, oauthUrl } = getToastConfigFromVitals(vitalsRecord);
+  const { hostname, clientId, clientSecret, userAccessType, restaurantGuid, oauthUrl } = getToastConfigFromVitals(vitalsRecord);
 
-  const auth = await toastLogin({ oauthUrl, clientId, clientSecret });
+  const auth = await toastLogin({ oauthUrl, clientId, clientSecret, userAccessType });
 
   const result = await fetchTimeEntries({
     hostname,
@@ -127,9 +128,9 @@ async function fetchToastTimeEntriesFromVitals({ vitalsRecord, periodStart, peri
     periodEnd,
   });
 
-  // IMPORTANT: Do not return token/secrets.
   return {
     hostname: hostname || null,
+    user_access_type: userAccessType,
     restaurant_guid_present: !!restaurantGuid,
     period_start: periodStart,
     period_end: periodEnd,
