@@ -1,24 +1,20 @@
 // server/src/domain/opsAuth.js
-//
-// Simple ops-token guard used by ops routes.
-// Checks the request-supplied token against env OPS_TOKEN.
+function json(res, status, body) {
+  res.writeHead(status, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(body));
+}
 
-function requireOpsToken(providedToken) {
-  const expected = process.env.OPS_TOKEN;
+function requireOpsToken(req, res, url) {
+  const expected = process.env.OPS_TOKEN || "";
+  // If no OPS_TOKEN is configured, allow (dev-friendly).
+  if (!expected) return { ok: true };
 
-  if (!expected || String(expected).trim() === '') {
-    // If OPS_TOKEN isn't set on the server, fail closed (safer).
-    throw new Error('ops_token_not_configured');
+  const token = (url.searchParams.get("ops_token") || "").trim();
+  if (!token || token !== expected) {
+    json(res, 401, { ok: false, error: "unauthorized" });
+    return { ok: false };
   }
-
-  const got = String(providedToken || '').trim();
-  if (!got) throw new Error('ops_token_missing');
-
-  if (got !== String(expected).trim()) {
-    throw new Error('ops_token_invalid');
-  }
-
-  return true;
+  return { ok: true };
 }
 
 module.exports = { requireOpsToken };
