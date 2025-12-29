@@ -14,8 +14,7 @@ function getAirtableConfig() {
 }
 
 function getLocationValue(record, locationField) {
-  // Primary field ("Name") may not appear in record.fields
-  if (record.fields && record.fields[locationField] !== undefined) {
+  if (record.fields && record.fields[locationField] !== undefined && record.fields[locationField] !== null) {
     return record.fields[locationField];
   }
   if (locationField === 'Name' && record.name) {
@@ -38,19 +37,27 @@ async function fetchVitalsSnapshot(clientLocationId) {
     filterByFormula,
   });
 
-  const data = records.map((record) => {
+  const data = [];
+  const skippedIds = [];
+
+  for (const record of records) {
     const locationValue = getLocationValue(record, locationField);
 
-    if (!locationValue) {
-      throw new Error(`airtable_missing_fields:${locationField}`);
+    // If the caller asked for a specific location, missing identifier is a real error.
+    if (clientLocationId) {
+      if (!locationValue) throw new Error(`airtable_missing_fields:${locationField}`);
+      data.push({ id: record.id, [locationField]: locationValue, ...record.fields });
+      continue;
     }
 
-    return {
-      id: record.id,
-      [locationField]: locationValue,
-      ...record.fields,
-    };
-  });
+    // Unfiltered: skip invalid rows so the endpoint is robust.
+    if (!locationValue) {
+      skippedIds.push(record.id);
+      continue;
+    }
+
+    data.push({ id: record.id, [locationField]: locationValue, ...record.fields });
+  }
 
   return {
     fetched_at: new Date().toISOString(),
@@ -58,6 +65,8 @@ async function fetchVitalsSnapshot(clientLocationId) {
     client_location_id: clientLocationId || null,
     endpoint,
     count: data.length,
+    skipped: skippedIds.length,
+    skipped_ids: skippedIds.slice(0, 25), // cap to avoid giant responses
     data,
   };
 }
