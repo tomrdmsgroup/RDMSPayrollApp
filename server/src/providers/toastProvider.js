@@ -1,388 +1,299 @@
 // server/src/providers/toastProvider.js
 //
-// Toast integration (Standard + Analytics) powered by per-location Airtable Vitals.
-// This implementation intentionally mirrors the working Google Sheets approach:
-//
-// - Auth POST includes: { clientId, clientSecret, userAccessType }
-// - Labor calls include restaurant GUID in Toast-Restaurant-External-Id
-// - Also sets Toast-Access-Type + X-Toast-Access-Type to TOAST_MACHINE_CLIENT
-//
-// Exports:
-//   - getToastConfigFromVitals(vitalsRecord)
-//   - fetchToastTimeEntriesFromVitals({ vitalsRecord, periodStart, periodEnd })
-//   - fetchToastEraLaborJobsFromVitals({ vitalsRecord, periodStart, periodEnd })
-//
-// periodStart/periodEnd accepted formats:
-//   - "YYYY-MM-DD"
-//   - ISO-like "YYYY-MM-DDTHH:mm:ss.SSS±HHMM"
+// Step 3: Read-only Toast proof.
+// - Pull Toast config from an Airtable vitals record.
+// - OAuth login (clientId/clientSecret/userAccessType) to get a bearer token.
+// - Call:
+//    (A) STANDARD labor time entries (already working)
+//    (B) ANALYTICS labor jobs via ERA (new)
+// - Never return secrets or tokens.
 
-function requireField(obj, key) {
-  const v = obj?.[key];
-  if (v === undefined || v === null || String(v).trim() === '') {
-    throw new Error(`toast_missing_field:${key}`);
-  }
-  return String(v).trim();
-}
+function getToastConfigFromVitals(vitalsRecord, mode = 'standard') {
+  const hostname = vitalsRecord['Toast API Hostname'] || null;
 
-/**
- * Map Airtable's human-friendly TZ to an IANA timezone for Intl usage.
- * Extend as you encounter more.
- */
-function normalizeIanaTimeZone(tz) {
-  const raw = String(tz || '').trim();
-  if (!raw) return 'America/Los_Angeles';
+  const clientId =
+    mode === 'analytics'
+      ? vitalsRecord['Toast API Client ID - ANALYTICS'] || null
+      : vitalsRecord['Toast API Client ID - STANDARD'] || vitalsRecord['Toast API Client ID - ANALYTICS'] || null;
 
-  const map = {
-    'Pacific - Los Angeles': 'America/Los_Angeles',
-    'Pacific': 'America/Los_Angeles',
-    'Eastern - New York': 'America/New_York',
-    'Eastern': 'America/New_York',
-    'Central': 'America/Chicago',
-    'Mountain': 'America/Denver',
-  };
+  const clientSecret =
+    mode === 'analytics'
+      ? vitalsRecord['Toast API Client Secret - ANALYTICS'] || null
+      : vitalsRecord['Toast API Client Secret - STANDARD'] || vitalsRecord['Toast API Client Secret - ANALYTICS'] || null;
 
-  return map[raw] || raw; // if they already store IANA, just use it
-}
+  const userAccessType = vitalsRecord['Toast API User Access Type'] || null;
 
-/**
- * Compute timezone offset minutes for a given IANA zone at a given Date instant.
- * Returns minutes east of UTC (so Los Angeles in winter => -480).
- */
-function tzOffsetMinutes(date, timeZone) {
-  const dtf = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  });
-
-  const parts = dtf.formatToParts(date).reduce((acc, p) => {
-    if (p.type !== 'literal') acc[p.type] = p.value;
-    return acc;
-  }, {});
-
-  // Interpret the formatted time as if it were UTC, then compare.
-  const asUTC = Date.UTC(
-    Number(parts.year),
-    Number(parts.month) - 1,
-    Number(parts.day),
-    Number(parts.hour),
-    Number(parts.minute),
-    Number(parts.second)
-  );
-
-  return (asUTC - date.getTime()) / 60000;
-}
-
-function formatOffsetHHMM(minutes) {
-  const sign = minutes >= 0 ? '+' : '-';
-  const abs = Math.abs(minutes);
-  const hh = String(Math.floor(abs / 60)).padStart(2, '0');
-  const mm = String(Math.floor(abs % 60)).padStart(2, '0');
-  return `${sign}${hh}${mm}`;
-}
-
-function looksLikeToastIso(s) {
-  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{4}$/.test(String(s || '').trim());
-}
-
-function looksLikeYmd(s) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(String(s || '').trim());
-}
-
-/**
- * Convert YYYY-MM-DD into Toast ISO with ±HHMM offset in a specific TZ.
- * We compute offset using noon UTC of that date to stabilize DST handling.
- */
-function ymdToToastIso(ymd, timeZone, kind) {
-  const [Y, M, D] = ymd.split('-').map(Number);
-  const probe = new Date(Date.UTC(Y, M - 1, D, 12, 0, 0));
-  const offsetMin = tzOffsetMinutes(probe, timeZone);
-  const off = formatOffsetHHMM(offsetMin);
-
-  if (kind === 'start') return `${ymd}T00:00:00.000${off}`;
-  return `${ymd}T23:59:59.999${off}`;
-}
-
-function resolveToastWindow({ periodStart, periodEnd, timeZone }) {
-  const tz = normalizeIanaTimeZone(timeZone);
-
-  const ps = String(periodStart || '').trim();
-  const pe = String(periodEnd || '').trim();
-
-  if (looksLikeToastIso(ps) && looksLikeToastIso(pe)) {
-    return { startIso: ps, endIso: pe, tz };
-  }
-
-  if (looksLikeYmd(ps) && looksLikeYmd(pe)) {
-    return {
-      startIso: ymdToToastIso(ps, tz, 'start'),
-      endIso: ymdToToastIso(pe, tz, 'end'),
-      tz,
-    };
-  }
-
-  throw new Error('toast_invalid_dates');
-}
-
-async function httpJson(url, opts) {
-  const res = await fetch(url, opts);
-  const text = await res.text();
-  let json = null;
-  try {
-    json = text ? JSON.parse(text) : null;
-  } catch (_) {
-    // leave json null
-  }
-  return { ok: res.ok, status: res.status, text, json };
-}
-
-function getToastConfigFromVitals(vitalsRecord) {
-  const fields = vitalsRecord?.fields || vitalsRecord || {};
-
-  return {
-    hostname: requireField(fields, 'Toast API Hostname'),
-    oauthUrl: requireField(fields, 'Toast API OAuth URL'),
-    userAccessType: requireField(fields, 'Toast API User Access Type'),
-
-    restaurantGuid: requireField(fields, 'Toast API Restaurant GUID'),
-    restaurantExternalId: String(fields['Toast API Restaurant External ID'] || '').trim() || null,
-
-    // Some endpoints benefit from locationId query param (j101 style)
-    toastLocationId: String(fields['Toast Location ID'] || '').trim() || null,
-
-    std: {
-      clientId: requireField(fields, 'Toast API Client ID - STANDARD'),
-      clientSecret: requireField(fields, 'Toast API Client Secret - STANDARD'),
-    },
-
-    analytics: {
-      clientId: requireField(fields, 'Toast API Client ID - ANALYTICS'),
-      clientSecret: requireField(fields, 'Toast API Client Secret - ANALYTICS'),
-      scope: String(fields['Toast Analytics Scope'] || '').trim() || null,
-    },
-
-    managementGroupGuid: String(fields['Toast Management Group GUID'] || '').trim() || null,
-    timeZone: String(fields['Time Zone'] || '').trim() || 'America/Los_Angeles',
-  };
-}
-
-async function loginToast({ oauthUrl, clientId, clientSecret, userAccessType }) {
-  const payload = { clientId, clientSecret, userAccessType };
-
-  const { ok, status, json, text } = await httpJson(oauthUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify(payload),
-  });
-
-  if (!ok) {
-    // Avoid logging secrets; surface status + Toast message.
-    throw new Error(`toast_auth_failed:${status}:${text?.slice(0, 220)}`);
-  }
-
-  // Toast responses vary a bit across tenants; support common shapes.
-  const token =
-    json?.token?.accessToken ||
-    json?.accessToken ||
-    json?.access_token ||
+  // Header scoping (your tenant worked using GUID in Toast-Restaurant-External-Id)
+  const restaurantGuid =
+    vitalsRecord['Toast API Restaurant GUID'] ||
+    vitalsRecord['Toast API Restaurant External ID'] ||
     null;
 
-  if (!token) throw new Error('toast_auth_missing_token');
+  const oauthUrl = vitalsRecord['Toast API OAuth URL'] || null;
 
-  return token;
-}
+  // Optional but useful to pass through (not required by these endpoints)
+  const locationId = vitalsRecord['Toast Location ID'] || null;
+  const mgmtGroupGuid = vitalsRecord['Toast Management Group GUID'] || null;
 
-function standardHeaders({ token, restaurantGuid, userAccessType }) {
-  // Mirror your Sheet’s working approach + add some harmless compat aliases.
   return {
-    Authorization: `Bearer ${token}`,
-    Accept: 'application/json',
-
-    'Toast-Access-Type': userAccessType,
-    'X-Toast-Access-Type': userAccessType,
-
-    // ✅ Your tenant: GUID in Toast-Restaurant-External-Id
-    'Toast-Restaurant-External-Id': restaurantGuid,
-
-    // Extra aliases (some clusters/proxies look for these)
-    'restaurant-external-id': restaurantGuid,
-    'Toast-Restaurant-Id': restaurantGuid,
+    hostname,
+    clientId,
+    clientSecret,
+    userAccessType,
+    restaurantGuid,
+    oauthUrl,
+    locationId,
+    mgmtGroupGuid,
   };
 }
 
-async function fetchStandardTimeEntries({ cfg, token, startIso, endIso }) {
-  const base = cfg.hostname.replace(/\/+$/, '');
-  let pageToken = null;
-
-  const all = [];
-  do {
-    const u = new URL(`${base}/labor/v1/timeEntries`);
-    u.searchParams.set('startDate', startIso);
-    u.searchParams.set('endDate', endIso);
-    if (cfg.toastLocationId) u.searchParams.set('locationId', cfg.toastLocationId);
-    if (pageToken) u.searchParams.set('pageToken', pageToken);
-
-    const { ok, status, json, text } = await httpJson(u.toString(), {
-      method: 'GET',
-      headers: standardHeaders({
-        token,
-        restaurantGuid: cfg.restaurantGuid,
-        userAccessType: cfg.userAccessType,
-      }),
-    });
-
-    if (!ok) {
-      // 401 here is almost always: missing/incorrect restaurant header OR wrong credential set.
-      throw new Error(`toast_time_entries_failed:${status}:${text?.slice(0, 260)}`);
-    }
-
-    // Toast sometimes returns array directly or { elements, nextPageToken }
-    const arr = Array.isArray(json) ? json : (json?.elements || []);
-    for (const te of arr) all.push(te);
-
-    pageToken = json?.nextPageToken || json?.pageToken || json?.cursor || null;
-  } while (pageToken);
-
-  return all;
-}
-
-function chooseEraRange(startYmd, endYmd) {
-  const [y1, m1, d1] = startYmd.split('-').map(Number);
-  const [y2, m2, d2] = endYmd.split('-').map(Number);
-  const a = Date.UTC(y1, m1 - 1, d1);
-  const b = Date.UTC(y2, m2 - 1, d2);
-  const days = Math.floor((b - a) / 86400000) + 1;
-  if (days > 31) throw new Error(`toast_era_range_too_long:${days}`);
-  return days <= 7 ? 'week' : 'month';
+async function safeJson(res) {
+  try {
+    return await res.json();
+  } catch (_) {
+    return null;
+  }
 }
 
 function ymdToBusinessDate(ymd) {
-  return Number(ymd.replace(/-/g, '')); // YYYYMMDD
+  // ymd expected: YYYY-MM-DD
+  return Number(String(ymd || '').replaceAll('-', ''));
 }
 
-async function fetchEraLaborJobs({ cfg, token, periodStartYmd, periodEndYmd }) {
-  const base = cfg.hostname.replace(/\/+$/, '');
-  const range = chooseEraRange(periodStartYmd, periodEndYmd);
+function daysInclusive(ymdStart, ymdEnd) {
+  // Interpret as UTC-midnight dates to avoid tz surprises (inputs are already date-only)
+  const [ys, ms, ds] = String(ymdStart).split('-').map((x) => Number(x));
+  const [ye, me, de] = String(ymdEnd).split('-').map((x) => Number(x));
+  const a = Date.UTC(ys, ms - 1, ds);
+  const b = Date.UTC(ye, me - 1, de);
+  const diffDays = Math.floor((b - a) / 86400000);
+  return diffDays + 1;
+}
 
-  // Create the report
-  const createUrl = `${base}/era/v1/labor/${range}`;
-  const body = {
-    startBusinessDate: ymdToBusinessDate(periodStartYmd),
-    endBusinessDate: ymdToBusinessDate(periodEndYmd),
-    restaurantIds: [cfg.restaurantGuid],
-    excludedRestaurantIds: [],
-    groupBy: ['JOB'],
-  };
+function chooseEraRange(ymdStart, ymdEnd) {
+  const d = daysInclusive(ymdStart, ymdEnd);
+  if (d > 31) return { ok: false, error: `toast_analytics_period_too_long:${d}_days` };
+  return { ok: true, range: d <= 7 ? 'week' : 'month', days: d };
+}
 
-  const created = await httpJson(createUrl, {
+async function loginToast({ oauthUrl, clientId, clientSecret, userAccessType }) {
+  const res = await fetch(oauthUrl, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      clientId,
+      clientSecret,
+      userAccessType, // REQUIRED (your earlier error proves this)
+    }),
   });
 
-  if (!created.ok) {
-    throw new Error(`toast_era_create_failed:${created.status}:${created.text?.slice(0, 260)}`);
+  if (!res.ok) {
+    const j = await safeJson(res);
+    return { ok: false, error: 'toast_auth_failed', status: res.status, details: j || null };
   }
 
-  const reportId = created.json;
-  if (!reportId) throw new Error('toast_era_create_missing_report_id');
+  const j = await safeJson(res);
+  const token =
+    (j && j.token && j.token.accessToken) ||
+    (j && j.accessToken) ||
+    (j && j.access_token) ||
+    null;
 
-  // Poll until ready (your Sheet did ~28 tries)
-  const getUrl = `${base}/era/v1/labor/${encodeURIComponent(reportId)}`;
-  for (let i = 0; i < 28; i++) {
-    const r = await httpJson(getUrl, {
-      method: 'GET',
-      headers: { Authorization: `Bearer ${token}` },
-    });
+  if (!token) return { ok: false, error: 'toast_auth_missing_token' };
 
-    if (r.ok) {
-      const arr = Array.isArray(r.json) ? r.json : [];
-      return arr;
-    }
+  return { ok: true, token };
+}
 
-    await new Promise((resolve) => setTimeout(resolve, 850));
+function standardHeaders({ token, restaurantGuid }) {
+  // Matching what worked in your Google Sheet: GUID passed in Toast-Restaurant-External-Id
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: 'application/json',
+    'Toast-Access-Type': 'TOAST_MACHINE_CLIENT',
+    'X-Toast-Access-Type': 'TOAST_MACHINE_CLIENT',
+  };
+
+  if (restaurantGuid) {
+    headers['Toast-Restaurant-External-Id'] = restaurantGuid;
+    // harmless extras
+    headers['restaurant-external-id'] = restaurantGuid;
+    headers['Toast-Restaurant-Id'] = restaurantGuid;
   }
 
-  throw new Error('toast_era_retrieve_timeout');
+  return headers;
+}
+
+function sanitizeToastConfig(cfg) {
+  return {
+    hostname: cfg.hostname || null,
+    oauthUrl: cfg.oauthUrl || null,
+    userAccessType: cfg.userAccessType || null,
+    restaurantGuid: cfg.restaurantGuid || null,
+    locationId: cfg.locationId || null,
+    mgmtGroupGuid: cfg.mgmtGroupGuid || null,
+    hasClientId: !!cfg.clientId,
+    hasClientSecret: !!cfg.clientSecret,
+  };
 }
 
 async function fetchToastTimeEntriesFromVitals({ vitalsRecord, periodStart, periodEnd }) {
-  const cfg = getToastConfigFromVitals(vitalsRecord);
+  const cfg = getToastConfigFromVitals(vitalsRecord, 'standard');
 
-  const { startIso, endIso, tz } = resolveToastWindow({
-    periodStart,
-    periodEnd,
-    timeZone: cfg.timeZone,
-  });
+  if (!cfg.hostname || !cfg.clientId || !cfg.clientSecret || !cfg.userAccessType || !cfg.restaurantGuid || !cfg.oauthUrl) {
+    return {
+      ok: false,
+      error: 'toast_missing_required_config',
+      config: sanitizeToastConfig(cfg),
+    };
+  }
 
-  const token = await loginToast({
+  const auth = await loginToast({
     oauthUrl: cfg.oauthUrl,
-    clientId: cfg.std.clientId,
-    clientSecret: cfg.std.clientSecret,
+    clientId: cfg.clientId,
+    clientSecret: cfg.clientSecret,
     userAccessType: cfg.userAccessType,
   });
 
-  const entries = await fetchStandardTimeEntries({
-    cfg,
-    token,
-    startIso,
-    endIso,
+  if (!auth.ok) {
+    return { ok: false, error: auth.error, status: auth.status || null, details: auth.details || null };
+  }
+
+  // Inputs are date-only; server already validates + converts to ISO window for labor/v1
+  const window = {
+    startIso: `${periodStart}T00:00:00.000-0800`,
+    endIso: `${periodEnd}T23:59:59.999-0800`,
+    timeZone: 'America/Los_Angeles',
+  };
+
+  const url = `https://${cfg.hostname}/labor/v1/timeEntries?startDate=${encodeURIComponent(
+    window.startIso
+  )}&endDate=${encodeURIComponent(window.endIso)}${cfg.locationId ? `&locationId=${encodeURIComponent(cfg.locationId)}` : ''}`;
+
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: standardHeaders({ token: auth.token, restaurantGuid: cfg.restaurantGuid }),
   });
+
+  if (!res.ok) {
+    const j = await safeJson(res);
+    return { ok: false, error: 'toast_time_entries_failed', status: res.status, details: j || null };
+  }
+
+  const data = await safeJson(res);
 
   return {
     ok: true,
     mode: 'standard_time_entries',
-    window: { startIso, endIso, timeZone: tz },
+    window,
     identifiers: {
       restaurantGuid: cfg.restaurantGuid,
-      toastLocationId: cfg.toastLocationId || null,
+      locationId: cfg.locationId || null,
     },
-    count: entries.length,
-    sample: entries.slice(0, 3),
-    data: entries,
+    data,
   };
 }
 
-async function fetchToastEraLaborJobsFromVitals({ vitalsRecord, periodStart, periodEnd }) {
-  const cfg = getToastConfigFromVitals(vitalsRecord);
+async function fetchToastAnalyticsJobsFromVitals({ vitalsRecord, periodStart, periodEnd }) {
+  const cfg = getToastConfigFromVitals(vitalsRecord, 'analytics');
 
-  // ERA wants YYYY-MM-DD business dates (not ISO timestamps)
-  const ps = String(periodStart || '').trim();
-  const pe = String(periodEnd || '').trim();
-  if (!looksLikeYmd(ps) || !looksLikeYmd(pe)) throw new Error('toast_era_requires_ymd');
+  if (!cfg.hostname || !cfg.clientId || !cfg.clientSecret || !cfg.userAccessType || !cfg.restaurantGuid || !cfg.oauthUrl) {
+    return {
+      ok: false,
+      error: 'toast_missing_required_config',
+      config: sanitizeToastConfig(cfg),
+    };
+  }
 
-  const token = await loginToast({
+  const rangePick = chooseEraRange(periodStart, periodEnd);
+  if (!rangePick.ok) return { ok: false, error: rangePick.error };
+
+  const auth = await loginToast({
     oauthUrl: cfg.oauthUrl,
-    clientId: cfg.analytics.clientId,
-    clientSecret: cfg.analytics.clientSecret,
+    clientId: cfg.clientId,
+    clientSecret: cfg.clientSecret,
     userAccessType: cfg.userAccessType,
   });
 
-  const rows = await fetchEraLaborJobs({
-    cfg,
-    token,
-    periodStartYmd: ps,
-    periodEndYmd: pe,
+  if (!auth.ok) {
+    return { ok: false, error: auth.error, status: auth.status || null, details: auth.details || null };
+  }
+
+  const startBD = ymdToBusinessDate(periodStart);
+  const endBD = ymdToBusinessDate(periodEnd);
+
+  const createUrl = `https://${cfg.hostname}/era/v1/labor/${rangePick.range}`;
+
+  const createBody = {
+    startBusinessDate: startBD,
+    endBusinessDate: endBD,
+    restaurantIds: [cfg.restaurantGuid], // GUIDs go in BODY for ERA
+    excludedRestaurantIds: [],
+    groupBy: ['JOB'],
+  };
+
+  const createRes = await fetch(createUrl, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${auth.token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(createBody),
   });
 
-  return {
-    ok: true,
-    mode: 'analytics_era_jobs',
-    window: { startYmd: ps, endYmd: pe },
-    identifiers: { restaurantGuid: cfg.restaurantGuid },
-    count: rows.length,
-    sample: rows.slice(0, 3),
-    data: rows,
-  };
+  if (!createRes.ok) {
+    const j = await safeJson(createRes);
+    return { ok: false, error: 'toast_analytics_create_failed', status: createRes.status, details: j || null };
+  }
+
+  const createJson = await safeJson(createRes);
+
+  // Toast returns a guid string (sometimes JSON string, sometimes object). Normalize.
+  const reportGuid =
+    (typeof createJson === 'string' && createJson) ||
+    (createJson && createJson.guid) ||
+    (createJson && createJson.id) ||
+    null;
+
+  if (!reportGuid) {
+    return { ok: false, error: 'toast_analytics_create_missing_guid', details: createJson || null };
+  }
+
+  const getUrl = `https://${cfg.hostname}/era/v1/labor/${encodeURIComponent(reportGuid)}`;
+
+  // Poll until ready (Toast often returns non-200 until finished)
+  for (let i = 0; i < 28; i++) {
+    const r = await fetch(getUrl, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${auth.token}`, Accept: 'application/json' },
+    });
+
+    if (r.ok) {
+      const rows = await safeJson(r);
+      return {
+        ok: true,
+        mode: 'analytics_jobs',
+        window: {
+          startBusinessDate: startBD,
+          endBusinessDate: endBD,
+          days: rangePick.days,
+          range: rangePick.range,
+        },
+        identifiers: {
+          restaurantGuid: cfg.restaurantGuid,
+        },
+        data: Array.isArray(rows) ? rows : rows || null,
+      };
+    }
+
+    // Backoff-ish wait
+    await new Promise((resolve) => setTimeout(resolve, 850));
+  }
+
+  return { ok: false, error: 'toast_analytics_timeout', details: { reportGuid } };
 }
 
 module.exports = {
-  getToastConfigFromVitals,
   fetchToastTimeEntriesFromVitals,
-  fetchToastEraLaborJobsFromVitals,
+  fetchToastAnalyticsJobsFromVitals,
 };
