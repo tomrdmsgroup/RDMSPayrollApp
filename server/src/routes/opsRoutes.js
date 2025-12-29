@@ -9,6 +9,7 @@ const { buildOutcome, saveOutcome, getOutcome, updateOutcome } = require('../dom
 const { composeEmail } = require('../domain/emailComposer');
 const { sendOutcomeEmail } = require('../domain/emailService');
 const { buildArtifacts } = require('../domain/artifactService');
+
 const { fetchVitalsSnapshot, fetchVitalsSchema } = require('../providers/vitalsProvider');
 
 function json(res, status, body) {
@@ -37,29 +38,24 @@ function parseBody(req) {
   });
 }
 
+// Single admin gate for sensitive ops endpoints.
+// - If OPS_TOKEN is set (Render), token is required.
+// - If OPS_TOKEN is not set (local dev), do not block.
+function requireOpsToken(req, res, url) {
+  const expected = process.env.OPS_TOKEN;
+  if (!expected) return true;
+
+  const fromQuery = url.searchParams?.get('ops_token') || null;
+  const fromHeader = req.headers?.['x-ops-token'] || null;
+
+  if (fromQuery === expected || fromHeader === expected) return true;
+
+  json(res, 401, { ok: false, error: 'ops_token_required' });
+  return false;
+}
+
 async function handleStatus(req, res) {
   return json(res, 200, { ok: true });
-}
-
-// GET /ops/airtable/vitals?client_location_id=XYZ
-async function handleAirtableVitals(req, res, url) {
-  try {
-    const clientLocationId = url.searchParams.get('client_location_id') || null;
-    const snapshot = await fetchVitalsSnapshot(clientLocationId);
-    return json(res, 200, { ok: true, snapshot });
-  } catch (err) {
-    return json(res, 500, { ok: false, error: String(err && err.message ? err.message : err) });
-  }
-}
-
-// NEW: GET /ops/airtable/schema  (lists base tables/fields so we can match provider config)
-async function handleAirtableSchema(req, res) {
-  try {
-    const schema = await fetchVitalsSchema();
-    return json(res, 200, { ok: true, schema });
-  } catch (err) {
-    return json(res, 500, { ok: false, error: String(err && err.message ? err.message : err) });
-  }
 }
 
 async function handleRun(req, res) {
@@ -83,13 +79,10 @@ async function handleRun(req, res) {
   appendEvent(run, 'ops_run_created', {});
   updateRun(run.id, { events: run.events });
 
-  // Step 6: validations still placeholders; artifacts now attach to outcome.
   const findings = [];
   const artifacts = buildArtifacts({ run, policySnapshot: policy_snapshot || {} });
 
-  // KEY: buildOutcome now seeds outcome.delivery from policy_snapshot.delivery if present.
   const outcome = buildOutcome(run, findings, artifacts, policy_snapshot);
-
   const savedOutcome = saveOutcome(run.id, outcome);
 
   appendEvent(run, 'ops_outcome_saved', { outcome_status: savedOutcome.status });
@@ -123,9 +116,7 @@ async function handleRerun(req, res, runId) {
   const findings = [];
   const artifacts = buildArtifacts({ run, policySnapshot: policySnapshot || {} });
 
-  // KEY: buildOutcome now seeds outcome.delivery from policy_snapshot.delivery if present.
   const outcome = buildOutcome(run, findings, artifacts, policySnapshot);
-
   const savedOutcome = saveOutcome(run.id, outcome);
 
   appendEvent(run, 'ops_rerun_outcome_saved', {});
@@ -144,7 +135,6 @@ async function handleInspect(req, res, runId) {
   if (!run) return json(res, 404, { ok: false, error: 'run_not_found' });
 
   const outcome = getOutcome(id);
-
   return json(res, 200, { ok: true, run, outcome });
 }
 
@@ -156,9 +146,7 @@ async function handleRenderEmail(req, res, runId) {
   const run = (store.runs || []).find((r) => Number(r.id) === id);
   const outcome = getOutcome(id);
 
-  if (!run || !outcome) {
-    return json(res, 404, { ok: false, error: 'run_or_outcome_not_found' });
-  }
+  if (!run || !outcome) return json(res, 404, { ok: false, error: 'run_or_outcome_not_found' });
 
   if (!outcome.delivery || outcome.delivery.mode !== 'email') {
     return json(res, 400, { ok: false, error: 'delivery_mode_not_email' });
@@ -196,15 +184,12 @@ async function handleSendEmail(req, res, runId) {
   const run = (store.runs || []).find((r) => Number(r.id) === id);
   let outcome = getOutcome(id);
 
-  if (!run || !outcome) {
-    return json(res, 404, { ok: false, error: 'run_or_outcome_not_found' });
-  }
+  if (!run || !outcome) return json(res, 404, { ok: false, error: 'run_or_outcome_not_found' });
 
   if (!outcome.delivery || outcome.delivery.mode !== 'email') {
     return json(res, 400, { ok: false, error: 'delivery_mode_not_email' });
   }
 
-  // Ensure rendered content exists; render first if needed.
   if (!outcome.delivery.subject || (!outcome.delivery.rendered_text && !outcome.delivery.rendered_html)) {
     const rendered = composeEmail(outcome, run);
     outcome = updateOutcome(id, {
@@ -243,6 +228,24 @@ async function handleSendEmail(req, res, runId) {
   return json(res, 500, { ok: false, error: sendResult.error || 'email_send_failed' });
 }
 
+// --- Airtable (token-gated) ---
+async function handleAirtableVitals(req, res, url) {
+  const clientLocationId = url.searchParams.get('client_location_id') || null;
+  const snapshot = await fetchVitalsSnapshot(clientLocationId);
+  return json(res, 200, { ok: true, snapshot });
+}
+
+async function handleAirtableSchema(req, res) {
+  const schema = await fetchVitalsSchema();
+  return json(res, 200, { ok: true, schema });
+}
+
+// --- Toast (token-gated) ---
+// For Step 3, we’re going to implement this in the next step (toastProvider rewrite).
+async function handleToastTimeEntries(req, res) {
+  return json(res, 501, { ok: false, error: 'toast_not_implemented_yet' });
+}
+
 /**
  * opsRouter(req, res, url)
  * url is a WHATWG URL instance from the server entrypoint.
@@ -250,9 +253,17 @@ async function handleSendEmail(req, res, runId) {
 async function opsRouter(req, res, url) {
   const pathname = url.pathname || '';
 
+  // public
   if (pathname === '/ops/status' && req.method === 'GET') return handleStatus(req, res);
-  if (pathname === '/ops/airtable/vitals' && req.method === 'GET') return handleAirtableVitals(req, res, url);
-  if (pathname === '/ops/airtable/schema' && req.method === 'GET') return handleAirtableSchema(req, res);
+
+  // token gate only for sensitive namespaces
+  const isSensitive = pathname.startsWith('/ops/airtable/') || pathname.startsWith('/ops/toast/');
+  if (isSensitive) {
+    const ok = requireOpsToken(req, res, url);
+    if (!ok) return;
+  }
+
+  // existing ops
   if (pathname === '/ops/run' && req.method === 'POST') return handleRun(req, res);
 
   const rerunMatch = pathname.match(/^\/ops\/rerun\/(\d+)$/);
@@ -266,6 +277,13 @@ async function opsRouter(req, res, url) {
 
   const sendMatch = pathname.match(/^\/ops\/send-email\/(\d+)$/);
   if (sendMatch && req.method === 'POST') return handleSendEmail(req, res, sendMatch[1]);
+
+  // Airtable
+  if (pathname === '/ops/airtable/vitals' && req.method === 'GET') return handleAirtableVitals(req, res, url);
+  if (pathname === '/ops/airtable/schema' && req.method === 'GET') return handleAirtableSchema(req, res);
+
+  // Toast (stub for now)
+  if (pathname === '/ops/toast/time-entries' && req.method === 'GET') return handleToastTimeEntries(req, res);
 
   return json(res, 404, { ok: false, error: 'not_found' });
 }
