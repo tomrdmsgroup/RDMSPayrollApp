@@ -4,12 +4,42 @@
 // - Pull Toast config from an Airtable vitals record.
 // - OAuth login (clientId/clientSecret/userAccessType) to get a bearer token.
 // - Call:
-//    (A) STANDARD labor time entries (already working)
-//    (B) ANALYTICS labor jobs via ERA (new)
+//    (A) STANDARD labor time entries
+//    (B) ANALYTICS labor jobs via ERA
 // - Never return secrets or tokens.
 
+function normalizeHostname(raw) {
+  if (!raw) return null;
+
+  const s = String(raw).trim();
+  if (!s) return null;
+
+  // If Airtable contains "https://ws-api.toasttab.com" (or http://...), strip scheme/path.
+  if (s.startsWith('http://') || s.startsWith('https://')) {
+    try {
+      const u = new URL(s);
+      return u.host || null;
+    } catch (_) {
+      // fall through
+    }
+  }
+
+  // If it contains a path without scheme (rare), try parsing as URL with https base.
+  if (s.includes('/') && !s.includes('://')) {
+    try {
+      const u = new URL(`https://${s}`);
+      return u.host || null;
+    } catch (_) {
+      // fall through
+    }
+  }
+
+  // Otherwise assume it's already a hostname.
+  return s;
+}
+
 function getToastConfigFromVitals(vitalsRecord, mode = 'standard') {
-  const hostname = vitalsRecord['Toast API Hostname'] || null;
+  const hostname = normalizeHostname(vitalsRecord['Toast API Hostname'] || null);
 
   const clientId =
     mode === 'analytics'
@@ -29,9 +59,10 @@ function getToastConfigFromVitals(vitalsRecord, mode = 'standard') {
     vitalsRecord['Toast API Restaurant External ID'] ||
     null;
 
+  // This should already be a full URL (often includes https://...).
   const oauthUrl = vitalsRecord['Toast API OAuth URL'] || null;
 
-  // Optional but useful to pass through (not required by these endpoints)
+  // Optional passthrough
   const locationId = vitalsRecord['Toast Location ID'] || null;
   const mgmtGroupGuid = vitalsRecord['Toast Management Group GUID'] || null;
 
@@ -56,12 +87,10 @@ async function safeJson(res) {
 }
 
 function ymdToBusinessDate(ymd) {
-  // ymd expected: YYYY-MM-DD
   return Number(String(ymd || '').replaceAll('-', ''));
 }
 
 function daysInclusive(ymdStart, ymdEnd) {
-  // Interpret as UTC-midnight dates to avoid tz surprises (inputs are already date-only)
   const [ys, ms, ds] = String(ymdStart).split('-').map((x) => Number(x));
   const [ye, me, de] = String(ymdEnd).split('-').map((x) => Number(x));
   const a = Date.UTC(ys, ms - 1, ds);
@@ -83,7 +112,7 @@ async function loginToast({ oauthUrl, clientId, clientSecret, userAccessType }) 
     body: JSON.stringify({
       clientId,
       clientSecret,
-      userAccessType, // REQUIRED (your earlier error proves this)
+      userAccessType,
     }),
   });
 
@@ -105,7 +134,6 @@ async function loginToast({ oauthUrl, clientId, clientSecret, userAccessType }) 
 }
 
 function standardHeaders({ token, restaurantGuid }) {
-  // Matching what worked in your Google Sheet: GUID passed in Toast-Restaurant-External-Id
   const headers = {
     Authorization: `Bearer ${token}`,
     Accept: 'application/json',
@@ -115,7 +143,6 @@ function standardHeaders({ token, restaurantGuid }) {
 
   if (restaurantGuid) {
     headers['Toast-Restaurant-External-Id'] = restaurantGuid;
-    // harmless extras
     headers['restaurant-external-id'] = restaurantGuid;
     headers['Toast-Restaurant-Id'] = restaurantGuid;
   }
@@ -158,18 +185,19 @@ async function fetchToastTimeEntriesFromVitals({ vitalsRecord, periodStart, peri
     return { ok: false, error: auth.error, status: auth.status || null, details: auth.details || null };
   }
 
-  // Inputs are date-only; server already validates + converts to ISO window for labor/v1
   const window = {
     startIso: `${periodStart}T00:00:00.000-0800`,
     endIso: `${periodEnd}T23:59:59.999-0800`,
     timeZone: 'America/Los_Angeles',
   };
 
-  const url = `https://${cfg.hostname}/labor/v1/timeEntries?startDate=${encodeURIComponent(
-    window.startIso
-  )}&endDate=${encodeURIComponent(window.endIso)}${cfg.locationId ? `&locationId=${encodeURIComponent(cfg.locationId)}` : ''}`;
+  const base = `https://${cfg.hostname}`;
+  const url = new URL('/labor/v1/timeEntries', base);
+  url.searchParams.set('startDate', window.startIso);
+  url.searchParams.set('endDate', window.endIso);
+  if (cfg.locationId) url.searchParams.set('locationId', cfg.locationId);
 
-  const res = await fetch(url, {
+  const res = await fetch(url.toString(), {
     method: 'GET',
     headers: standardHeaders({ token: auth.token, restaurantGuid: cfg.restaurantGuid }),
   });
@@ -221,17 +249,18 @@ async function fetchToastAnalyticsJobsFromVitals({ vitalsRecord, periodStart, pe
   const startBD = ymdToBusinessDate(periodStart);
   const endBD = ymdToBusinessDate(periodEnd);
 
-  const createUrl = `https://${cfg.hostname}/era/v1/labor/${rangePick.range}`;
+  const base = `https://${cfg.hostname}`;
+  const createUrl = new URL(`/era/v1/labor/${rangePick.range}`, base);
 
   const createBody = {
     startBusinessDate: startBD,
     endBusinessDate: endBD,
-    restaurantIds: [cfg.restaurantGuid], // GUIDs go in BODY for ERA
+    restaurantIds: [cfg.restaurantGuid],
     excludedRestaurantIds: [],
     groupBy: ['JOB'],
   };
 
-  const createRes = await fetch(createUrl, {
+  const createRes = await fetch(createUrl.toString(), {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${auth.token}`,
@@ -248,7 +277,6 @@ async function fetchToastAnalyticsJobsFromVitals({ vitalsRecord, periodStart, pe
 
   const createJson = await safeJson(createRes);
 
-  // Toast returns a guid string (sometimes JSON string, sometimes object). Normalize.
   const reportGuid =
     (typeof createJson === 'string' && createJson) ||
     (createJson && createJson.guid) ||
@@ -259,11 +287,10 @@ async function fetchToastAnalyticsJobsFromVitals({ vitalsRecord, periodStart, pe
     return { ok: false, error: 'toast_analytics_create_missing_guid', details: createJson || null };
   }
 
-  const getUrl = `https://${cfg.hostname}/era/v1/labor/${encodeURIComponent(reportGuid)}`;
+  const getUrl = new URL(`/era/v1/labor/${encodeURIComponent(reportGuid)}`, base);
 
-  // Poll until ready (Toast often returns non-200 until finished)
   for (let i = 0; i < 28; i++) {
-    const r = await fetch(getUrl, {
+    const r = await fetch(getUrl.toString(), {
       method: 'GET',
       headers: { Authorization: `Bearer ${auth.token}`, Accept: 'application/json' },
     });
@@ -286,7 +313,6 @@ async function fetchToastAnalyticsJobsFromVitals({ vitalsRecord, periodStart, pe
       };
     }
 
-    // Backoff-ish wait
     await new Promise((resolve) => setTimeout(resolve, 850));
   }
 
