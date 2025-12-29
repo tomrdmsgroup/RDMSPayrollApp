@@ -10,8 +10,10 @@ const { composeEmail } = require('../domain/emailComposer');
 const { sendOutcomeEmail } = require('../domain/emailService');
 const { buildArtifacts } = require('../domain/artifactService');
 
-const { fetchVitalsSnapshot, fetchVitalsSchema } = require('../providers/vitalsProvider');
-const { fetchToastTimeEntriesFromVitals } = require('../providers/toastProvider');
+const { requireOpsToken } = require('../domain/opsAuth');
+const { fetchVitalsSchema, fetchVitalsSnapshot } = require('../providers/vitalsProvider');
+
+const { fetchToastTimeEntriesFromVitals, fetchToastAnalyticsJobsFromVitals } = require('../providers/toastProvider');
 
 function json(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -39,23 +41,132 @@ function parseBody(req) {
   });
 }
 
-function requireOpsToken(req, res, url) {
-  const expected = process.env.OPS_TOKEN;
-  if (!expected) return true;
-
-  const fromQuery = url.searchParams?.get('ops_token') || null;
-  const fromHeader = req.headers?.['x-ops-token'] || null;
-
-  if (fromQuery === expected || fromHeader === expected) return true;
-
-  json(res, 401, { ok: false, error: 'ops_token_required' });
-  return false;
+function readQuery(url) {
+  const q = {};
+  for (const [k, v] of url.searchParams.entries()) q[k] = v;
+  return q;
 }
 
 async function handleStatus(req, res) {
   return json(res, 200, { ok: true });
 }
 
+/**
+ * Airtable introspection
+ */
+async function handleAirtableSchema(req, res) {
+  try {
+    const schema = await fetchVitalsSchema();
+    return json(res, 200, { ok: true, schema });
+  } catch (e) {
+    return json(res, 500, { ok: false, error: e.message || 'airtable_schema_failed' });
+  }
+}
+
+async function handleAirtableVitals(req, res, url) {
+  const q = readQuery(url);
+  const client_location_id = q.client_location_id || null;
+
+  try {
+    const snapshot = await fetchVitalsSnapshot({ client_location_id });
+    return json(res, 200, { ok: true, snapshot });
+  } catch (e) {
+    return json(res, 500, { ok: false, error: e.message || 'airtable_vitals_failed' });
+  }
+}
+
+/**
+ * Toast proof endpoints
+ */
+function validateYmd(s) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
+}
+
+async function handleToastTimeEntries(req, res, url) {
+  const q = readQuery(url);
+
+  try {
+    requireOpsToken(q.ops_token);
+
+    const client_location_id = q.client_location_id || null;
+    const period_start = q.period_start || null;
+    const period_end = q.period_end || null;
+
+    if (!client_location_id || !period_start || !period_end) {
+      return json(res, 400, { ok: false, error: 'missing_required_fields' });
+    }
+    if (!validateYmd(period_start) || !validateYmd(period_end)) {
+      return json(res, 400, { ok: false, error: 'toast_invalid_dates' });
+    }
+
+    const vitals = await fetchVitalsSnapshot({ client_location_id });
+
+    // vitals.data is an array of Airtable row-like objects
+    const record = (vitals && vitals.data && vitals.data[0]) || null;
+    if (!record) return json(res, 404, { ok: false, error: 'vitals_not_found' });
+
+    const toast = await fetchToastTimeEntriesFromVitals({
+      vitalsRecord: record,
+      periodStart: period_start,
+      periodEnd: period_end,
+    });
+
+    if (!toast.ok) return json(res, 500, { ok: false, error: toast.error, details: toast.details || null, status: toast.status || null, config: toast.config || null });
+
+    return json(res, 200, { ok: true, toast });
+  } catch (e) {
+    if (String(e.message || '').startsWith('ops_')) return json(res, 401, { ok: false, error: e.message });
+    return json(res, 500, { ok: false, error: e.message || 'toast_time_entries_failed' });
+  }
+}
+
+async function handleToastAnalyticsJobs(req, res, url) {
+  const q = readQuery(url);
+
+  try {
+    requireOpsToken(q.ops_token);
+
+    const client_location_id = q.client_location_id || null;
+    const period_start = q.period_start || null;
+    const period_end = q.period_end || null;
+
+    if (!client_location_id || !period_start || !period_end) {
+      return json(res, 400, { ok: false, error: 'missing_required_fields' });
+    }
+    if (!validateYmd(period_start) || !validateYmd(period_end)) {
+      return json(res, 400, { ok: false, error: 'toast_invalid_dates' });
+    }
+
+    const vitals = await fetchVitalsSnapshot({ client_location_id });
+    const record = (vitals && vitals.data && vitals.data[0]) || null;
+    if (!record) return json(res, 404, { ok: false, error: 'vitals_not_found' });
+
+    const toast = await fetchToastAnalyticsJobsFromVitals({
+      vitalsRecord: record,
+      periodStart: period_start,
+      periodEnd: period_end,
+    });
+
+    if (!toast.ok) {
+      return json(res, 500, {
+        ok: false,
+        error: toast.error,
+        details: toast.details || null,
+        status: toast.status || null,
+        config: toast.config || null,
+      });
+    }
+
+    return json(res, 200, { ok: true, toast });
+  } catch (e) {
+    if (String(e.message || '').startsWith('ops_')) return json(res, 401, { ok: false, error: e.message });
+    return json(res, 500, { ok: false, error: e.message || 'toast_analytics_failed' });
+  }
+}
+
+/**
+ * Core ops routes
+ */
 async function handleRun(req, res) {
   const body = await parseBody(req);
   if (body === null) return json(res, 400, { ok: false, error: 'invalid_json' });
@@ -77,10 +188,13 @@ async function handleRun(req, res) {
   appendEvent(run, 'ops_run_created', {});
   updateRun(run.id, { events: run.events });
 
+  // Step 6: validations still placeholders; artifacts now attach to outcome.
   const findings = [];
   const artifacts = buildArtifacts({ run, policySnapshot: policy_snapshot || {} });
 
+  // buildOutcome seeds delivery from policy_snapshot.delivery if present.
   const outcome = buildOutcome(run, findings, artifacts, policy_snapshot);
+
   const savedOutcome = saveOutcome(run.id, outcome);
 
   appendEvent(run, 'ops_outcome_saved', { outcome_status: savedOutcome.status });
@@ -115,6 +229,7 @@ async function handleRerun(req, res, runId) {
   const artifacts = buildArtifacts({ run, policySnapshot: policySnapshot || {} });
 
   const outcome = buildOutcome(run, findings, artifacts, policySnapshot);
+
   const savedOutcome = saveOutcome(run.id, outcome);
 
   appendEvent(run, 'ops_rerun_outcome_saved', {});
@@ -133,6 +248,7 @@ async function handleInspect(req, res, runId) {
   if (!run) return json(res, 404, { ok: false, error: 'run_not_found' });
 
   const outcome = getOutcome(id);
+
   return json(res, 200, { ok: true, run, outcome });
 }
 
@@ -144,7 +260,9 @@ async function handleRenderEmail(req, res, runId) {
   const run = (store.runs || []).find((r) => Number(r.id) === id);
   const outcome = getOutcome(id);
 
-  if (!run || !outcome) return json(res, 404, { ok: false, error: 'run_or_outcome_not_found' });
+  if (!run || !outcome) {
+    return json(res, 404, { ok: false, error: 'run_or_outcome_not_found' });
+  }
 
   if (!outcome.delivery || outcome.delivery.mode !== 'email') {
     return json(res, 400, { ok: false, error: 'delivery_mode_not_email' });
@@ -182,12 +300,15 @@ async function handleSendEmail(req, res, runId) {
   const run = (store.runs || []).find((r) => Number(r.id) === id);
   let outcome = getOutcome(id);
 
-  if (!run || !outcome) return json(res, 404, { ok: false, error: 'run_or_outcome_not_found' });
+  if (!run || !outcome) {
+    return json(res, 404, { ok: false, error: 'run_or_outcome_not_found' });
+  }
 
   if (!outcome.delivery || outcome.delivery.mode !== 'email') {
     return json(res, 400, { ok: false, error: 'delivery_mode_not_email' });
   }
 
+  // Ensure rendered content exists; render first if needed.
   if (!outcome.delivery.subject || (!outcome.delivery.rendered_text && !outcome.delivery.rendered_html)) {
     const rendered = composeEmail(outcome, run);
     outcome = updateOutcome(id, {
@@ -226,45 +347,6 @@ async function handleSendEmail(req, res, runId) {
   return json(res, 500, { ok: false, error: sendResult.error || 'email_send_failed' });
 }
 
-// --- Airtable (token-gated) ---
-async function handleAirtableVitals(req, res, url) {
-  const clientLocationId = url.searchParams.get('client_location_id') || null;
-  const snapshot = await fetchVitalsSnapshot(clientLocationId);
-  return json(res, 200, { ok: true, snapshot });
-}
-
-async function handleAirtableSchema(req, res) {
-  const schema = await fetchVitalsSchema();
-  return json(res, 200, { ok: true, schema });
-}
-
-// --- Toast (token-gated) ---
-async function handleToastTimeEntries(req, res, url) {
-  const clientLocationId = url.searchParams.get('client_location_id') || null;
-  const periodStart = url.searchParams.get('period_start') || null;
-  const periodEnd = url.searchParams.get('period_end') || null;
-
-  if (!clientLocationId || !periodStart || !periodEnd) {
-    return json(res, 400, { ok: false, error: 'missing_required_fields:client_location_id,period_start,period_end' });
-  }
-
-  const vitals = await fetchVitalsSnapshot(clientLocationId);
-  const record = Array.isArray(vitals?.data) && vitals.data.length ? vitals.data[0] : null;
-
-  if (!record) return json(res, 404, { ok: false, error: 'vitals_not_found' });
-
-  try {
-    const toast = await fetchToastTimeEntriesFromVitals({
-      vitalsRecord: record,
-      periodStart,
-      periodEnd,
-    });
-    return json(res, 200, { ok: true, toast });
-  } catch (e) {
-    return json(res, 500, { ok: false, error: String(e?.message || e) });
-  }
-}
-
 /**
  * opsRouter(req, res, url)
  * url is a WHATWG URL instance from the server entrypoint.
@@ -272,17 +354,22 @@ async function handleToastTimeEntries(req, res, url) {
 async function opsRouter(req, res, url) {
   const pathname = url.pathname || '';
 
-  // public
   if (pathname === '/ops/status' && req.method === 'GET') return handleStatus(req, res);
 
-  // token gate only for sensitive namespaces
-  const isSensitive = pathname.startsWith('/ops/airtable/') || pathname.startsWith('/ops/toast/');
-  if (isSensitive) {
-    const ok = requireOpsToken(req, res, url);
-    if (!ok) return;
-  }
+  // Airtable helpers
+  if (pathname === '/ops/airtable/schema' && req.method === 'GET') return handleAirtableSchema(req, res);
+  if (pathname === '/ops/airtable/vitals' && req.method === 'GET') return handleAirtableVitals(req, res, url);
 
-  // existing ops
+  // Toast proof endpoints
+  if (pathname === '/ops/toast/time-entries' && req.method === 'GET') return handleToastTimeEntries(req, res, url);
+
+  // Preferred naming
+  if (pathname === '/ops/toast/analytics/jobs' && req.method === 'GET') return handleToastAnalyticsJobs(req, res, url);
+
+  // Back-compat alias (optional)
+  if (pathname === '/ops/toast/era/jobs' && req.method === 'GET') return handleToastAnalyticsJobs(req, res, url);
+
+  // Core ops flow
   if (pathname === '/ops/run' && req.method === 'POST') return handleRun(req, res);
 
   const rerunMatch = pathname.match(/^\/ops\/rerun\/(\d+)$/);
@@ -296,13 +383,6 @@ async function opsRouter(req, res, url) {
 
   const sendMatch = pathname.match(/^\/ops\/send-email\/(\d+)$/);
   if (sendMatch && req.method === 'POST') return handleSendEmail(req, res, sendMatch[1]);
-
-  // Airtable
-  if (pathname === '/ops/airtable/vitals' && req.method === 'GET') return handleAirtableVitals(req, res, url);
-  if (pathname === '/ops/airtable/schema' && req.method === 'GET') return handleAirtableSchema(req, res);
-
-  // Toast
-  if (pathname === '/ops/toast/time-entries' && req.method === 'GET') return handleToastTimeEntries(req, res, url);
 
   return json(res, 404, { ok: false, error: 'not_found' });
 }
