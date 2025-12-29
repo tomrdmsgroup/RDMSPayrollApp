@@ -11,6 +11,7 @@ const { sendOutcomeEmail } = require('../domain/emailService');
 const { buildArtifacts } = require('../domain/artifactService');
 
 const { fetchVitalsSnapshot, fetchVitalsSchema } = require('../providers/vitalsProvider');
+const { fetchToastTimeEntriesFromVitals } = require('../providers/toastProvider');
 
 function json(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -38,9 +39,6 @@ function parseBody(req) {
   });
 }
 
-// Single admin gate for sensitive ops endpoints.
-// - If OPS_TOKEN is set (Render), token is required.
-// - If OPS_TOKEN is not set (local dev), do not block.
 function requireOpsToken(req, res, url) {
   const expected = process.env.OPS_TOKEN;
   if (!expected) return true;
@@ -241,9 +239,30 @@ async function handleAirtableSchema(req, res) {
 }
 
 // --- Toast (token-gated) ---
-// For Step 3, we’re going to implement this in the next step (toastProvider rewrite).
-async function handleToastTimeEntries(req, res) {
-  return json(res, 501, { ok: false, error: 'toast_not_implemented_yet' });
+async function handleToastTimeEntries(req, res, url) {
+  const clientLocationId = url.searchParams.get('client_location_id') || null;
+  const periodStart = url.searchParams.get('period_start') || null;
+  const periodEnd = url.searchParams.get('period_end') || null;
+
+  if (!clientLocationId || !periodStart || !periodEnd) {
+    return json(res, 400, { ok: false, error: 'missing_required_fields:client_location_id,period_start,period_end' });
+  }
+
+  const vitals = await fetchVitalsSnapshot(clientLocationId);
+  const record = Array.isArray(vitals?.data) && vitals.data.length ? vitals.data[0] : null;
+
+  if (!record) return json(res, 404, { ok: false, error: 'vitals_not_found' });
+
+  try {
+    const toast = await fetchToastTimeEntriesFromVitals({
+      vitalsRecord: record,
+      periodStart,
+      periodEnd,
+    });
+    return json(res, 200, { ok: true, toast });
+  } catch (e) {
+    return json(res, 500, { ok: false, error: String(e?.message || e) });
+  }
 }
 
 /**
@@ -282,8 +301,8 @@ async function opsRouter(req, res, url) {
   if (pathname === '/ops/airtable/vitals' && req.method === 'GET') return handleAirtableVitals(req, res, url);
   if (pathname === '/ops/airtable/schema' && req.method === 'GET') return handleAirtableSchema(req, res);
 
-  // Toast (stub for now)
-  if (pathname === '/ops/toast/time-entries' && req.method === 'GET') return handleToastTimeEntries(req, res);
+  // Toast
+  if (pathname === '/ops/toast/time-entries' && req.method === 'GET') return handleToastTimeEntries(req, res, url);
 
   return json(res, 404, { ok: false, error: 'not_found' });
 }
