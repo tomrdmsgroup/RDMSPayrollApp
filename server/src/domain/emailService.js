@@ -1,132 +1,102 @@
-// server/src/domain/emailService.js
+const https = require('https');
 
-const nodemailer = require('nodemailer');
-const { notifyFailure } = require('./failureService');
-const { updateOutcome } = require('./outcomeService');
+function postmarkRequest({ token, payload }) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify(payload);
 
-function nowIso() {
-  return new Date().toISOString();
-}
+    const req = https.request(
+      {
+        method: 'POST',
+        hostname: 'api.postmarkapp.com',
+        path: '/email',
+        headers: {
+          'X-Postmark-Server-Token': token,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Content-Length': Buffer.byteLength(body),
+        },
+        timeout: 20000,
+      },
+      (res) => {
+        let data = '';
+        res.on('data', (chunk) => (data += chunk));
+        res.on('end', () => {
+          let parsed = null;
+          try {
+            parsed = data ? JSON.parse(data) : null;
+          } catch (_) {
+            parsed = { raw: data };
+          }
 
-function getSmtpConfig() {
-  const {
-    SMTP_HOST,
-    SMTP_PORT,
-    SMTP_USER,
-    SMTP_PASS,
-    SMTP_FROM,
-  } = process.env;
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            return resolve(parsed);
+          }
 
-  if (!SMTP_HOST || !SMTP_PORT || !SMTP_USER || !SMTP_PASS) {
-    return null;
-  }
+          const err = new Error(
+            `postmark_error status=${res.statusCode} body=${data || ''}`
+          );
+          err.statusCode = res.statusCode;
+          err.response = parsed;
+          return reject(err);
+        });
+      }
+    );
 
-  return {
-    host: SMTP_HOST,
-    port: Number(SMTP_PORT),
-    secure: Number(SMTP_PORT) === 465,
-    auth: {
-      user: SMTP_USER,
-      pass: SMTP_PASS,
-    },
-    defaultFrom: SMTP_FROM || null,
-  };
-}
+    req.on('timeout', () => {
+      req.destroy(new Error('postmark_timeout'));
+    });
 
-function createTransport(config) {
-  return nodemailer.createTransport({
-    host: config.host,
-    port: config.port,
-    secure: config.secure,
-    auth: config.auth,
+    req.on('error', (err) => reject(err));
+
+    req.write(body);
+    req.end();
   });
 }
 
-/**
- * sendOutcomeEmail({ run, outcome })
- *
- * Preconditions:
- * - outcome.delivery.mode === "email"
- * - rendered subject + body exist
- * - recipients exist
- *
- * Idempotent:
- * - if sent_at already set, does nothing
- */
-async function sendOutcomeEmail({ run, outcome }) {
-  if (!run || !outcome) return { ok: false, error: 'missing_run_or_outcome' };
+async function sendOutcomeEmail(outcome) {
+  const token = process.env.POSTMARK_SERVER_TOKEN;
+  if (!token) return { ok: false, error: 'missing_postmark_server_token' };
 
-  const delivery = outcome.delivery || {};
+  const delivery = outcome?.delivery || {};
+  const to = Array.isArray(delivery.recipients) ? delivery.recipients : [];
+  const from = (delivery.from || '').trim();
+  const replyTo = (delivery.reply_to || '').trim();
 
-  if (delivery.mode !== 'email') {
-    return { ok: false, error: 'delivery_mode_not_email' };
-  }
+  if (!to.length) return { ok: false, error: 'missing_recipients' };
+  if (!from) return { ok: false, error: 'missing_from' };
 
-  if (delivery.sent_at) {
-    return { ok: true, already_sent: true };
-  }
+  const subject = delivery.subject || 'Payroll validation';
+  const html = delivery.rendered_html || '';
+  const text = delivery.rendered_text || '';
 
-  const recipients = Array.isArray(delivery.recipients) ? delivery.recipients : [];
-  if (recipients.length === 0) {
-    return { ok: false, error: 'missing_recipients' };
-  }
-
-  if (!delivery.subject || (!delivery.rendered_text && !delivery.rendered_html)) {
-    return { ok: false, error: 'missing_rendered_content' };
-  }
-
-  const smtp = getSmtpConfig();
-  if (!smtp) {
-    notifyFailure({
-      step: 'email_send',
-      error: 'smtp_not_configured',
-      runId: run.id,
-    });
-    return { ok: false, error: 'smtp_not_configured' };
-  }
-
-  const transporter = createTransport(smtp);
-
-  const mail = {
-    from: delivery.from || smtp.defaultFrom,
-    to: recipients.join(','),
-    replyTo: delivery.reply_to || undefined,
-    subject: delivery.subject,
-    text: delivery.rendered_text || undefined,
-    html: delivery.rendered_html || undefined,
+  const payload = {
+    From: from,
+    To: to.join(','),
+    Subject: subject,
+    HtmlBody: html || undefined,
+    TextBody: text || undefined,
+    ReplyTo: replyTo || undefined,
   };
 
-  if (!mail.from) {
-    return { ok: false, error: 'missing_from_address' };
-  }
+  // Optional: allow a specific Message Stream name via env if you want it later.
+  // Example: POSTMARK_MESSAGE_STREAM="Payroll Validation"
+  const stream = (process.env.POSTMARK_MESSAGE_STREAM || '').trim();
+  if (stream) payload.MessageStream = stream;
 
   try {
-    const info = await transporter.sendMail(mail);
+    const result = await postmarkRequest({ token, payload });
 
-    const updated = updateOutcome(run.id, {
-      status: 'delivered',
-      delivery: {
-        sent_at: nowIso(),
-        provider_message_id: info?.messageId || null,
-      },
-    });
+    const providerMessageId =
+      result?.MessageID || result?.MessageId || result?.messageID || null;
 
-    return {
-      ok: true,
-      message_id: info?.messageId || null,
-      outcome: updated,
-    };
+    return { ok: true, providerMessageId, result };
   } catch (err) {
-    notifyFailure({
-      step: 'email_send',
-      error: err?.message || 'email_send_failed',
-      runId: run.id,
-    });
-
-    return { ok: false, error: 'email_send_failed' };
+    return {
+      ok: false,
+      error: 'postmark_send_failed',
+      detail: err?.message || String(err),
+    };
   }
 }
 
-module.exports = {
-  sendOutcomeEmail,
-};
+module.exports = { sendOutcomeEmail };
