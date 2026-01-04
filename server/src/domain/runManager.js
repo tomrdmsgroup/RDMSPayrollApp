@@ -1,6 +1,6 @@
 // server/src/domain/runManager.js
 
-const { updateStore, nextCounter } = require('./persistenceStore');
+const { query } = require('./db');
 
 function nowIso() {
   return new Date().toISOString();
@@ -22,80 +22,58 @@ function appendEvent(run, type, data) {
   return run;
 }
 
-function createRun({
-  client_location_id,
-  period_start,
-  period_end,
-  payload = null,
-  status = 'created',
-}) {
-  let createdRun = null;
+async function createRun({ client_location_id, period_start, period_end, payload = null, status = 'created' }) {
+  const run = {
+    id: null,
+    client_location_id,
+    period_start,
+    period_end,
+    status,
+    created_at: nowIso(),
+    updated_at: nowIso(),
+    payload,
+    events: [],
+  };
 
-  updateStore((store) => {
-    const id = nextCounter(store, 'run_id');
+  const r = await query(
+    `INSERT INTO ops_runs (run, created_at, updated_at) VALUES ($1::jsonb, NOW(), NOW()) RETURNING id`,
+    [run],
+  );
 
-    createdRun = {
-      id,
-      client_location_id,
-      period_start,
-      period_end,
-      status,
-      created_at: nowIso(),
-      updated_at: nowIso(),
-      payload,
-      events: [],
-    };
+  run.id = Number(r.rows[0].id);
 
-    store.runs.push(createdRun);
-    return store;
-  });
+  // Update stored JSON to include the assigned id.
+  await query(`UPDATE ops_runs SET run = $1::jsonb, updated_at = NOW() WHERE id = $2`, [run, run.id]);
 
-  return createdRun;
+  return run;
 }
 
-function getRunById(runId) {
+async function getRunById(runId) {
   const id = Number(runId);
-  let found = null;
+  if (!id) return null;
 
-  updateStore((store) => {
-    found = store.runs.find((r) => Number(r.id) === id) || null;
-    return store;
-  });
-
-  return found;
+  const r = await query(`SELECT run FROM ops_runs WHERE id = $1`, [id]);
+  if (!r.rows.length) return null;
+  return r.rows[0].run || null;
 }
 
-function updateRun(runId, patch) {
+async function updateRun(runId, patch) {
   const id = Number(runId);
-  let updated = null;
+  if (!id) return null;
 
-  updateStore((store) => {
-    const run = store.runs.find((r) => Number(r.id) === id);
-    if (!run) {
-      updated = null;
-      return store;
-    }
+  const existing = await getRunById(id);
+  if (!existing) return null;
 
-    Object.assign(run, patch || {});
-    run.updated_at = nowIso();
+  const next = { ...existing, ...(patch || {}), updated_at: nowIso() };
 
-    updated = run;
-    return store;
-  });
-
-  return updated;
+  await query(`UPDATE ops_runs SET run = $1::jsonb, updated_at = NOW() WHERE id = $2`, [next, id]);
+  return next;
 }
 
-function listRuns({ limit = 50 } = {}) {
-  let rows = [];
-
-  updateStore((store) => {
-    const sorted = [...store.runs].sort((a, b) => Number(b.id) - Number(a.id));
-    rows = sorted.slice(0, Number(limit) || 50);
-    return store;
-  });
-
-  return rows;
+async function listRuns({ limit = 50 } = {}) {
+  const lim = Number(limit) || 50;
+  const r = await query(`SELECT run FROM ops_runs ORDER BY id DESC LIMIT $1`, [lim]);
+  return r.rows.map((row) => row.run).filter(Boolean);
 }
 
 module.exports = {
