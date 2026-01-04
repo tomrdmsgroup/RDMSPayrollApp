@@ -20,6 +20,10 @@ function json(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
+function nowIso() {
+  return new Date().toISOString();
+}
+
 function parseBody(req) {
   return new Promise((resolve) => {
     let data = '';
@@ -224,6 +228,10 @@ async function handleRun(req, res, url) {
   appendEvent(run, 'ops_outcome_saved', { outcome_status: savedOutcome.status });
   updateRun(run.id, { status: 'completed', events: run.events });
 
+  // Keep the returned run object consistent with the store update.
+  run.status = 'completed';
+  run.updated_at = nowIso();
+
   return json(res, 200, { ok: true, run, outcome: savedOutcome });
 }
 
@@ -260,6 +268,9 @@ async function handleRerun(req, res, url, runId) {
 
   appendEvent(run, 'ops_rerun_outcome_saved', {});
   updateRun(run.id, { status: 'completed', events: run.events });
+
+  run.status = 'completed';
+  run.updated_at = nowIso();
 
   return json(res, 200, { ok: true, previous_run_id: id, run, outcome: savedOutcome });
 }
@@ -340,6 +351,13 @@ async function handleSendEmail(req, res, url, runId) {
     return json(res, 400, { ok: false, error: 'delivery_mode_not_email' });
   }
 
+  // Idempotency: if we already sent, do nothing.
+  if (outcome.delivery.sent_at) {
+    appendEvent(run, 'ops_email_already_sent', { provider_message_id: outcome.delivery.provider_message_id || null });
+    updateRun(run.id, { events: run.events });
+    return json(res, 200, { ok: true, already_sent: true, message_id: outcome.delivery.provider_message_id || null });
+  }
+
   // Ensure rendered content exists; render first if needed.
   if (!outcome.delivery.subject || (!outcome.delivery.rendered_text && !outcome.delivery.rendered_html)) {
     const rendered = composeEmail(outcome, run);
@@ -355,28 +373,53 @@ async function handleSendEmail(req, res, url, runId) {
     updateRun(run.id, { events: run.events });
   }
 
-  const sendResult = await sendOutcomeEmail({ run, outcome });
+  // Ensure a From exists. For now, allow an env fallback so delivery can work before Airtable wiring.
+  const fallbackFrom = (process.env.EMAIL_FROM_FALLBACK || process.env.SMTP_FROM || '').trim();
+  const from = (outcome.delivery.from || '').trim() || fallbackFrom;
+  const replyTo = (outcome.delivery.reply_to || '').trim() || from;
 
-  if (sendResult.ok) {
-    appendEvent(run, sendResult.already_sent ? 'ops_email_already_sent' : 'ops_email_sent', {
-      message_id: sendResult.message_id || null,
-    });
+  if (!from) {
+    appendEvent(run, 'ops_email_send_failed', { error: 'missing_from' });
     updateRun(run.id, { events: run.events });
+    return json(res, 500, { ok: false, error: 'missing_from' });
+  }
 
-    const latest = getOutcome(id);
+  outcome = updateOutcome(id, {
+    delivery: {
+      from,
+      reply_to: replyTo,
+    },
+  });
+
+  const sendResult = await sendOutcomeEmail(outcome);
+
+  if (sendResult && sendResult.ok) {
+    const providerMessageId = sendResult.providerMessageId || null;
+
+    const updated = updateOutcome(id, {
+      status: 'delivered',
+      delivery: {
+        sent_at: nowIso(),
+        provider_message_id: providerMessageId,
+      },
+    });
+
+    appendEvent(run, 'ops_email_sent', { provider_message_id: providerMessageId });
+    updateRun(run.id, { events: run.events });
 
     return json(res, 200, {
       ok: true,
-      already_sent: !!sendResult.already_sent,
-      message_id: sendResult.message_id || null,
-      outcome: latest,
+      already_sent: false,
+      message_id: providerMessageId,
+      outcome: updated,
     });
   }
 
-  appendEvent(run, 'ops_email_send_failed', { error: sendResult.error });
+  const detail = sendResult?.detail || sendResult?.error || 'email_send_failed';
+  appendEvent(run, 'ops_email_send_failed', { error: detail });
   updateRun(run.id, { events: run.events });
 
-  return json(res, 500, { ok: false, error: sendResult.error || 'email_send_failed' });
+  return json(res, 500, { ok: false, error: detail });
 }
 
 /**
