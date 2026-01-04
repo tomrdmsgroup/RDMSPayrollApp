@@ -188,6 +188,13 @@ async function handleSendEmail(req, res, url, runId) {
 
   if (!outcome.delivery.subject) {
     const rendered = composeEmail(outcome, run);
+
+  if (!rendered.ok) {
+    appendEvent(run, 'ops_email_render_failed', { error: rendered.error });
+    await updateRun(run.id, { events: run.events });
+    return json(res, 400, { ok: false, error: rendered.error });
+  }
+
     outcome = await updateOutcome(runId, {
       delivery: {
         subject: rendered.subject,
