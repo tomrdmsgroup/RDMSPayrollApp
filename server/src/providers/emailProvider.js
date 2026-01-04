@@ -1,53 +1,93 @@
-let nodemailer;
+/**
+ * Postmark email provider (API based, no SMTP).
+ *
+ * Env:
+ *   POSTMARK_SERVER_TOKEN (required)
+ *   POSTMARK_MESSAGE_STREAM (optional) default: "outbound"
+ */
 
-function loadNodemailer() {
-  if (nodemailer) return nodemailer;
+function requireEnv(name) {
+  const v = process.env[name];
+  if (!v) throw new Error(`missing_env_${name}`);
+  return v;
+}
+
+function normalizeTo(to) {
+  if (Array.isArray(to)) return to.filter(Boolean).join(', ');
+  return String(to || '').trim();
+}
+
+function normalizeString(v) {
+  return v === null || v === undefined ? '' : String(v);
+}
+
+async function postmarkSendEmail({
+  from,
+  to,
+  subject,
+  html,
+  text,
+  replyTo,
+}) {
+  const token = requireEnv('POSTMARK_SERVER_TOKEN');
+  const messageStream = process.env.POSTMARK_MESSAGE_STREAM || 'outbound';
+
+  const payload = {
+    From: normalizeString(from),
+    To: normalizeTo(to),
+    Subject: normalizeString(subject),
+    MessageStream: messageStream,
+  };
+
+  if (replyTo) payload.ReplyTo = normalizeString(replyTo);
+  if (html) payload.HtmlBody = normalizeString(html);
+  if (text) payload.TextBody = normalizeString(text);
+
+  if (!payload.From) throw new Error('missing_from');
+  if (!payload.To) throw new Error('missing_to');
+  if (!payload.Subject) throw new Error('missing_subject');
+  if (!payload.HtmlBody && !payload.TextBody) throw new Error('missing_body');
+
+  const controller = new AbortController();
+  const timeoutMs = 15000;
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
-    // Prefer real nodemailer when installed
-    // eslint-disable-next-line global-require
-    nodemailer = require('nodemailer');
-  } catch (err) {
-    // Fallback stub keeps the module usable in restricted environments
-    nodemailer = require('../vendor/nodemailerFallback');
-  }
-  return nodemailer;
-}
+    const resp = await fetch('https://api.postmarkapp.com/email', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Postmark-Server-Token': token,
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
 
-let cachedTransporter = null;
+    const data = await resp.json().catch(() => ({}));
 
-function buildTransporter() {
-  if (cachedTransporter) return cachedTransporter;
-  const host = process.env.SMTP_HOST;
-  const port = process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : 587;
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
-  if (!host) throw new Error('smtp_host_missing');
-  const nm = loadNodemailer();
-  cachedTransporter = nm.createTransport({
-    host,
-    port,
-    secure: process.env.SMTP_SECURE === 'true',
-    auth: user && pass ? { user, pass } : undefined,
-  }, {
-    from: process.env.SMTP_FROM || user,
-  });
-  return cachedTransporter;
-}
+    if (!resp.ok) {
+      const message = data && (data.Message || data.ErrorCode)
+        ? `postmark_error_${normalizeString(data.ErrorCode)}_${normalizeString(data.Message)}`
+        : `postmark_http_${resp.status}`;
+      const err = new Error(message);
+      err.details = data;
+      throw err;
+    }
 
-async function sendEmail({ to, subject, body, attachments = [] }) {
-  if (!to || !subject || !body) throw new Error('email_fields_missing');
-  const transporter = buildTransporter();
-  try {
-    const info = await transporter.sendMail({ to, subject, text: body, attachments });
-    return { id: info && info.messageId ? info.messageId : `email-${Date.now()}`, to, subject };
-  } catch (err) {
-    throw new Error(`email_send_failed:${err.message}`);
+    return {
+      ok: true,
+      provider: 'postmark',
+      provider_message_id: data.MessageID || null,
+    };
+  } finally {
+    clearTimeout(t);
   }
 }
 
-function resetTransporter() {
-  cachedTransporter = null;
-  nodemailer = null;
+async function sendEmail({ from, to, subject, html, text, replyTo }) {
+  return postmarkSendEmail({ from, to, subject, html, text, replyTo });
 }
 
-module.exports = { sendEmail, buildTransporter, loadNodemailer, resetTransporter };
+module.exports = {
+  sendEmail,
+};
