@@ -5,6 +5,7 @@ const { router } = require('./api/routes');
 const { env } = require('./config');
 const { seedAdmin } = require('./domain/authService');
 const { opsRouter } = require('./routes/opsRoutes');
+const { initDb } = require('./domain/db');
 
 seedAdmin(
   env.APP_DEFAULT_ADMIN_EMAIL || 'admin@example.com',
@@ -16,15 +17,24 @@ function toUrl(req) {
   return new URL(req.url || '/', `http://${host}`);
 }
 
-const server = http.createServer((req, res) => {
-  const url = toUrl(req);
+async function main() {
+  await initDb();
 
-  if ((url.pathname || '').startsWith('/ops')) {
-    return opsRouter(req, res, url);
-  }
+  const server = http.createServer((req, res) => {
+    const url = toUrl(req);
 
-  return router(req, res);
+    if ((url.pathname || '').startsWith('/ops')) {
+      return opsRouter(req, res, url);
+    }
+
+    return router(req, res);
+  });
+
+  const port = env.PORT || 3000;
+  server.listen(port, () => console.log(`Server listening on ${port}`));
+}
+
+main().catch((err) => {
+  console.error('fatal_startup_error', err);
+  process.exit(1);
 });
-
-const port = env.PORT || 3000;
-server.listen(port, () => console.log(`Server listening on ${port}`));
