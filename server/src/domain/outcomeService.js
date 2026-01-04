@@ -1,6 +1,6 @@
 // server/src/domain/outcomeService.js
 
-const { updateStore } = require('./persistenceStore');
+const { query } = require('./db');
 const { createToken } = require('./tokenService');
 
 function nowIso() {
@@ -12,26 +12,16 @@ function normalizeFindings(findings) {
 }
 
 function computeFindingCounts(findings) {
-  const counts = {
-    total: 0,
-    success: 0,
-    warning: 0,
-    failure: 0,
-    error: 0,
-  };
-
+  const counts = { total: 0, success: 0, warning: 0, failure: 0, error: 0 };
   for (const f of findings) {
     const status = (f?.status || '').toLowerCase();
     if (!status) continue;
-
     counts.total += 1;
-
     if (status === 'success') counts.success += 1;
     else if (status === 'warning') counts.warning += 1;
     else if (status === 'failure') counts.failure += 1;
     else if (status === 'error') counts.error += 1;
   }
-
   return counts;
 }
 
@@ -40,16 +30,6 @@ function needsAttentionFromFindings(findings) {
     const s = (f?.status || '').toLowerCase();
     return s === 'failure' || s === 'error';
   });
-}
-
-function buildActions(runId) {
-  const approve = createToken({ run_id: runId, type: 'approval' });
-  const rerun = createToken({ run_id: runId, type: 'rerun' });
-
-  return {
-    approve_url: approve ? `/approve?token=${approve.token}` : null,
-    rerun_url: rerun ? `/rerun?token=${rerun.token}` : null,
-  };
 }
 
 function defaultDelivery() {
@@ -70,7 +50,6 @@ function defaultDelivery() {
 function normalizeDelivery(delivery) {
   const base = defaultDelivery();
   if (!delivery || typeof delivery !== 'object') return base;
-
   return {
     ...base,
     ...delivery,
@@ -78,122 +57,102 @@ function normalizeDelivery(delivery) {
   };
 }
 
-function buildOutcome(run, findings, artifacts, policySnapshot) {
+async function buildActions(runId) {
+  const approve = await createToken({ run_id: runId, type: 'approval' });
+  const rerun = await createToken({ run_id: runId, type: 'rerun' });
+
+  return {
+    approve_url: approve ? `/approve?token=${approve.token}` : null,
+    rerun_url: rerun ? `/rerun?token=${rerun.token}` : null,
+  };
+}
+
+async function buildOutcome(run, findings, artifacts, policySnapshot) {
   const safeFindings = normalizeFindings(findings);
   const counts = computeFindingCounts(safeFindings);
   const needsAttention = needsAttentionFromFindings(safeFindings);
 
-  const deliveryFromPolicy = policySnapshot && typeof policySnapshot === 'object' ? policySnapshot.delivery : null;
+  const deliveryFromPolicy =
+    policySnapshot && typeof policySnapshot === 'object' ? policySnapshot.delivery : null;
 
   return {
     run_id: Number(run.id),
     version: 1,
     created_at: nowIso(),
     updated_at: nowIso(),
-
     status: needsAttention ? 'needs_attention' : 'completed',
-
     summary: {
       finding_counts: counts,
       needs_attention: needsAttention,
     },
-
     findings: safeFindings,
     artifacts: Array.isArray(artifacts) ? artifacts : [],
-
-    // KEY CHANGE: seed outcome.delivery from policy snapshot (merge into defaults)
     delivery: normalizeDelivery(deliveryFromPolicy),
-
-    actions: buildActions(run.id),
-
+    actions: await buildActions(run.id),
     policy_snapshot: policySnapshot || null,
   };
 }
 
-function saveOutcome(runId, outcome) {
-  let saved = null;
+async function saveOutcome(runId, outcome) {
+  const id = Number(runId);
+  if (!id) return null;
 
-  updateStore((store) => {
-    if (!Array.isArray(store.outcomes)) store.outcomes = [];
+  const normalized = { ...(outcome || {}), run_id: id };
+  normalized.delivery = normalizeDelivery(normalized.delivery);
 
-    const idx = store.outcomes.findIndex((o) => o.run_id === runId);
-    const now = nowIso();
+  await query(
+    `
+    INSERT INTO ops_outcomes (run_id, outcome, created_at, updated_at)
+    VALUES ($1, $2::jsonb, NOW(), NOW())
+    ON CONFLICT (run_id)
+    DO UPDATE SET outcome = EXCLUDED.outcome, updated_at = NOW()
+    `,
+    [id, normalized],
+  );
 
-    if (idx >= 0) {
-      const merged = {
-        ...store.outcomes[idx],
-        ...outcome,
-        run_id: runId,
-        updated_at: now,
-      };
-
-      merged.delivery = normalizeDelivery(merged.delivery);
-
-      store.outcomes[idx] = merged;
-      saved = merged;
-      return store;
-    }
-
-    const inserted = {
-      ...outcome,
-      run_id: runId,
-      created_at: now,
-      updated_at: now,
-    };
-
-    inserted.delivery = normalizeDelivery(inserted.delivery);
-
-    store.outcomes.push(inserted);
-    saved = inserted;
-    return store;
-  });
-
-  return saved;
+  return getOutcome(id);
 }
 
-function getOutcome(runId) {
-  let found = null;
+async function getOutcome(runId) {
+  const id = Number(runId);
+  if (!id) return null;
 
-  updateStore((store) => {
-    found = store.outcomes.find((o) => o.run_id === runId) || null;
-    return store;
-  });
+  const r = await query(`SELECT outcome FROM ops_outcomes WHERE run_id = $1`, [id]);
+  if (!r.rows.length) return null;
 
+  const found = r.rows[0].outcome || null;
   if (found) found.delivery = normalizeDelivery(found.delivery);
   return found;
 }
 
-function updateOutcome(runId, patch) {
-  let updated = null;
+async function updateOutcome(runId, patch) {
+  const id = Number(runId);
+  if (!id) return null;
 
-  updateStore((store) => {
-    const idx = store.outcomes.findIndex((o) => o.run_id === runId);
-    if (idx < 0) return store;
+  const existing = await getOutcome(id);
+  if (!existing) return null;
 
-    const existing = store.outcomes[idx];
-    const now = nowIso();
+  let status = existing.status;
+  if (patch?.delivery?.sent_at) status = 'delivered';
 
-    let status = existing.status;
-    if (patch.delivery?.sent_at) status = 'delivered';
+  const merged = {
+    ...existing,
+    ...patch,
+    status,
+    updated_at: nowIso(),
+  };
 
-    const merged = {
-      ...existing,
-      ...patch,
-      status,
-      updated_at: now,
-    };
-
-    merged.delivery = normalizeDelivery({
-      ...existing.delivery,
-      ...patch.delivery,
-    });
-
-    store.outcomes[idx] = merged;
-    updated = merged;
-    return store;
+  merged.delivery = normalizeDelivery({
+    ...existing.delivery,
+    ...(patch?.delivery || {}),
   });
 
-  return updated;
+  await query(`UPDATE ops_outcomes SET outcome = $1::jsonb, updated_at = NOW() WHERE run_id = $2`, [
+    merged,
+    id,
+  ]);
+
+  return merged;
 }
 
 module.exports = {
