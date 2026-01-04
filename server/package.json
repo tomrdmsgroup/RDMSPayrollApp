@@ -1,13 +1,20 @@
 {
   "name": "rdms-payroll-app-server",
   "version": "1.0.0",
-  "private": true,
   "main": "src/index.js",
-  "type": "commonjs",
   "scripts": {
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
   },
   "dependencies": {
-    "nodemailer": "^6.9.16"
+    "@postmarkapp/postmark": "^4.0.5",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "node-fetch": "^2.7.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
   }
 }
