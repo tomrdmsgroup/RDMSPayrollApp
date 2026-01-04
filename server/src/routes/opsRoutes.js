@@ -1,6 +1,5 @@
 // server/src/routes/opsRoutes.js
 //
-// Ops routes implemented for the repo's current HTTP-router style (NOT Express).
 // Export: opsRouter(req, res, url)
 
 const { readStore } = require('../domain/persistenceStore');
@@ -14,6 +13,8 @@ const { requireOpsToken } = require('../domain/opsAuth');
 const { fetchVitalsSchema, fetchVitalsSnapshot } = require('../providers/vitalsProvider');
 
 const { fetchToastTimeEntriesFromVitals, fetchToastAnalyticsJobsFromVitals } = require('../providers/toastProvider');
+
+const AIRTABLE_FROM_FIELD = 'PR RDMS Payroll Project Email Address';
 
 function json(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -52,9 +53,25 @@ function readQuery(url) {
 }
 
 function enforceOpsToken(req, res, url) {
-  // opsAuth handles "OPS_TOKEN unset => allow"
   const r = requireOpsToken(req, res, url);
   return !!(r && r.ok);
+}
+
+function safeStr(v) {
+  if (v == null) return '';
+  return String(v).trim();
+}
+
+function getFromAddressFromVitalsRecord(vitalsRecord) {
+  if (!vitalsRecord || typeof vitalsRecord !== 'object') return '';
+  return safeStr(vitalsRecord[AIRTABLE_FROM_FIELD]);
+}
+
+async function lookupFromAddressForLocation(client_location_id) {
+  const snapshot = await fetchVitalsSnapshot(client_location_id);
+  const record = (snapshot && snapshot.data && snapshot.data[0]) || null;
+  const from = getFromAddressFromVitalsRecord(record);
+  return { snapshot, record, from };
 }
 
 async function handleStatus(req, res) {
@@ -86,8 +103,6 @@ async function handleAirtableVitals(req, res, url) {
   }
 
   try {
-    // IMPORTANT: vitalsProvider expects a STRING clientLocationId (the Name field),
-    // not an object. Passing an object yields "[object Object]" and breaks Airtable filtering.
     const snapshot = await fetchVitalsSnapshot(client_location_id);
     return json(res, 200, { ok: true, snapshot });
   } catch (e) {
@@ -121,7 +136,6 @@ async function handleToastTimeEntries(req, res, url) {
 
     const vitals = await fetchVitalsSnapshot(client_location_id);
 
-    // vitals.data is an array of Airtable row-like objects
     const record = (vitals && vitals.data && vitals.data[0]) || null;
     if (!record) return json(res, 404, { ok: false, error: 'vitals_not_found' });
 
@@ -205,30 +219,52 @@ async function handleRun(req, res, url) {
     return json(res, 400, { ok: false, error: 'missing_required_fields' });
   }
 
+  // If this run is email mode, seed From and Reply-To from Airtable now.
+  let policySnapshot = policy_snapshot;
+  const requestedMode = policySnapshot?.delivery?.mode || null;
+
+  if (requestedMode === 'email') {
+    try {
+      const { from } = await lookupFromAddressForLocation(client_location_id);
+
+      const normalizedFrom = safeStr(from);
+      if (normalizedFrom) {
+        policySnapshot = {
+          ...(policySnapshot || {}),
+          delivery: {
+            ...(policySnapshot?.delivery || {}),
+            from: normalizedFrom,
+            reply_to: normalizedFrom,
+          },
+        };
+      }
+    } catch (e) {
+      // We do not fail the run on lookup failure, but email sending will fail later if From is missing.
+      // This keeps /ops/run deterministic and still returns the run + outcome.
+    }
+  }
+
   const run = createRun({
     client_location_id,
     period_start,
     period_end,
-    payload: { policy_snapshot },
+    payload: { policy_snapshot: policySnapshot },
     status: 'running',
   });
 
   appendEvent(run, 'ops_run_created', {});
   updateRun(run.id, { events: run.events });
 
-  // Step 6: validations still placeholders; artifacts now attach to outcome.
   const findings = [];
-  const artifacts = buildArtifacts({ run, policySnapshot: policy_snapshot || {} });
+  const artifacts = buildArtifacts({ run, policySnapshot: policySnapshot || {} });
 
-  // buildOutcome seeds delivery from policy_snapshot.delivery if present.
-  const outcome = buildOutcome(run, findings, artifacts, policy_snapshot);
+  const outcome = buildOutcome(run, findings, artifacts, policySnapshot);
 
   const savedOutcome = saveOutcome(run.id, outcome);
 
   appendEvent(run, 'ops_outcome_saved', { outcome_status: savedOutcome.status });
   updateRun(run.id, { status: 'completed', events: run.events });
 
-  // Keep the returned run object consistent with the store update.
   run.status = 'completed';
   run.updated_at = nowIso();
 
@@ -351,7 +387,6 @@ async function handleSendEmail(req, res, url, runId) {
     return json(res, 400, { ok: false, error: 'delivery_mode_not_email' });
   }
 
-  // Idempotency: if we already sent, do nothing.
   if (outcome.delivery.sent_at) {
     appendEvent(run, 'ops_email_already_sent', { provider_message_id: outcome.delivery.provider_message_id || null });
     updateRun(run.id, { events: run.events });
@@ -373,16 +408,33 @@ async function handleSendEmail(req, res, url, runId) {
     updateRun(run.id, { events: run.events });
   }
 
-  // Ensure a From exists. For now, allow an env fallback so delivery can work before Airtable wiring.
-  const fallbackFrom = (process.env.EMAIL_FROM_FALLBACK || process.env.SMTP_FROM || '').trim();
-  const from = (outcome.delivery.from || '').trim() || fallbackFrom;
-  const replyTo = (outcome.delivery.reply_to || '').trim() || from;
+  // Enforce Airtable-driven From and Reply-To.
+  let from = safeStr(outcome.delivery.from);
+  if (!from) {
+    try {
+      const lookedUp = await lookupFromAddressForLocation(run.client_location_id);
+      from = safeStr(lookedUp.from);
+
+      if (from) {
+        outcome = updateOutcome(id, {
+          delivery: {
+            from,
+            reply_to: from,
+          },
+        });
+      }
+    } catch (e) {
+      // No-op, handled below.
+    }
+  }
 
   if (!from) {
-    appendEvent(run, 'ops_email_send_failed', { error: 'missing_from' });
+    appendEvent(run, 'ops_email_send_failed', { error: 'missing_from_airtable' });
     updateRun(run.id, { events: run.events });
-    return json(res, 500, { ok: false, error: 'missing_from' });
+    return json(res, 500, { ok: false, error: 'missing_from_airtable', field: AIRTABLE_FROM_FIELD });
   }
+
+  const replyTo = from;
 
   outcome = updateOutcome(id, {
     delivery: {
@@ -422,29 +474,19 @@ async function handleSendEmail(req, res, url, runId) {
   return json(res, 500, { ok: false, error: detail });
 }
 
-/**
- * opsRouter(req, res, url)
- * url is a WHATWG URL instance from the server entrypoint.
- */
 async function opsRouter(req, res, url) {
   const pathname = url.pathname || '';
 
   if (pathname === '/ops/status' && req.method === 'GET') return handleStatus(req, res);
 
-  // Airtable helpers
   if (pathname === '/ops/airtable/schema' && req.method === 'GET') return handleAirtableSchema(req, res, url);
   if (pathname === '/ops/airtable/vitals' && req.method === 'GET') return handleAirtableVitals(req, res, url);
 
-  // Toast proof endpoints
   if (pathname === '/ops/toast/time-entries' && req.method === 'GET') return handleToastTimeEntries(req, res, url);
 
-  // Preferred naming
   if (pathname === '/ops/toast/analytics/jobs' && req.method === 'GET') return handleToastAnalyticsJobs(req, res, url);
-
-  // Back-compat alias (optional)
   if (pathname === '/ops/toast/era/jobs' && req.method === 'GET') return handleToastAnalyticsJobs(req, res, url);
 
-  // Core ops flow
   if (pathname === '/ops/run' && req.method === 'POST') return handleRun(req, res, url);
 
   const rerunMatch = pathname.match(/^\/ops\/rerun\/(\d+)$/);
