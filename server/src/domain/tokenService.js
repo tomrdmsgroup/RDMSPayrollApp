@@ -1,7 +1,7 @@
 // server/src/domain/tokenService.js
 
 const crypto = require('crypto');
-const { updateStore } = require('./persistenceStore');
+const { query } = require('./db');
 
 function nowIso() {
   return new Date().toISOString();
@@ -11,49 +11,36 @@ function randomToken() {
   return crypto.randomBytes(24).toString('hex');
 }
 
-function createToken({
-  run_id,
-  type = 'approval',
-  ttl_seconds = 60 * 60 * 24 * 7, // 7 days default
-  meta = null,
-} = {}) {
+async function createToken({ run_id, type = 'approval', ttl_seconds = 60 * 60 * 24 * 7, meta = null } = {}) {
   if (!run_id) return null;
 
   const token = randomToken();
   const createdAt = nowIso();
   const expiresAt = new Date(Date.now() + Number(ttl_seconds) * 1000).toISOString();
 
-  let created = null;
+  const row = {
+    token,
+    run_id: Number(run_id),
+    type,
+    created_at: createdAt,
+    expires_at: expiresAt,
+    used_at: null,
+    meta,
+  };
 
-  updateStore((store) => {
-    created = {
-      token,
-      run_id: Number(run_id),
-      type,
-      created_at: createdAt,
-      expires_at: expiresAt,
-      used_at: null,
-      meta,
-    };
+  await query(
+    `INSERT INTO ops_tokens (token, token_row, created_at, updated_at) VALUES ($1, $2::jsonb, NOW(), NOW())`,
+    [token, row],
+  );
 
-    store.tokens.push(created);
-    return store;
-  });
-
-  return created;
+  return row;
 }
 
-function getToken(token) {
+async function getToken(token) {
   if (!token) return null;
-
-  let found = null;
-
-  updateStore((store) => {
-    found = store.tokens.find((t) => t.token === token) || null;
-    return store;
-  });
-
-  return found;
+  const r = await query(`SELECT token_row FROM ops_tokens WHERE token = $1`, [token]);
+  if (!r.rows.length) return null;
+  return r.rows[0].token_row || null;
 }
 
 function isExpired(tokenRow) {
@@ -61,27 +48,18 @@ function isExpired(tokenRow) {
   return Date.now() > new Date(tokenRow.expires_at).getTime();
 }
 
-function markTokenUsed(token) {
-  if (!token) return null;
+async function markTokenUsed(token) {
+  const row = await getToken(token);
+  if (!row) return null;
 
-  let updated = null;
+  row.used_at = nowIso();
 
-  updateStore((store) => {
-    const row = store.tokens.find((t) => t.token === token);
-    if (!row) {
-      updated = null;
-      return store;
-    }
-    row.used_at = nowIso();
-    updated = row;
-    return store;
-  });
-
-  return updated;
+  await query(`UPDATE ops_tokens SET token_row = $1::jsonb, updated_at = NOW() WHERE token = $2`, [row, token]);
+  return row;
 }
 
-function validateToken(token, { type = null, allow_used = false } = {}) {
-  const row = getToken(token);
+async function validateToken(token, { type = null, allow_used = false } = {}) {
+  const row = await getToken(token);
   if (!row) return { ok: false, reason: 'token_not_found' };
   if (type && row.type !== type) return { ok: false, reason: 'token_wrong_type' };
   if (!allow_used && row.used_at) return { ok: false, reason: 'token_used' };
