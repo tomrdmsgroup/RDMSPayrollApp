@@ -106,4 +106,4 @@ function composeOutcomeEmail({ run, outcome, publicBaseUrl }) {
   return { subject, html, text };
 }
 
-module.exports = { composeOutcomeEmail };
+module.exports = { composeOutcomeEmail, composeEmail: composeOutcomeEmail };
