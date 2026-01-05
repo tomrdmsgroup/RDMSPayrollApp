@@ -45,6 +45,21 @@ async function initDb() {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
+
+    -- One approval per location + pay period.
+    -- Once present, reruns are blocked for that location + period.
+    CREATE TABLE IF NOT EXISTS ops_period_approvals (
+      id SERIAL PRIMARY KEY,
+      client_location_id TEXT NOT NULL,
+      period_start TEXT NOT NULL,
+      period_end TEXT NOT NULL,
+      approved_run_id INTEGER,
+      approved_at TIMESTAMPTZ,
+      approved_token TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE (client_location_id, period_start, period_end)
+    );
     `,
     [],
   );
