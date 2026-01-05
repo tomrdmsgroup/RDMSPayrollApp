@@ -14,23 +14,17 @@ function airtableBaseUrl() {
 }
 
 function airtableAuthHeader() {
-  // This can be a PAT or legacy key. Treat it as a bearer token.
   const token = requireEnv('AIRTABLE_VITALS_API_KEY');
   return { Authorization: `Bearer ${token}` };
 }
 
 function escapeAirtableString(v) {
-  // Airtable formulas use single quotes for string literals.
-  // Escape single quotes by backslash.
   return String(v || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
-async function airtableListAll({ table, filterByFormula }) {
+async function airtableListAll({ table, filterByFormula, fields }) {
   const urlBase = airtableBaseUrl();
-  const headers = {
-    ...airtableAuthHeader(),
-    'Content-Type': 'application/json',
-  };
+  const headers = { ...airtableAuthHeader(), 'Content-Type': 'application/json' };
 
   let offset = null;
   const out = [];
@@ -39,15 +33,17 @@ async function airtableListAll({ table, filterByFormula }) {
     const params = new URLSearchParams();
     if (filterByFormula) params.set('filterByFormula', filterByFormula);
     if (offset) params.set('offset', offset);
+    if (Array.isArray(fields) && fields.length) {
+      fields.forEach((f) => params.append('fields[]', f));
+    }
 
     const url = `${urlBase}/${encodeURIComponent(table)}?${params.toString()}`;
     const resp = await fetch(url, { method: 'GET', headers });
-
     const body = await resp.json();
+
     if (!resp.ok) throw new Error(`airtable_list_failed:${resp.status}`);
 
     (body.records || []).forEach((r) => out.push(r));
-
     offset = body.offset || null;
     if (!offset) break;
   }
@@ -58,8 +54,6 @@ async function airtableListAll({ table, filterByFormula }) {
 function parseTime12h(s) {
   const raw = String(s || '').trim();
   if (!raw) return null;
-
-  // Accept "11:00 AM", "8:00 AM", "11 AM"
   const m = raw.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i);
   if (!m) return null;
 
@@ -80,17 +74,12 @@ function parseTime12h(s) {
 }
 
 function toYmd(dateLike) {
-  // Airtable date fields usually come through as ISO strings.
   const d = new Date(dateLike);
   if (Number.isNaN(d.getTime())) return null;
-
   const y = d.getUTCFullYear();
   const m = d.getUTCMonth() + 1;
   const day = d.getUTCDate();
-
-  const mm = String(m).padStart(2, '0');
-  const dd = String(day).padStart(2, '0');
-  return `${y}-${mm}-${dd}`;
+  return `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 function addDaysYmd(ymd, days) {
@@ -130,38 +119,45 @@ function localPartsFromUtcDate(utcDate, timeZone) {
 }
 
 function zonedLocalToUtc({ y, m, d, hh, mm, ss = 0, timeZone }) {
-  // Convert a local date/time in a named time zone into a UTC Date.
-  // We do a two-pass correction using Intl to handle DST offsets.
-
-  // First guess: interpret local parts as if they are UTC.
   let guess = new Date(Date.UTC(y, m - 1, d, hh, mm, ss));
-
-  // Get what that UTC moment looks like in the desired time zone.
   const p1 = localPartsFromUtcDate(guess, timeZone);
-
-  // Compute the delta between desired local parts and the formatted local parts.
   const desired = Date.UTC(y, m - 1, d, hh, mm, ss);
   const got = Date.UTC(p1.year, p1.month - 1, p1.day, p1.hour, p1.minute, p1.second);
-  const deltaMs = desired - got;
+  guess = new Date(guess.getTime() + (desired - got));
 
-  // Adjust guess by delta.
-  guess = new Date(guess.getTime() + deltaMs);
-
-  // Second pass for safety around DST boundaries.
   const p2 = localPartsFromUtcDate(guess, timeZone);
   const got2 = Date.UTC(p2.year, p2.month - 1, p2.day, p2.hour, p2.minute, p2.second);
-  const deltaMs2 = desired - got2;
+  return new Date(guess.getTime() + (desired - got2));
+}
 
-  return new Date(guess.getTime() + deltaMs2);
+function formatLocalCutoff({ cutoffUtcIso, timeZone }) {
+  if (!cutoffUtcIso) return null;
+  const d = new Date(cutoffUtcIso);
+  if (Number.isNaN(d.getTime())) return null;
+
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+
+  const tzShort = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'short' })
+    .formatToParts(d)
+    .find((p) => p.type === 'timeZoneName')?.value;
+
+  return `${fmt.format(d)}${tzShort ? ` (${tzShort})` : ''}`;
 }
 
 function computeValidationCutoffUtc({ validationDateYmd, endTimeNextDay, timeZone }) {
   const tz = String(timeZone || '').trim() || 'UTC';
-
   const nextDayYmd = addDaysYmd(validationDateYmd, 1);
   if (!nextDayYmd) return null;
 
-  const time = parseTime12h(endTimeNextDay) || { hh: 0, mm: 0 }; // default 12:00 AM
+  const time = parseTime12h(endTimeNextDay) || { hh: 0, mm: 0 };
   const m = nextDayYmd.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!m) return null;
 
@@ -177,10 +173,7 @@ function computeValidationCutoffUtc({ validationDateYmd, endTimeNextDay, timeZon
 }
 
 function findCurrentPeriodRow(rows, nowUtc) {
-  // Pick the row where now is between Start and Submit (inclusive), comparing in UTC.
-  // Airtable stores dates, so time-of-day is not meaningful here.
   const now = nowUtc || new Date();
-
   const candidates = rows
     .map((r) => ({
       record_id: r.id,
@@ -192,10 +185,40 @@ function findCurrentPeriodRow(rows, nowUtc) {
     .filter((x) => now.getTime() >= x.start.getTime() && now.getTime() <= x.submit.getTime());
 
   if (!candidates.length) return null;
-
-  // If multiple match, choose the latest start.
   candidates.sort((a, b) => b.start.getTime() - a.start.getTime());
   return candidates[0];
+}
+
+function normalizePreviewRecipients(vitals) {
+  const emails = [];
+  for (let i = 1; i <= 5; i++) {
+    const v = (vitals[`Payroll Preview ${i} Email`] || '').toString().trim();
+    if (v) emails.push(v);
+  }
+  const count = emails.length;
+  let summary = '';
+  if (count === 0) summary = 'None configured';
+  else if (count === 1) summary = emails[0];
+  else summary = `${emails[0]} +${count - 1}`;
+  return { emails, count, summary };
+}
+
+async function listLocationNames() {
+  const vitalsTable = requireEnv('AIRTABLE_VITALS_TABLE');
+  const locationField = requireEnv('AIRTABLE_VITALS_LOCATION_FIELD');
+
+  const recs = await airtableListAll({
+    table: vitalsTable,
+    fields: [locationField],
+  });
+
+  const names = recs
+    .map((r) => (r.fields || {})[locationField])
+    .map((v) => (v || '').toString().trim())
+    .filter(Boolean);
+
+  names.sort((a, b) => a.localeCompare(b));
+  return names;
 }
 
 async function getRecapForLocationName(locationName) {
@@ -206,7 +229,6 @@ async function getRecapForLocationName(locationName) {
   const name = String(locationName || '').trim();
   if (!name) throw new Error('location_name_required');
 
-  // 1) Fetch vitals record
   const filterVitals = `{${locationField}}='${escapeAirtableString(name)}'`;
   const vitalsRecords = await airtableListAll({ table: vitalsTable, filterByFormula: filterVitals });
   if (!vitalsRecords.length) throw new Error('location_not_found');
@@ -221,18 +243,32 @@ async function getRecapForLocationName(locationName) {
 
   if (!calendarName) throw new Error('missing_payroll_calendar_name');
 
-  const timeZone = vitals['Time Zone'] || 'UTC';
-  const validationEndTimeNextDay = vitals['Validation End Time (Next Day)'] || '';
+  const timeZone = (vitals['Time Zone'] || '').toString().trim();
+  if (!timeZone) throw new Error('invalid_time_zone');
+
+  const validationEndTimeNextDay = (vitals['Validation End Time (Next Day)'] || '').toString().trim();
   const appActive = vitals['PR Validation APP Active?'] === true;
 
-  // 2) Fetch payroll calendar detail rows for that calendar
+  const preview = normalizePreviewRecipients(vitals);
+
+  const asanaProjectGuid = (vitals['PR Asana Project GUID'] || '').toString().trim();
+  const asanaInboxGuid = (vitals['PR Asana Inbox Section GUID'] || '').toString().trim();
+  const asanaConnected = !!(asanaProjectGuid && asanaInboxGuid);
+
+  const payrollCompany = (vitals['Payroll Company'] || '').toString().trim();
+  const posType = (vitals['POS Type'] || '').toString().trim();
+  const payrollProjectEmail = (vitals['PR RDMS Payroll Project Email Address'] || '').toString().trim();
+  const tipReportType = (vitals['PR Tip Report Type'] || '').toString().trim();
+  const payrollCompanyCode = (vitals['PR Company Code (for UPload)'] || '').toString().trim();
+  const payFrequency = (vitals['PR Pay Frequency for Upload'] || '').toString().trim();
+
   const filterDetails = `{PR Calendar Name - Master}='${escapeAirtableString(calendarName)}'`;
   const detailRecords = await airtableListAll({ table: payrollDetailsTable, filterByFormula: filterDetails });
 
   const current = findCurrentPeriodRow(detailRecords, new Date());
   if (!current) throw new Error('no_current_pay_period_found');
 
-  const f = current.fields;
+  const f = current.fields || {};
 
   const periodStart = toYmd(f['PR Period Start Date']);
   const periodEnd = toYmd(f['PR Period End Date']);
@@ -248,14 +284,29 @@ async function getRecapForLocationName(locationName) {
     timeZone,
   });
 
+  const cutoffUtcIso = cutoffUtc ? cutoffUtc.toISOString() : null;
+  const cutoffLocal = cutoffUtcIso ? formatLocalCutoff({ cutoffUtcIso, timeZone }) : null;
   const isLate = cutoffUtc ? Date.now() > cutoffUtc.getTime() : false;
 
   return {
     location_name: name,
     calendar_name: calendarName,
+
     app_active: appActive,
     time_zone: timeZone,
     validation_end_time_next_day: validationEndTimeNextDay || null,
+
+    payroll_company: payrollCompany || null,
+    pos_type: posType || null,
+    payroll_project_email: payrollProjectEmail || null,
+    tip_report_type: tipReportType || null,
+    payroll_company_code: payrollCompanyCode || null,
+    pay_frequency: payFrequency || null,
+
+    preview_recipients_count: preview.count,
+    preview_recipients_summary: preview.summary,
+
+    asana_connected: asanaConnected,
 
     current_pay_period: {
       record_id: current.record_id,
@@ -264,7 +315,8 @@ async function getRecapForLocationName(locationName) {
       validation_date: validationDate,
       submit_date: submitDate,
       check_date: checkDate,
-      cutoff_utc: cutoffUtc ? cutoffUtc.toISOString() : null,
+      cutoff_utc: cutoffUtcIso,
+      cutoff_local: cutoffLocal,
       is_late: isLate,
       late_message: isLate
         ? 'You have missed the validation window. Please email 911@rdmsgroup.com confirming your payroll is complete. Please note late payroll submission may require additional billing.'
@@ -274,5 +326,6 @@ async function getRecapForLocationName(locationName) {
 }
 
 module.exports = {
+  listLocationNames,
   getRecapForLocationName,
 };
