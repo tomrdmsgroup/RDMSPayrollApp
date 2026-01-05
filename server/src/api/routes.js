@@ -1,5 +1,7 @@
 // server/src/api/routes.js
 
+const fs = require('fs');
+const path = require('path');
 const fetch = require('node-fetch');
 
 const { issueToken } = require('../domain/tokenService');
@@ -10,26 +12,6 @@ const { notifyFailure } = require('../domain/failureService');
 const { runValidation } = require('../domain/validationEngine');
 
 const {
-  createClientLocation,
-  listClientLocations,
-  updateClientLocation,
-  deleteClientLocation,
-} = require('../domain/clientLocationService');
-
-const {
-  listExclusionsForLocation,
-  createExclusion,
-  updateExclusion,
-  deleteExclusion,
-} = require('../domain/exclusionConfigService');
-
-const {
-  getRuleConfigsForLocation,
-  setRuleConfig,
-  deleteRuleConfig,
-} = require('../domain/ruleConfigService');
-
-const {
   createSessionForEmail,
   getUserBySessionToken,
   deleteSessionToken,
@@ -38,7 +20,7 @@ const {
   listStaffUsersAsAdminOnly,
 } = require('../domain/authService');
 
-const { getRecapForLocationName } = require('../domain/airtableRecapService');
+const { listLocationNames, getRecapForLocationName } = require('../domain/airtableRecapService');
 
 const idempotency = new IdempotencyService();
 
@@ -67,9 +49,6 @@ function parseBody(req) {
 }
 
 function handleError(res, err) {
-  if (err && err.message === 'persistence_store_corrupt') {
-    return json(res, 500, { error: 'persistence_store_corrupt', backup: err.backup || null });
-  }
   return json(res, 500, { error: err?.message || 'unknown_error' });
 }
 
@@ -207,10 +186,37 @@ async function fetchGoogleUserInfo(accessToken) {
   return resp.json();
 }
 
+function staffHtml() {
+  // server/ is the Render root, web/ is sibling of server/
+  const filePath = path.join(__dirname, '..', '..', '..', 'web', 'staff.html');
+  return fs.readFileSync(filePath, 'utf8');
+}
+
 function router(req, res) {
   const url = new URL(req.url, 'http://localhost');
 
   if (url.pathname === '/health') return json(res, 200, { ok: true });
+
+  // Convenience: send root to staff console
+  if (url.pathname === '/' && req.method === 'GET') {
+    res.writeHead(302, { Location: '/staff' });
+    res.end();
+    return;
+  }
+
+  // Staff UI page
+  if (url.pathname === '/staff' && req.method === 'GET') {
+    (async () => {
+      const user = await getStaffUserFromRequest(req);
+      if (!user) {
+        res.writeHead(302, { Location: '/auth/google' });
+        res.end();
+        return;
+      }
+      return html(res, 200, staffHtml());
+    })();
+    return;
+  }
 
   // Staff Auth (Google)
   if (url.pathname === '/auth/google' && req.method === 'GET') {
@@ -252,15 +258,8 @@ function router(req, res) {
         }
 
         setSessionCookie(res, session.token);
-
-        return html(
-          res,
-          200,
-          `<html><body style="font-family:Arial;padding:24px;">
-            Logged in as <b>${session.user.email}</b> (${session.user.role}).<br/><br/>
-            Next: we will build the Staff Console UI.
-          </body></html>`,
-        );
+        res.writeHead(302, { Location: '/staff' });
+        res.end();
       } catch (e) {
         return html(res, 500, `<html><body style="font-family:Arial;padding:24px;">Login failed: ${e.message}</body></html>`);
       }
@@ -271,8 +270,7 @@ function router(req, res) {
   if (url.pathname === '/auth/me' && req.method === 'GET') {
     (async () => {
       const user = await getStaffUserFromRequest(req);
-      if (!user) return json(res, 200, { user: null });
-      return json(res, 200, { user });
+      return json(res, 200, { user: user || null });
     })();
     return;
   }
@@ -287,16 +285,28 @@ function router(req, res) {
     return;
   }
 
-  // Staff Console Recap (staff only)
+  // Staff endpoints
+  if (url.pathname === '/staff/locations' && req.method === 'GET') {
+    (async () => {
+      const user = await requireStaff(req, res);
+      if (!user) return;
+      try {
+        const locations = await listLocationNames();
+        return json(res, 200, { locations });
+      } catch (e) {
+        return handleError(res, e);
+      }
+    })();
+    return;
+  }
+
   if (url.pathname === '/staff/recap' && req.method === 'GET') {
     (async () => {
       const user = await requireStaff(req, res);
       if (!user) return;
-
       try {
         const locationName = url.searchParams.get('locationName');
         if (!locationName) return json(res, 400, { error: 'locationName_required' });
-
         const recap = await getRecapForLocationName(locationName);
         return json(res, 200, { recap });
       } catch (e) {
@@ -306,7 +316,7 @@ function router(req, res) {
     return;
   }
 
-  // Staff Admin: manage staff users
+  // Staff admin endpoints remain available
   if (url.pathname === '/staff-users' && req.method === 'GET') {
     (async () => {
       try {
@@ -351,7 +361,7 @@ function router(req, res) {
     return;
   }
 
-  // Tokens
+  // Keep your existing public API endpoints that are already working
   if (url.pathname === '/tokens/issue' && req.method === 'POST') {
     parseBody(req).then((body) => {
       try {
@@ -370,200 +380,6 @@ function router(req, res) {
     return;
   }
 
-  // Client Locations (staff only)
-  if (url.pathname === '/client-locations' && req.method === 'GET') {
-    (async () => {
-      const user = await requireStaff(req, res);
-      if (!user) return;
-      try {
-        const activeOnly = url.searchParams.get('activeOnly');
-        const rows = listClientLocations({
-          activeOnly: activeOnly === null ? true : activeOnly !== 'false',
-        });
-        return json(res, 200, { client_locations: rows });
-      } catch (e) {
-        return handleError(res, e);
-      }
-    })();
-    return;
-  }
-
-  if (url.pathname === '/client-locations' && req.method === 'POST') {
-    (async () => {
-      const user = await requireAdmin(req, res);
-      if (!user) return;
-      const body = await parseBody(req);
-      try {
-        const row = createClientLocation(body);
-        return json(res, 201, { client_location: row });
-      } catch (e) {
-        if (e && e.message === 'persistence_store_corrupt') return handleError(res, e);
-        return json(res, 400, { error: e.message });
-      }
-    })();
-    return;
-  }
-
-  if (url.pathname.startsWith('/client-locations/') && req.method === 'PUT') {
-    (async () => {
-      const user = await requireAdmin(req, res);
-      if (!user) return;
-      const id = url.pathname.split('/')[2];
-      const body = await parseBody(req);
-      try {
-        const row = updateClientLocation(id, body);
-        if (!row) return json(res, 404, { error: 'not_found' });
-        return json(res, 200, { client_location: row });
-      } catch (e) {
-        if (e && e.message === 'persistence_store_corrupt') return handleError(res, e);
-        return json(res, 400, { error: e.message });
-      }
-    })();
-    return;
-  }
-
-  if (url.pathname.startsWith('/client-locations/') && req.method === 'DELETE') {
-    (async () => {
-      const user = await requireAdmin(req, res);
-      if (!user) return;
-      try {
-        const id = url.pathname.split('/')[2];
-        const ok = deleteClientLocation(id);
-        return json(res, 200, { deleted: ok === true });
-      } catch (e) {
-        return handleError(res, e);
-      }
-    })();
-    return;
-  }
-
-  // Rule Configs (staff only)
-  if (url.pathname === '/rule-configs' && req.method === 'GET') {
-    (async () => {
-      const user = await requireStaff(req, res);
-      if (!user) return;
-      try {
-        const clientLocationId = url.searchParams.get('clientLocationId');
-        if (!clientLocationId) return json(res, 400, { error: 'clientLocationId_required' });
-        const rows = getRuleConfigsForLocation(clientLocationId);
-        return json(res, 200, { rule_configs: rows });
-      } catch (e) {
-        return handleError(res, e);
-      }
-    })();
-    return;
-  }
-
-  if (url.pathname === '/rule-configs' && req.method === 'PUT') {
-    (async () => {
-      const user = await requireAdmin(req, res);
-      if (!user) return;
-      const clientLocationId = url.searchParams.get('clientLocationId');
-      const ruleCode = url.searchParams.get('ruleCode');
-      if (!clientLocationId) return json(res, 400, { error: 'clientLocationId_required' });
-      if (!ruleCode) return json(res, 400, { error: 'ruleCode_required' });
-
-      const body = await parseBody(req);
-      try {
-        const row = setRuleConfig(clientLocationId, ruleCode, body);
-        return json(res, 200, { rule_config: row });
-      } catch (e) {
-        if (e && e.message === 'persistence_store_corrupt') return handleError(res, e);
-        return json(res, 400, { error: e.message });
-      }
-    })();
-    return;
-  }
-
-  if (url.pathname === '/rule-configs' && req.method === 'DELETE') {
-    (async () => {
-      const user = await requireAdmin(req, res);
-      if (!user) return;
-      try {
-        const clientLocationId = url.searchParams.get('clientLocationId');
-        const ruleCode = url.searchParams.get('ruleCode');
-        if (!clientLocationId) return json(res, 400, { error: 'clientLocationId_required' });
-        if (!ruleCode) return json(res, 400, { error: 'ruleCode_required' });
-        const ok = deleteRuleConfig(clientLocationId, ruleCode);
-        return json(res, 200, { deleted: ok === true });
-      } catch (e) {
-        return handleError(res, e);
-      }
-    })();
-    return;
-  }
-
-  // Exclusions (staff only)
-  if (url.pathname === '/exclusions' && req.method === 'GET') {
-    (async () => {
-      const user = await requireStaff(req, res);
-      if (!user) return;
-      try {
-        const clientLocationId = url.searchParams.get('clientLocationId');
-        if (!clientLocationId) return json(res, 400, { error: 'clientLocationId_required' });
-        const rows = listExclusionsForLocation(clientLocationId);
-        return json(res, 200, { exclusions: rows });
-      } catch (e) {
-        return handleError(res, e);
-      }
-    })();
-    return;
-  }
-
-  if (url.pathname === '/exclusions' && req.method === 'POST') {
-    (async () => {
-      const user = await requireAdmin(req, res);
-      if (!user) return;
-      const clientLocationId = url.searchParams.get('clientLocationId');
-      if (!clientLocationId) return json(res, 400, { error: 'clientLocationId_required' });
-      const body = await parseBody(req);
-      try {
-        const row = createExclusion(clientLocationId, body);
-        return json(res, 201, { exclusion: row });
-      } catch (e) {
-        if (e && e.message === 'persistence_store_corrupt') return handleError(res, e);
-        return json(res, 400, { error: e.message });
-      }
-    })();
-    return;
-  }
-
-  if (url.pathname === '/exclusions' && req.method === 'PUT') {
-    (async () => {
-      const user = await requireAdmin(req, res);
-      if (!user) return;
-      const id = url.searchParams.get('id');
-      if (!id) return json(res, 400, { error: 'id_required' });
-      const body = await parseBody(req);
-      try {
-        const row = updateExclusion(id, body);
-        if (!row) return json(res, 404, { error: 'not_found' });
-        return json(res, 200, { exclusion: row });
-      } catch (e) {
-        if (e && e.message === 'persistence_store_corrupt') return handleError(res, e);
-        return json(res, 400, { error: e.message });
-      }
-    })();
-    return;
-  }
-
-  if (url.pathname === '/exclusions' && req.method === 'DELETE') {
-    (async () => {
-      const user = await requireAdmin(req, res);
-      if (!user) return;
-      try {
-        const id = url.searchParams.get('id');
-        if (!id) return json(res, 400, { error: 'id_required' });
-        const ok = deleteExclusion(id);
-        return json(res, 200, { deleted: ok === true });
-      } catch (e) {
-        return handleError(res, e);
-      }
-    })();
-    return;
-  }
-
-  // Validation (public, used by ops email flow)
   if (url.pathname === '/validate' && req.method === 'POST') {
     parseBody(req).then(async (body) => {
       try {
@@ -592,36 +408,6 @@ function router(req, res) {
     return;
   }
 
-  // Run (read-only convenience, staff only)
-  if (url.pathname === '/run' && req.method === 'GET') {
-    (async () => {
-      const user = await requireStaff(req, res);
-      if (!user) return;
-      try {
-        const id = url.searchParams.get('id');
-        if (!id) return json(res, 400, { error: 'id_required' });
-        const run = getRun(id);
-        if (!run) return json(res, 404, { error: 'not_found' });
-        return json(res, 200, { run });
-      } catch (e) {
-        return handleError(res, e);
-      }
-    })();
-    return;
-  }
-
-  // Idempotency (public utility)
-  if (url.pathname === '/idempotency/check' && req.method === 'POST') {
-    parseBody(req).then(async (body) => {
-      const exists = idempotency.check(body.scope, body.key);
-      if (exists) return json(res, 200, { reused: true });
-      idempotency.record(body.scope, body.key);
-      json(res, 200, { reused: false });
-    });
-    return;
-  }
-
-  // Approve / Rerun (public, used by email CTA links)
   if (url.pathname === '/approve' && req.method === 'GET') {
     const tokenId = url.searchParams.get('token');
     if (!tokenId) {
@@ -634,8 +420,7 @@ function router(req, res) {
         const statusCode = result && result.ok === false ? 400 : 200;
         html(res, statusCode, result.html || '');
       })
-      .catch((e) => {
-        notifyFailure({ step: 'approve', error: e?.message || 'approve_failed', runId: null });
+      .catch(() => {
         html(res, 500, '<html><body style="font-family:Arial,Helvetica,sans-serif;padding:24px;">Server error.</body></html>');
       });
 
@@ -654,11 +439,37 @@ function router(req, res) {
         const statusCode = result && result.ok === false ? 400 : 200;
         html(res, statusCode, result.html || '');
       })
-      .catch((e) => {
-        notifyFailure({ step: 'rerun', error: e?.message || 'rerun_failed', runId: null });
+      .catch(() => {
         html(res, 500, '<html><body style="font-family:Arial,Helvetica,sans-serif;padding:24px;">Server error.</body></html>');
       });
 
+    return;
+  }
+
+  if (url.pathname === '/idempotency/check' && req.method === 'POST') {
+    parseBody(req).then(async (body) => {
+      const exists = idempotency.check(body.scope, body.key);
+      if (exists) return json(res, 200, { reused: true });
+      idempotency.record(body.scope, body.key);
+      json(res, 200, { reused: false });
+    });
+    return;
+  }
+
+  if (url.pathname === '/run' && req.method === 'GET') {
+    (async () => {
+      const user = await requireStaff(req, res);
+      if (!user) return;
+      try {
+        const id = url.searchParams.get('id');
+        if (!id) return json(res, 400, { error: 'id_required' });
+        const run = getRun(id);
+        if (!run) return json(res, 404, { error: 'not_found' });
+        return json(res, 200, { run });
+      } catch (e) {
+        return handleError(res, e);
+      }
+    })();
     return;
   }
 
