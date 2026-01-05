@@ -222,11 +222,14 @@ function router(req, res) {
     }
   }
 
-  // POST /exclusions
+  // POST /exclusions?clientLocationId=#
   if (url.pathname === '/exclusions' && req.method === 'POST') {
+    const clientLocationId = url.searchParams.get('clientLocationId');
+    if (!clientLocationId) return json(res, 400, { error: 'clientLocationId_required' });
+
     parseBody(req).then((body) => {
       try {
-        const row = createExclusion(body);
+        const row = createExclusion(clientLocationId, body);
         return json(res, 201, { exclusion: row });
       } catch (e) {
         if (e && e.message === 'persistence_store_corrupt') return handleError(res, e);
@@ -236,9 +239,11 @@ function router(req, res) {
     return;
   }
 
-  // PUT /exclusions/:id
-  if (url.pathname.startsWith('/exclusions/') && req.method === 'PUT') {
-    const id = url.pathname.split('/')[2];
+  // PUT /exclusions?id=#
+  if (url.pathname === '/exclusions' && req.method === 'PUT') {
+    const id = url.searchParams.get('id');
+    if (!id) return json(res, 400, { error: 'id_required' });
+
     parseBody(req).then((body) => {
       try {
         const row = updateExclusion(id, body);
@@ -252,10 +257,11 @@ function router(req, res) {
     return;
   }
 
-  // DELETE /exclusions/:id
-  if (url.pathname.startsWith('/exclusions/') && req.method === 'DELETE') {
+  // DELETE /exclusions?id=#
+  if (url.pathname === '/exclusions' && req.method === 'DELETE') {
     try {
-      const id = url.pathname.split('/')[2];
+      const id = url.searchParams.get('id');
+      if (!id) return json(res, 400, { error: 'id_required' });
       const ok = deleteExclusion(id);
       return json(res, 200, { deleted: ok === true });
     } catch (e) {
@@ -264,103 +270,51 @@ function router(req, res) {
   }
 
   // -----------------------
-  // Runs
+  // Validation
   // -----------------------
-  if (url.pathname === '/runs/manual' && req.method === 'POST') {
+  // POST /validate (body: { clientLocationId, periodStart, periodEnd })
+  if (url.pathname === '/validate' && req.method === 'POST') {
     parseBody(req).then(async (body) => {
-      const run = createRunRecord({
-        clientLocationId: body.clientLocationId,
-        periodStart: body.periodStart,
-        periodEnd: body.periodEnd,
-      });
-
-      appendEvent(run, 'manual_start');
-
       try {
-        appendEvent(run, 'toast_fetch', { count: 0 });
-
-        const exclusions = listExclusionsForLocation(body.clientLocationId);
-
-        const validation = await runValidation({
-          run,
-          context: {
-            clientLocationId: body.clientLocationId,
-            periodStart: body.periodStart,
-            periodEnd: body.periodEnd,
-          },
-          exclusions,
+        const run = createRunRecord({
+          clientLocationId: body.clientLocationId,
+          periodStart: body.periodStart,
+          periodEnd: body.periodEnd,
         });
 
-        appendEvent(run, 'validation_completed', { findings_count: validation.findings.length });
+        appendEvent(run, 'validation_requested', { at: new Date().toISOString() });
 
-        const exportLines = require('../domain/exportService').generateRunWip([]);
-        appendEvent(run, 'export_generated', { length: exportLines.length });
-
-        const approveToken = issueToken({
-          action: 'approve',
-          runId: run.id,
-          periodStart: run.period_start,
-          periodEnd: run.period_end,
-        });
-
-        const rerunToken = issueToken({
-          action: 'rerun',
-          runId: run.id,
-          periodStart: run.period_start,
-          periodEnd: run.period_end,
-        });
-
-        appendEvent(run, 'tokens_issued', {
-          approve: approveToken.token_id,
-          rerun: rerunToken.token_id,
-        });
-
-        run.status = 'completed';
-
-        json(res, 200, {
-          run,
-          tokens: { approve: approveToken.token_id, rerun: rerunToken.token_id },
-          exclusion_decisions: validation.exclusion_decisions || null,
-        });
+        try {
+          const result = await runValidation(run);
+          appendEvent(run, 'validation_completed', { ok: true });
+          return json(res, 200, { run, result });
+        } catch (e) {
+          failRun(run, e);
+          notifyFailure({ step: 'validation', error: e.message, runId: run.id });
+          return json(res, 500, { error: e.message, run_id: run.id });
+        }
       } catch (e) {
-        failRun(run, 'manual_run', e.message);
-        json(res, 500, { error: e.message, run });
+        notifyFailure({ step: 'validation', error: e.message, runId: null });
+        return json(res, 500, { error: e.message });
       }
     });
     return;
   }
 
-  if (url.pathname === '/runs/validate' && req.method === 'POST') {
-    parseBody(req).then(async (body) => {
-      const run = getRun(body.runId);
-      if (!run) return json(res, 404, { error: 'run_not_found' });
-
-      try {
-        const exclusions = listExclusionsForLocation(run.client_location_id);
-
-        const validation = await runValidation({
-          run,
-          context: {
-            clientLocationId: run.client_location_id,
-            periodStart: run.period_start,
-            periodEnd: run.period_end,
-          },
-          exclusions,
-        });
-
-        appendEvent(run, 'validation_completed', { findings_count: validation.findings.length });
-
-        return json(res, 200, {
-          run_id: run.id,
-          findings: validation.findings,
-          exclusion_decisions: validation.exclusion_decisions || null,
-        });
-      } catch (e) {
-        failRun(run, 'validate_run', e.message);
-        return json(res, 500, { error: e.message, run_id: run.id });
-      }
-    });
-    return;
+  // -----------------------
+  // Run (read-only convenience)
+  // -----------------------
+  // GET /run?id=#
+  if (url.pathname === '/run' && req.method === 'GET') {
+    try {
+      const id = url.searchParams.get('id');
+      if (!id) return json(res, 400, { error: 'id_required' });
+      const run = getRun(id);
+      if (!run) return json(res, 404, { error: 'not_found' });
+      return json(res, 200, { run });
+    } catch (e) {
+      return handleError(res, e);
+    }
   }
 
   // -----------------------
@@ -383,22 +337,48 @@ function router(req, res) {
     const tokenId = url.searchParams.get('token');
     if (!tokenId) {
       notifyFailure({ step: 'approve', error: 'missing_token', runId: null });
-      return json(res, 400, { error: 'missing_token' });
+      res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end('<html><body style="font-family:Arial,Helvetica,sans-serif;padding:24px;">Missing token.</body></html>');
+      return;
     }
-    const result = approveAction(tokenId);
-    const statusCode = result.status === 'invalid' || result.status === 'missing_run' ? 400 : 200;
-    return json(res, statusCode, result);
+
+    approveAction(tokenId)
+      .then((result) => {
+        const statusCode = result && result.ok === false ? 400 : 200;
+        res.writeHead(statusCode, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(result.html || '');
+      })
+      .catch((e) => {
+        notifyFailure({ step: 'approve', error: e?.message || 'approve_failed', runId: null });
+        res.writeHead(500, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end('<html><body style="font-family:Arial,Helvetica,sans-serif;padding:24px;">Server error.</body></html>');
+      });
+
+    return;
   }
 
   if (url.pathname === '/rerun' && req.method === 'GET') {
     const tokenId = url.searchParams.get('token');
     if (!tokenId) {
       notifyFailure({ step: 'rerun', error: 'missing_token', runId: null });
-      return json(res, 400, { error: 'missing_token' });
+      res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end('<html><body style="font-family:Arial,Helvetica,sans-serif;padding:24px;">Missing token.</body></html>');
+      return;
     }
-    const result = rerunAction(tokenId);
-    const statusCode = result.status === 'invalid' || result.status === 'missing_run' ? 400 : 200;
-    return json(res, statusCode, result);
+
+    rerunAction(tokenId)
+      .then((result) => {
+        const statusCode = result && result.ok === false ? 400 : 200;
+        res.writeHead(statusCode, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(result.html || '');
+      })
+      .catch((e) => {
+        notifyFailure({ step: 'rerun', error: e?.message || 'rerun_failed', runId: null });
+        res.writeHead(500, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end('<html><body style="font-family:Arial,Helvetica,sans-serif;padding:24px;">Server error.</body></html>');
+      });
+
+    return;
   }
 
   json(res, 404, { error: 'not_found' });
