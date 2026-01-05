@@ -7,16 +7,33 @@ const { appendEvent } = require('./runManager');
 
 /**
  * Resolve Asana routing from vitals snapshot.
- * Routing is required ONLY if we have findings that require Asana tasks.
+ *
+ * IMPORTANT:
+ * vitalsProvider returns records that always include:
+ * - record.id (Airtable record id)
+ * - record[locationField] (usually "Name") containing the location name text
+ *
+ * It does NOT guarantee record.client_location_id exists on each record.
+ * So routing must match using:
+ * - clientLocationId equals Airtable record id, OR
+ * - clientLocationId equals record[locationField], OR
+ * - clientLocationId equals record.Name (fallback)
  */
 function resolveAsanaRoute(clientLocationId, vitalsSnapshot) {
-  if (!vitalsSnapshot?.data || !clientLocationId) return null;
+  if (!clientLocationId || !vitalsSnapshot?.data || !Array.isArray(vitalsSnapshot.data)) return null;
 
-  const match = vitalsSnapshot.data.find(
-    (record) =>
-      `${record.client_location_id}` === `${clientLocationId}` ||
-      `${record.id}` === `${clientLocationId}`,
-  );
+  const locationField = vitalsSnapshot.location_field || 'Name';
+
+  const wanted = `${clientLocationId}`.trim();
+
+  const match = vitalsSnapshot.data.find((record) => {
+    const recordId = record?.id != null ? `${record.id}`.trim() : '';
+    const fieldValue =
+      record && record[locationField] != null ? `${record[locationField]}`.trim() : '';
+    const nameFallback = record && record.Name != null ? `${record.Name}`.trim() : '';
+
+    return wanted === recordId || wanted === fieldValue || wanted === nameFallback;
+  });
 
   if (!match) return null;
 
@@ -123,6 +140,7 @@ async function createAsanaTasksForFindings({
   if (!route) {
     appendEvent(run, 'asana_routing_missing', {
       client_location_id: run.client_location_id,
+      location_field: vitalsSnapshot?.location_field || 'Name',
     });
 
     failureNotifier({
