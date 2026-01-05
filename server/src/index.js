@@ -3,14 +3,8 @@
 const http = require('http');
 const { router } = require('./api/routes');
 const { env } = require('./config');
-const { seedAdmin } = require('./domain/authService');
 const { opsRouter } = require('./routes/opsRoutes');
 const { initDb } = require('./domain/db');
-
-seedAdmin(
-  env.APP_DEFAULT_ADMIN_EMAIL || 'admin@example.com',
-  env.APP_DEFAULT_ADMIN_PASSWORD || 'changeme',
-);
 
 function toUrl(req) {
   const host = req.headers && req.headers.host ? req.headers.host : 'localhost';
@@ -31,7 +25,7 @@ async function main() {
   });
 
   const port = env.PORT || 3000;
-  server.listen(port, () => console.log(`Server listening on ${port}`));
+  server.listen(port, '0.0.0.0', () => console.log(`Server listening on ${port}`));
 }
 
 main().catch((err) => {
