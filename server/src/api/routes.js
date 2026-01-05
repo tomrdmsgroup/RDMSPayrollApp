@@ -38,6 +38,8 @@ const {
   listStaffUsersAsAdminOnly,
 } = require('../domain/authService');
 
+const { getRecapForLocationName } = require('../domain/airtableRecapService');
+
 const idempotency = new IdempotencyService();
 
 function json(res, status, body) {
@@ -57,7 +59,7 @@ function parseBody(req) {
     req.on('end', () => {
       try {
         resolve(JSON.parse(data || '{}'));
-      } catch (e) {
+      } catch (_) {
         resolve({});
       }
     });
@@ -192,11 +194,8 @@ async function exchangeCodeForTokens(req, code) {
     body: body.toString(),
   });
 
-  const jsonBody = await resp.json();
-  if (!resp.ok) {
-    throw new Error(`google_token_exchange_failed:${resp.status}`);
-  }
-  return jsonBody;
+  if (!resp.ok) throw new Error(`google_token_exchange_failed:${resp.status}`);
+  return resp.json();
 }
 
 async function fetchGoogleUserInfo(accessToken) {
@@ -204,9 +203,8 @@ async function fetchGoogleUserInfo(accessToken) {
     method: 'GET',
     headers: { Authorization: `Bearer ${accessToken}` },
   });
-  const body = await resp.json();
   if (!resp.ok) throw new Error(`google_userinfo_failed:${resp.status}`);
-  return body;
+  return resp.json();
 }
 
 function router(req, res) {
@@ -214,9 +212,7 @@ function router(req, res) {
 
   if (url.pathname === '/health') return json(res, 200, { ok: true });
 
-  // -----------------------
   // Staff Auth (Google)
-  // -----------------------
   if (url.pathname === '/auth/google' && req.method === 'GET') {
     try {
       const redirect = googleAuthUrl(req);
@@ -245,7 +241,6 @@ function router(req, res) {
 
         const session = await createSessionForEmail(email);
         if (!session) {
-          // Staff must be pre-approved in staff_users
           return html(
             res,
             403,
@@ -258,8 +253,6 @@ function router(req, res) {
 
         setSessionCookie(res, session.token);
 
-        // For now, send them to a simple placeholder page.
-        // We will replace this with the real staff console later.
         return html(
           res,
           200,
@@ -294,9 +287,26 @@ function router(req, res) {
     return;
   }
 
-  // -----------------------
+  // Staff Console Recap (staff only)
+  if (url.pathname === '/staff/recap' && req.method === 'GET') {
+    (async () => {
+      const user = await requireStaff(req, res);
+      if (!user) return;
+
+      try {
+        const locationName = url.searchParams.get('locationName');
+        if (!locationName) return json(res, 400, { error: 'locationName_required' });
+
+        const recap = await getRecapForLocationName(locationName);
+        return json(res, 200, { recap });
+      } catch (e) {
+        return handleError(res, e);
+      }
+    })();
+    return;
+  }
+
   // Staff Admin: manage staff users
-  // -----------------------
   if (url.pathname === '/staff-users' && req.method === 'GET') {
     (async () => {
       try {
@@ -341,9 +351,7 @@ function router(req, res) {
     return;
   }
 
-  // -----------------------
   // Tokens
-  // -----------------------
   if (url.pathname === '/tokens/issue' && req.method === 'POST') {
     parseBody(req).then((body) => {
       try {
@@ -362,9 +370,7 @@ function router(req, res) {
     return;
   }
 
-  // -----------------------
   // Client Locations (staff only)
-  // -----------------------
   if (url.pathname === '/client-locations' && req.method === 'GET') {
     (async () => {
       const user = await requireStaff(req, res);
@@ -431,9 +437,7 @@ function router(req, res) {
     return;
   }
 
-  // -----------------------
   // Rule Configs (staff only)
-  // -----------------------
   if (url.pathname === '/rule-configs' && req.method === 'GET') {
     (async () => {
       const user = await requireStaff(req, res);
@@ -489,9 +493,7 @@ function router(req, res) {
     return;
   }
 
-  // -----------------------
   // Exclusions (staff only)
-  // -----------------------
   if (url.pathname === '/exclusions' && req.method === 'GET') {
     (async () => {
       const user = await requireStaff(req, res);
@@ -561,9 +563,7 @@ function router(req, res) {
     return;
   }
 
-  // -----------------------
   // Validation (public, used by ops email flow)
-  // -----------------------
   if (url.pathname === '/validate' && req.method === 'POST') {
     parseBody(req).then(async (body) => {
       try {
@@ -592,9 +592,7 @@ function router(req, res) {
     return;
   }
 
-  // -----------------------
   // Run (read-only convenience, staff only)
-  // -----------------------
   if (url.pathname === '/run' && req.method === 'GET') {
     (async () => {
       const user = await requireStaff(req, res);
@@ -612,9 +610,7 @@ function router(req, res) {
     return;
   }
 
-  // -----------------------
   // Idempotency (public utility)
-  // -----------------------
   if (url.pathname === '/idempotency/check' && req.method === 'POST') {
     parseBody(req).then(async (body) => {
       const exists = idempotency.check(body.scope, body.key);
@@ -625,9 +621,7 @@ function router(req, res) {
     return;
   }
 
-  // -----------------------
   // Approve / Rerun (public, used by email CTA links)
-  // -----------------------
   if (url.pathname === '/approve' && req.method === 'GET') {
     const tokenId = url.searchParams.get('token');
     if (!tokenId) {
