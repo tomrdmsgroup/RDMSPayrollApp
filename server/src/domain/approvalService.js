@@ -1,23 +1,37 @@
 // server/src/domain/approvalService.js
 //
-// Step 2 behavior rules
-// 1) Approval is final for a location + pay period.
-// 2) Once any approval exists for that location + pay period, reruns are blocked.
-// 3) Approve always succeeds (or no-ops as "already approved") even if rerun was clicked earlier.
-// 4) On first approval for the pay period, create ONE Asana task using routing from Airtable Vitals.
-//    (Project GUID + Inbox Section GUID). No internal email.
+// Step 2 plus rerun automation and copy updates.
+//
+// Rules
+// - Approval is final for a location + pay period.
+// - Once any approval exists for that location + pay period, reruns are blocked.
+// - Approve always succeeds (or no-ops as "already approved") even if rerun was clicked earlier.
+// - On first approval for the pay period, create ONE Asana task using Airtable Vitals routing.
+// - Rerun triggers a fresh audit run immediately and sends a new email.
+// - Confirmation pages show a contact line using the Airtable payroll project email address.
 
 const { query } = require('./db');
 const { validateToken, markTokenUsed } = require('./tokenService');
-const { getRunById, updateRun, appendEvent } = require('./runManager');
-const { getOutcome, updateOutcome } = require('./outcomeService');
+const { createRun, getRunById, updateRun, appendEvent, nowIso } = require('./runManager');
+const { buildOutcome, saveOutcome, getOutcome, updateOutcome } = require('./outcomeService');
+const { buildArtifacts } = require('./artifactService');
+const { composeEmail } = require('./emailComposer');
+const { sendOutcomeEmail } = require('./emailService');
+
 const { fetchVitalsSnapshot } = require('../providers/vitalsProvider');
 const { resolveAsanaRoute } = require('./asanaTaskService');
 const { createTask } = require('../providers/asanaProvider');
 const { notifyFailure } = require('./failureService');
 
-function nowIso() {
-  return new Date().toISOString();
+const AIRTABLE_PAYROLL_EMAIL_FIELD = 'PR RDMS Payroll Project Email Address';
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
 
 function formatPacific(isoString) {
@@ -37,21 +51,16 @@ function formatPacific(isoString) {
   }
 }
 
-function escapeHtml(value) {
-  return String(value || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
-
-function htmlPage(title, heading, lines) {
+function htmlPage({ title, heading, lines, contactEmail }) {
   const safeTitle = escapeHtml(title);
   const safeHeading = escapeHtml(heading);
   const body = (Array.isArray(lines) ? lines : [])
     .map((t) => `<p style="margin:0 0 12px 0;">${escapeHtml(t)}</p>`)
     .join('');
+
+  const footerLine = contactEmail
+    ? `If you reached this page by mistake, please email ${contactEmail}.`
+    : 'If you reached this page by mistake, please reply to the email you received.';
 
   return `<!doctype html>
 <html>
@@ -67,11 +76,22 @@ function htmlPage(title, heading, lines) {
         ${body}
       </div>
       <div style="margin-top:16px; font-size:12px; color:#6b7280;">
-        If you reached this page by mistake, close this tab.
+        ${escapeHtml(footerLine)}
       </div>
     </div>
   </body>
 </html>`;
+}
+
+async function getPayrollContactEmail(client_location_id) {
+  try {
+    const snapshot = await fetchVitalsSnapshot(client_location_id);
+    const record = (snapshot && snapshot.data && snapshot.data[0]) || null;
+    const email = record && record[AIRTABLE_PAYROLL_EMAIL_FIELD] ? String(record[AIRTABLE_PAYROLL_EMAIL_FIELD]).trim() : '';
+    return email || '';
+  } catch (_) {
+    return '';
+  }
 }
 
 async function getPeriodApproval(client_location_id, period_start, period_end) {
@@ -164,29 +184,103 @@ async function createApprovalAsanaTask(run) {
   }
 }
 
+async function triggerRerunAndEmail({ sourceRun, sourceOutcome }) {
+  const policySnapshot = sourceOutcome?.policy_snapshot || sourceRun?.payload?.policy_snapshot || null;
+
+  const newRun = await createRun({
+    client_location_id: sourceRun.client_location_id,
+    period_start: sourceRun.period_start,
+    period_end: sourceRun.period_end,
+    payload: { policy_snapshot: policySnapshot },
+    status: 'running',
+  });
+
+  appendEvent(newRun, 'rerun_created', { from_run_id: sourceRun.id });
+  await updateRun(newRun.id, { events: newRun.events });
+
+  const artifacts = buildArtifacts({ run: newRun, policySnapshot: policySnapshot || {} });
+  const outcome = await buildOutcome(newRun, [], artifacts, policySnapshot);
+  const savedOutcome = await saveOutcome(newRun.id, outcome);
+
+  appendEvent(newRun, 'ops_outcome_saved', { outcome_status: savedOutcome.status });
+  await updateRun(newRun.id, { events: newRun.events });
+
+  // Ensure recipients carry forward if policy snapshot did not include them.
+  const recipients = Array.isArray(sourceOutcome?.delivery?.recipients) ? sourceOutcome.delivery.recipients : [];
+  if (recipients.length && (!savedOutcome.delivery.recipients || savedOutcome.delivery.recipients.length === 0)) {
+    await updateOutcome(newRun.id, { delivery: { recipients } });
+  }
+
+  const latestOutcome = await getOutcome(newRun.id);
+  const rendered = composeEmail(latestOutcome, newRun);
+  if (!rendered.ok) {
+    appendEvent(newRun, 'ops_email_render_failed', { error: rendered.error });
+    await updateRun(newRun.id, { events: newRun.events, status: 'completed' });
+    return { ok: false, error: rendered.error, newRunId: newRun.id };
+  }
+
+  const readyOutcome = await updateOutcome(newRun.id, {
+    delivery: {
+      subject: rendered.subject,
+      rendered_text: rendered.text,
+      rendered_html: rendered.html,
+    },
+  });
+
+  const sendResult = await sendOutcomeEmail(readyOutcome);
+
+  if (sendResult?.ok) {
+    await updateOutcome(newRun.id, {
+      status: 'delivered',
+      delivery: {
+        sent_at: nowIso(),
+        provider_message_id: sendResult.providerMessageId || null,
+      },
+    });
+
+    appendEvent(newRun, 'ops_email_sent', { provider_message_id: sendResult.providerMessageId });
+    await updateRun(newRun.id, { status: 'completed', events: newRun.events });
+
+    return { ok: true, newRunId: newRun.id, messageId: sendResult.providerMessageId || null };
+  }
+
+  appendEvent(newRun, 'ops_email_send_failed', { error: sendResult?.error || 'email_send_failed' });
+  await updateRun(newRun.id, { status: 'completed', events: newRun.events });
+  return { ok: false, error: sendResult?.error || 'email_send_failed', newRunId: newRun.id };
+}
+
 async function approveAction(token) {
   const v = await validateToken(token, { type: 'approval', allow_used: true });
+  const contactEmail = v?.token?.client_location_id ? await getPayrollContactEmail(v.token.client_location_id) : '';
+
   if (!v.ok) {
     return {
       ok: false,
       status: 'invalid',
-      html: htmlPage('Payroll Approval', 'This approval link is not valid', [
-        'This link is missing, expired, already used, or incorrect.',
-        `Reason: ${v.reason}`,
-      ]),
+      html: htmlPage({
+        title: 'Payroll Approval',
+        heading: 'This approval link is not valid',
+        lines: ['This link is missing, expired, already used, or incorrect.', `Reason: ${v.reason}`],
+        contactEmail,
+      }),
     };
   }
 
   const tokenRow = v.token;
   const run = await getRunById(tokenRow.run_id);
 
+  const runContactEmail = run ? await getPayrollContactEmail(run.client_location_id) : contactEmail;
+
   if (!run) {
     return {
       ok: false,
       status: 'missing_run',
-      html: htmlPage('Payroll Approval', 'We could not find that payroll run', [
-        'Please reply to the email you received and we will help.',
-      ]),
+      html: htmlPage({
+        title: 'Payroll Approval',
+        heading: 'We could not find that payroll run',
+        lines: ['Please reply to the email you received and we will help.'],
+        contactEmail: runContactEmail,
+      }),
     };
   }
 
@@ -202,24 +296,18 @@ async function approveAction(token) {
     return {
       ok: true,
       status: 'already_approved',
-      html: htmlPage('Payroll Approval', 'Payroll already approved for this pay period', [
-        `Location: ${run.client_location_id}`,
-        `Period: ${run.period_start} to ${run.period_end}`,
-        'No further action is needed.',
-      ]),
+      html: htmlPage({
+        title: 'Payroll Approval',
+        heading: 'Payroll already approved for this pay period',
+        lines: [`Location: ${run.client_location_id}`, `Period: ${run.period_start} to ${run.period_end}`, 'No further action is needed.'],
+        contactEmail: runContactEmail,
+      }),
     };
   }
 
-  // Mark token used (best effort). We allow used tokens to render "already approved" too.
   await markTokenUsed(token);
 
-  const inserted = await insertPeriodApproval(
-    run.client_location_id,
-    run.period_start,
-    run.period_end,
-    run.id,
-    token,
-  );
+  const inserted = await insertPeriodApproval(run.client_location_id, run.period_start, run.period_end, run.id, token);
 
   if (!inserted) {
     const latest = await getPeriodApproval(run.client_location_id, run.period_start, run.period_end);
@@ -234,11 +322,12 @@ async function approveAction(token) {
     return {
       ok: true,
       status: 'already_approved',
-      html: htmlPage('Payroll Approval', 'Payroll already approved for this pay period', [
-        `Location: ${run.client_location_id}`,
-        `Period: ${run.period_start} to ${run.period_end}`,
-        'No further action is needed.',
-      ]),
+      html: htmlPage({
+        title: 'Payroll Approval',
+        heading: 'Payroll already approved for this pay period',
+        lines: [`Location: ${run.client_location_id}`, `Period: ${run.period_start} to ${run.period_end}`, 'No further action is needed.'],
+        contactEmail: runContactEmail,
+      }),
     };
   }
 
@@ -254,44 +343,52 @@ async function approveAction(token) {
     });
   }
 
-  // Create Asana task only on first approval insert.
   await createApprovalAsanaTask(run);
   await updateRun(run.id, { events: run.events });
 
   return {
     ok: true,
     status: 'approved',
-    html: htmlPage('Payroll Approved', 'Payroll approved', [
-      `Location: ${run.client_location_id}`,
-      `Period: ${run.period_start} to ${run.period_end}`,
-      'RDMS has been notified.',
-    ]),
+    html: htmlPage({
+      title: 'Payroll Approved',
+      heading: 'Payroll approved',
+      lines: [`Location: ${run.client_location_id}`, `Period: ${run.period_start} to ${run.period_end}`, 'RDMS has been notified.'],
+      contactEmail: runContactEmail,
+    }),
   };
 }
 
 async function rerunAction(token) {
   const v = await validateToken(token, { type: 'rerun', allow_used: true });
+  const contactEmail = v?.token?.client_location_id ? await getPayrollContactEmail(v.token.client_location_id) : '';
+
   if (!v.ok) {
     return {
       ok: false,
       status: 'invalid',
-      html: htmlPage('Rerun Audit', 'This rerun link is not valid', [
-        'This link is missing, expired, already used, or incorrect.',
-        `Reason: ${v.reason}`,
-      ]),
+      html: htmlPage({
+        title: 'Rerun Audit',
+        heading: 'This rerun link is not valid',
+        lines: ['This link is missing, expired, already used, or incorrect.', `Reason: ${v.reason}`],
+        contactEmail,
+      }),
     };
   }
 
   const tokenRow = v.token;
   const run = await getRunById(tokenRow.run_id);
+  const runContactEmail = run ? await getPayrollContactEmail(run.client_location_id) : contactEmail;
 
   if (!run) {
     return {
       ok: false,
       status: 'missing_run',
-      html: htmlPage('Rerun Audit', 'We could not find that payroll run', [
-        'Please reply to the email you received and we will help.',
-      ]),
+      html: htmlPage({
+        title: 'Rerun Audit',
+        heading: 'We could not find that payroll run',
+        lines: ['Please reply to the email you received and we will help.'],
+        contactEmail: runContactEmail,
+      }),
     };
   }
 
@@ -307,21 +404,26 @@ async function rerunAction(token) {
     return {
       ok: true,
       status: 'rerun_blocked_already_approved',
-      html: htmlPage('Rerun Audit', 'Rerun is disabled because payroll is already approved', [
-        `Location: ${run.client_location_id}`,
-        `Period: ${run.period_start} to ${run.period_end}`,
-        'Payroll has already been approved for this pay period.',
-      ]),
+      html: htmlPage({
+        title: 'Rerun Audit',
+        heading: 'Rerun is disabled because payroll is already approved',
+        lines: [
+          `Location: ${run.client_location_id}`,
+          `Period: ${run.period_start} to ${run.period_end}`,
+          'Payroll has already been approved for this pay period.',
+        ],
+        contactEmail: runContactEmail,
+      }),
     };
   }
 
   await markTokenUsed(token);
 
-  appendEvent(run, 'rerun_requested', { token });
+  appendEvent(run, 'rerun_clicked', { token });
   await updateRun(run.id, { events: run.events });
 
-  const outcome = await getOutcome(run.id);
-  if (outcome) {
+  const sourceOutcome = await getOutcome(run.id);
+  if (sourceOutcome) {
     await updateOutcome(run.id, {
       status: 'rerun_requested',
       rerun_requested_at: nowIso(),
@@ -329,14 +431,30 @@ async function rerunAction(token) {
     });
   }
 
+  // Auto-trigger the rerun immediately and send the new email.
+  const trigger = await triggerRerunAndEmail({ sourceRun: run, sourceOutcome });
+
+  appendEvent(run, 'rerun_trigger_result', {
+    ok: trigger.ok,
+    new_run_id: trigger.newRunId || null,
+    provider_message_id: trigger.messageId || null,
+    error: trigger.ok ? null : trigger.error,
+  });
+  await updateRun(run.id, { events: run.events });
+
   return {
     ok: true,
-    status: 'rerun_requested',
-    html: htmlPage('Rerun Requested', 'Rerun requested', [
-      `Location: ${run.client_location_id}`,
-      `Period: ${run.period_start} to ${run.period_end}`,
-      'Please correct your data in your POS system. RDMS will rerun the audit.',
-    ]),
+    status: 'rerun_started',
+    html: htmlPage({
+      title: 'Rerun Started',
+      heading: 'Payroll Validation Audit will be delivered shortly',
+      lines: [
+        `Location: ${run.client_location_id}`,
+        `Period: ${run.period_start} to ${run.period_end}`,
+        'RDMS is rerunning the audit to capture your corrected POS data.',
+      ],
+      contactEmail: runContactEmail,
+    }),
   };
 }
 
