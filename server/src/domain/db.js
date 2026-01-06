@@ -75,6 +75,22 @@ async function initDb() {
       expires_at TIMESTAMPTZ NOT NULL,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
+
+    -- Per location rule configuration (Tab 2)
+    CREATE TABLE IF NOT EXISTS ops_rule_configs (
+      client_location_id TEXT NOT NULL,
+      rule_id TEXT NOT NULL,
+      active BOOLEAN NOT NULL,
+      internal_notification BOOLEAN NOT NULL,
+      asana_task_mode TEXT NOT NULL CHECK (asana_task_mode IN ('SUMMARY','PER_FINDING')),
+      params JSONB,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (client_location_id, rule_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ops_rule_configs_location
+      ON ops_rule_configs (client_location_id);
     `,
     [],
   );
