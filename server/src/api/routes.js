@@ -25,6 +25,13 @@ const { listLocationNames, getRecapForLocationName } = require('../domain/airtab
 const { rulesCatalog } = require('../domain/rulesCatalog');
 const { getRuleConfigsForLocation, upsertRuleConfig } = require('../domain/rulesConfigDb');
 
+const {
+  listExcludedStaffByLocation,
+  createExcludedStaff,
+  updateExcludedStaffById,
+  softDeleteExcludedStaffById,
+} = require('../domain/excludedStaffDb');
+
 const idempotency = new IdempotencyService();
 
 function json(res, status, body) {
@@ -84,13 +91,7 @@ function setSessionCookie(res, token) {
 
 function clearSessionCookie(res) {
   const isProd = (process.env.PUBLIC_BASE_URL || '').startsWith('https://');
-  const parts = [
-    `rdms_staff_session=`,
-    'Path=/',
-    'HttpOnly',
-    'SameSite=Lax',
-    'Max-Age=0',
-  ];
+  const parts = [`rdms_staff_session=`, 'Path=/', 'HttpOnly', 'SameSite=Lax', 'Max-Age=0'];
   if (isProd) parts.push('Secure');
   res.setHeader('Set-Cookie', parts.join('; '));
 }
@@ -320,6 +321,123 @@ function router(req, res) {
         const recap = await getRecapForLocationName(locationName);
         return json(res, 200, { recap });
       } catch (e) {
+        return handleError(res, e);
+      }
+    })();
+    return;
+  }
+
+  // Excluded Staff (global ingress filter)
+  // Additive only. Does not touch rule execution.
+  if (url.pathname === '/staff/excluded' && req.method === 'GET') {
+    (async () => {
+      const user = await requireStaff(req, res);
+      if (!user) return;
+      try {
+        const locationName = url.searchParams.get('locationName');
+        if (!locationName) return json(res, 400, { error: 'locationName_required' });
+        const rows = await listExcludedStaffByLocation(locationName);
+        return json(res, 200, { excluded: rows });
+      } catch (e) {
+        return handleError(res, e);
+      }
+    })();
+    return;
+  }
+
+  if (url.pathname === '/staff/excluded' && req.method === 'POST') {
+    (async () => {
+      const user = await requireStaff(req, res);
+      if (!user) return;
+      try {
+        const body = await parseBody(req);
+
+        const row = await createExcludedStaff({
+          location_name: body.location_name,
+          toast_employee_id: body.toast_employee_id,
+          employee_name: body.employee_name,
+          reason: body.reason,
+          effective_from: body.effective_from,
+          effective_to: body.effective_to,
+          notes: body.notes,
+          active: body.active,
+        });
+
+        return json(res, 200, { excluded: row });
+      } catch (e) {
+        // Common input errors return 400
+        const msg = String(e.message || '');
+        if (
+          msg === 'location_name_required' ||
+          msg === 'toast_employee_id_required' ||
+          msg === 'reason_required'
+        ) {
+          return json(res, 400, { error: msg });
+        }
+        return handleError(res, e);
+      }
+    })();
+    return;
+  }
+
+  if (url.pathname.startsWith('/staff/excluded/') && req.method === 'PUT') {
+    (async () => {
+      const user = await requireStaff(req, res);
+      if (!user) return;
+      try {
+        const parts = url.pathname.split('/').filter(Boolean);
+        const id = Number(parts[2]);
+        if (!id) return json(res, 400, { error: 'id_required' });
+
+        const body = await parseBody(req);
+
+        // toast_employee_id must be read-only once saved
+        if (body.toast_employee_id !== undefined) {
+          return json(res, 400, { error: 'toast_employee_id_read_only' });
+        }
+        if (body.location_name !== undefined) {
+          return json(res, 400, { error: 'location_name_read_only' });
+        }
+
+        const row = await updateExcludedStaffById(id, {
+          employee_name: body.employee_name,
+          reason: body.reason,
+          effective_from: body.effective_from,
+          effective_to: body.effective_to,
+          notes: body.notes,
+          active: body.active,
+        });
+
+        if (!row) return json(res, 404, { error: 'not_found' });
+        return json(res, 200, { excluded: row });
+      } catch (e) {
+        const msg = String(e.message || '');
+        if (msg === 'id_invalid' || msg === 'reason_required') {
+          return json(res, 400, { error: msg });
+        }
+        return handleError(res, e);
+      }
+    })();
+    return;
+  }
+
+  if (url.pathname.startsWith('/staff/excluded/') && req.method === 'DELETE') {
+    (async () => {
+      const user = await requireStaff(req, res);
+      if (!user) return;
+      try {
+        const parts = url.pathname.split('/').filter(Boolean);
+        const id = Number(parts[2]);
+        if (!id) return json(res, 400, { error: 'id_required' });
+
+        const row = await softDeleteExcludedStaffById(id);
+        if (!row) return json(res, 404, { error: 'not_found' });
+        return json(res, 200, { excluded: row });
+      } catch (e) {
+        const msg = String(e.message || '');
+        if (msg === 'id_invalid') {
+          return json(res, 400, { error: msg });
+        }
         return handleError(res, e);
       }
     })();
