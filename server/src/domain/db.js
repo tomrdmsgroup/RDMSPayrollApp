@@ -91,6 +91,32 @@ async function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_ops_rule_configs_location
       ON ops_rule_configs (client_location_id);
+
+    -- Excluded Staff (global ingress filter foundation)
+    -- Additive only. No changes to existing tables or routes.
+    CREATE TABLE IF NOT EXISTS excluded_staff (
+      id SERIAL PRIMARY KEY,
+
+      location_name TEXT NOT NULL,
+      toast_employee_id TEXT NOT NULL,
+      employee_name TEXT,
+
+      reason TEXT NOT NULL,
+      effective_from DATE,
+      effective_to DATE,
+      notes TEXT,
+
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+
+      CONSTRAINT excluded_staff_effective_window_chk
+        CHECK (effective_from IS NULL OR effective_to IS NULL OR effective_from <= effective_to)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_excluded_staff_lookup
+      ON excluded_staff (location_name, toast_employee_id, active);
     `,
     [],
   );
