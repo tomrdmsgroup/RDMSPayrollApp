@@ -220,6 +220,49 @@
         color: var(--muted);
         font-size: 13px;
       }
+
+      /* Better readability for long definitions */
+      .defClamp {
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 4;
+        overflow: hidden;
+        line-height: 1.35;
+        max-height: 5.4em;
+      }
+
+      .defTip {
+        position: relative;
+      }
+
+      .defTip:hover::after {
+        content: attr(data-full);
+        position: absolute;
+        left: 0;
+        top: 100%;
+        margin-top: 8px;
+        width: min(640px, 70vw);
+        background: rgba(15, 26, 51, 0.98);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 12px 12px;
+        color: var(--text);
+        box-shadow: var(--shadow);
+        z-index: 50;
+        white-space: normal;
+      }
+
+      .defTip:hover::before {
+        content: "";
+        position: absolute;
+        left: 18px;
+        top: 100%;
+        margin-top: 2px;
+        border: 8px solid transparent;
+        border-bottom-color: rgba(15, 26, 51, 0.98);
+        z-index: 51;
+      }
+
     </style>
   </head>
   <body>
@@ -630,7 +673,8 @@
           .map((r) => {
             const rid = escapeHtml(r.rule_id || "");
             const rname = escapeHtml(r.rule_name || "");
-            const def = escapeHtml(r.definition || "");
+            const defRaw = String(r.definition || "");
+            const def = escapeHtml(defRaw);
             const paramsRequired = !!r.params_required;
             const paramsHint = escapeHtml(r.params_hint || "");
             const paramsVal = r.params === null || r.params === undefined ? "" : String(r.params);
@@ -647,7 +691,11 @@
                 <td><span class="mono">${rid}</span></td>
                 <td>${rname}</td>
                 <td>${paramsCell}</td>
-                <td>${def}</td>
+                <td>
+                  <div class="defTip" data-full="${escapeAttr(defRaw)}">
+                    <div class="defClamp">${def}</div>
+                  </div>
+                </td>
                 <td>${yesNoSelect(active, "active")}</td>
                 <td>${yesNoSelect(internal, "internal_notification")}</td>
                 <td>${yesNoSelect(oneTask, "one_task_per_finding")}</td>
