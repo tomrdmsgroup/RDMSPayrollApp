@@ -1,474 +1,82 @@
 <!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>RDMS Payroll Validation</title>
-    <style>
-      :root {
-        --bg: #0b1220;
-        --card: #0f1a33;
-        --muted: #9fb0d0;
-        --text: #e9efff;
-        --border: rgba(255, 255, 255, 0.12);
-        --pill: rgba(255, 255, 255, 0.10);
-        --ok: rgba(46, 204, 113, 0.18);
-        --warn: rgba(241, 196, 15, 0.18);
-        --bad: rgba(231, 76, 60, 0.18);
-        --info: rgba(52, 152, 219, 0.18);
-      }
-      * { box-sizing: border-box; }
-      body {
-        margin: 0;
-        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Helvetica Neue", "Noto Sans", "Liberation Sans", sans-serif;
-        background: radial-gradient(1000px 700px at 10% 0%, rgba(66, 133, 244, 0.22), transparent 55%),
-                    radial-gradient(900px 650px at 90% 10%, rgba(0, 196, 154, 0.18), transparent 55%),
-                    var(--bg);
-        color: var(--text);
-      }
-      .wrap { max-width: 1100px; margin: 0 auto; padding: 22px; }
-      .topbar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 14px 16px;
-        border: 1px solid var(--border);
-        background: rgba(15, 26, 51, 0.55);
-        backdrop-filter: blur(10px);
-        border-radius: 14px;
-      }
-      .brand { font-weight: 700; letter-spacing: 0.2px; }
-      .center {
-        flex: 1;
-        display: flex;
-        justify-content: center;
-      }
-      .location {
-        width: min(520px, 100%);
-        display: flex;
-        gap: 10px;
-        align-items: center;
-      }
-      select {
-        width: 100%;
-        padding: 10px 12px;
-        border-radius: 10px;
-        border: 1px solid var(--border);
-        background: rgba(255, 255, 255, 0.06);
-        color: var(--text);
-        outline: none;
-      }
-      option { color: #111; }
-      .userbox {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        color: var(--muted);
-        font-size: 13px;
-      }
-      .btn {
-        border: 1px solid var(--border);
-        background: rgba(255, 255, 255, 0.06);
-        color: var(--text);
-        padding: 8px 10px;
-        border-radius: 10px;
-        cursor: pointer;
-      }
-      .btn:hover { background: rgba(255, 255, 255, 0.10); }
-      .tabs {
-        margin-top: 14px;
-        display: flex;
-        gap: 10px;
-        border-bottom: 1px solid var(--border);
-      }
-      .tab {
-        padding: 10px 12px;
-        color: var(--muted);
-        cursor: pointer;
-        border-bottom: 2px solid transparent;
-        font-weight: 600;
-        font-size: 14px;
-      }
-      .tab.active {
-        color: var(--text);
-        border-bottom-color: rgba(255, 255, 255, 0.55);
-      }
-      .page {
-        margin-top: 16px;
-        border: 1px solid var(--border);
-        background: rgba(15, 26, 51, 0.55);
-        backdrop-filter: blur(10px);
-        border-radius: 14px;
-        padding: 16px;
-      }
-      .pagetitle {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        margin-bottom: 14px;
-      }
-      .pagetitle h1 {
-        margin: 0;
-        font-size: 18px;
-      }
-      .pagetitle .sub {
-        color: var(--muted);
-        font-size: 13px;
-      }
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        overflow: hidden;
-        border-radius: 12px;
-        border: 1px solid var(--border);
-      }
-      th, td {
-        text-align: left;
-        padding: 12px 12px;
-        border-bottom: 1px solid var(--border);
-        font-size: 14px;
-      }
-      th {
-        color: var(--muted);
-        font-weight: 700;
-        background: rgba(255, 255, 255, 0.04);
-      }
-      tr:last-child td { border-bottom: none; }
-      .sectionRow td {
-        background: rgba(255, 255, 255, 0.04);
-        color: var(--muted);
-        font-weight: 700;
-        font-size: 13px;
-      }
-      .pill {
-        display: inline-flex;
-        align-items: center;
-        padding: 6px 10px;
-        border-radius: 999px;
-        border: 1px solid var(--border);
-        background: var(--pill);
-        font-weight: 700;
-        font-size: 12px;
-        letter-spacing: 0.2px;
-      }
-      .pill.ok { background: var(--ok); }
-      .pill.attention { background: var(--warn); }
-      .pill.missing { background: var(--bad); }
-      .pill.notactive { background: rgba(255,255,255,0.10); }
-      .pill.late { background: var(--bad); }
-      .pill.locked { background: rgba(231, 76, 60, 0.12); }
-      .pill.reference { background: var(--info); }
-      .notice {
-        margin-top: 12px;
-        padding: 12px;
-        border-radius: 12px;
-        border: 1px solid var(--border);
-        background: rgba(231, 76, 60, 0.10);
-        color: var(--text);
-        display: none;
-      }
-      .muted { color: var(--muted); }
-      .loading { color: var(--muted); font-size: 13px; }
-    </style>
-  </head>
-  <body>
-    <div class="wrap">
-      <div class="topbar">
-        <div class="brand">RDMS Payroll Validation</div>
+btn.textContent = "Saving...";
+btn.disabled = true;
 
-        <div class="center">
-          <div class="location">
-            <select id="locationSelect">
-              <option value="">Select a location</option>
-            </select>
-          </div>
-        </div>
 
-        <div class="userbox">
-          <span id="userLabel">Checking login...</span>
-          <button class="btn" id="logoutBtn" type="button">Logout</button>
-        </div>
-      </div>
+try {
+const q = encodeURIComponent(state.rulesLocationName);
+const { resp, body } = await apiPut(`/staff/rules?locationName=${q}`, { rules });
+if (!resp.ok) {
+alert(`Save failed: ${body.error || "unknown_error"}`);
+return;
+}
+btn.textContent = "Saved";
+setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 800);
+} catch (e) {
+alert(`Save failed: ${e.message || e}`);
+} finally {
+if (btn.textContent !== "Saved") {
+btn.textContent = original;
+btn.disabled = false;
+}
+}
+}
 
-      <div class="tabs" id="tabs">
-        <div class="tab active" data-tab="confirmations">Client Info Confirmations</div>
-        <div class="tab" data-tab="rules">Payroll Validation Rules</div>
-        <div class="tab" data-tab="excluded">Excluded Staff</div>
-        <div class="tab" data-tab="reports">RDMS Manual Reporting</div>
-      </div>
 
-      <div class="page" id="page">
-        <div class="pagetitle">
-          <h1 id="pageTitle">Client Info Confirmations</h1>
-          <div class="sub" id="pageSub">Pick a location to load the current pay period recap.</div>
-        </div>
+async function loadRecapForSelected() {
+const sel = document.getElementById("locationSelect");
+const name = sel.value;
+state.recap = null;
+renderConfirmations();
+if (!name) return;
 
-        <div id="content">
-          <div class="loading">Waiting for location selection.</div>
-        </div>
 
-        <div class="notice" id="lateNotice"></div>
-      </div>
-    </div>
+const q = encodeURIComponent(name);
+const { resp, body } = await apiGet(`/staff/recap?locationName=${q}`);
+if (!resp.ok) {
+document.getElementById("content").innerHTML = `<div class="muted">Recap error: ${body.error || "unknown_error"}</div>`;
+return;
+}
+state.recap = body.recap || null;
+renderConfirmations();
+}
 
-    <script>
-      const state = {
-        tab: "confirmations",
-        locations: [],
-        recap: null,
-      };
 
-      function setActiveTab(tab) {
-        state.tab = tab;
-        document.querySelectorAll(".tab").forEach(el => {
-          el.classList.toggle("active", el.dataset.tab === tab);
-        });
+async function logout() {
+await fetch("/auth/logout", { method: "POST", credentials: "include" });
+window.location.href = "/auth/google";
+}
 
-        const titleMap = {
-          confirmations: "Client Info Confirmations",
-          rules: "Payroll Validation Rules",
-          excluded: "Excluded Staff",
-          reports: "RDMS Manual Reporting",
-        };
 
-        document.getElementById("pageTitle").textContent = titleMap[tab] || "RDMS Payroll Validation";
+document.getElementById("tabs").addEventListener("click", (e) => {
+const tab = e.target && e.target.dataset ? e.target.dataset.tab : null;
+if (!tab) return;
+setActiveTab(tab);
+});
 
-        if (tab !== "confirmations") {
-          document.getElementById("pageSub").textContent = "Coming soon.";
-          document.getElementById("content").innerHTML = "<div class='muted'>Coming soon.</div>";
-          document.getElementById("lateNotice").style.display = "none";
-          return;
-        }
 
-        document.getElementById("pageSub").textContent = "Pick a location to load the current pay period recap.";
-        renderConfirmations();
-      }
+document.getElementById("locationSelect").addEventListener("change", () => {
+if (state.tab === "confirmations") {
+loadRecapForSelected();
+return;
+}
+if (state.tab === "rules") {
+loadRulesForSelected();
+return;
+}
+setActiveTab("confirmations");
+loadRecapForSelected();
+});
 
-      function pill(text, klass) {
-        return `<span class="pill ${klass}">${text}</span>`;
-      }
 
-      function fmtDateRange(startYmd, endYmd) {
-        if (!startYmd || !endYmd) return "";
-        return `${startYmd} to ${endYmd}`;
-      }
+document.getElementById("logoutBtn").addEventListener("click", logout);
 
-      function renderConfirmations() {
-        const content = document.getElementById("content");
-        const lateNotice = document.getElementById("lateNotice");
-        lateNotice.style.display = "none";
-        lateNotice.textContent = "";
 
-        if (!state.recap) {
-          content.innerHTML = "<div class='loading'>Select a location to load data.</div>";
-          return;
-        }
-
-        const r = state.recap;
-        const p = (r.current_pay_period || {});
-
-        const rows = [];
-
-        function addSection(label) {
-          rows.push(`<tr class="sectionRow"><td colspan="3">${label}</td></tr>`);
-        }
-        function addRow(item, result, statusPill) {
-          rows.push(`<tr><td>${item}</td><td>${result || ""}</td><td>${statusPill}</td></tr>`);
-        }
-
-        addSection("Pay Period + Processing Readiness");
-
-        const appEnabled = r.app_active === true;
-        addRow(
-          "Validation App",
-          appEnabled ? "Enabled" : "Disabled",
-          appEnabled ? pill("OK", "ok") : pill("Not Active", "notactive")
-        );
-
-        // These are vitals-driven. If a field is missing we show Missing.
-        addRow(
-          "Payroll Company",
-          r.payroll_company || "",
-          r.payroll_company ? pill("OK", "ok") : pill("Missing", "missing")
-        );
-
-        addRow(
-          "Pay Period",
-          fmtDateRange(p.start_date, p.end_date),
-          (p.start_date && p.end_date) ? pill("OK", "ok") : pill("Missing", "missing")
-        );
-
-        const windowResult = p.cutoff_local ? `Through ${p.cutoff_local}` : "";
-        addRow(
-          "Validation Window",
-          windowResult,
-          p.is_late ? pill("Late", "late") : pill("OK", "ok")
-        );
-
-        addRow(
-          "Payroll Submit Date",
-          p.submit_date || "",
-          p.submit_date ? pill("OK", "ok") : pill("Missing", "missing")
-        );
-
-        addRow(
-          "Check Date",
-          p.check_date || "",
-          p.check_date ? pill("Reference", "reference") : pill("Missing", "missing")
-        );
-
-        // Placeholders for now, we will wire these to Postgres next.
-        addRow("Last Validation Run", "Not available yet", pill("Reference", "reference"));
-        addRow("Payroll Approval", "Not available yet", pill("Reference", "reference"));
-
-        addRow(
-          "Asana Tracking",
-          r.asana_connected ? "Connected" : "Missing configuration",
-          r.asana_connected ? pill("OK", "ok") : pill("Attention", "attention")
-        );
-
-        addSection("Required Setup");
-
-        addRow(
-          "POS Type",
-          r.pos_type || "",
-          r.pos_type ? pill("OK", "ok") : pill("Missing", "missing")
-        );
-
-        addRow(
-          "Payroll Project Email",
-          r.payroll_project_email || "",
-          r.payroll_project_email ? pill("OK", "ok") : pill("Missing", "missing")
-        );
-
-        addRow(
-          "Payroll Preview Recipients",
-          r.preview_recipients_summary || "",
-          r.preview_recipients_count > 0 ? pill("OK", "ok") : pill("Missing", "missing")
-        );
-
-        addRow(
-          "Tip Report Type",
-          r.tip_report_type || "",
-          r.tip_report_type ? pill("OK", "ok") : pill("Attention", "attention")
-        );
-
-        addRow(
-          "Payroll Company Code",
-          r.payroll_company_code || "",
-          r.payroll_company_code ? pill("OK", "ok") : pill("Missing", "missing")
-        );
-
-        addRow(
-          "Pay Frequency",
-          r.pay_frequency || "",
-          r.pay_frequency ? pill("OK", "ok") : pill("Missing", "missing")
-        );
-
-        const tzOk = !!r.time_zone;
-        addRow(
-          "Time Zone",
-          r.time_zone || "",
-          tzOk ? pill("OK", "ok") : pill("Missing", "missing")
-        );
-
-        content.innerHTML = `
-          <table>
-            <thead>
-              <tr>
-                <th style="width: 38%;">Item</th>
-                <th style="width: 42%;">Result</th>
-                <th style="width: 20%;">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rows.join("")}
-            </tbody>
-          </table>
-        `;
-
-        if (p.is_late && p.late_message) {
-          lateNotice.textContent = p.late_message;
-          lateNotice.style.display = "block";
-        }
-      }
-
-      async function apiGet(path) {
-        const resp = await fetch(path, { credentials: "include" });
-        const body = await resp.json().catch(() => ({}));
-        return { resp, body };
-      }
-
-      async function ensureLoggedIn() {
-        const { resp, body } = await apiGet("/auth/me");
-        if (!resp.ok) {
-          window.location.href = "/auth/google";
-          return;
-        }
-        if (!body.user) {
-          window.location.href = "/auth/google";
-          return;
-        }
-        document.getElementById("userLabel").textContent = `${body.user.email} (${body.user.role})`;
-      }
-
-      async function loadLocations() {
-        const sel = document.getElementById("locationSelect");
-        sel.innerHTML = "<option value=''>Loading locations...</option>";
-
-        const { resp, body } = await apiGet("/staff/locations");
-        if (!resp.ok) {
-          sel.innerHTML = "<option value=''>Failed to load locations</option>";
-          return;
-        }
-
-        state.locations = body.locations || [];
-        const opts = ["<option value=''>Select a location</option>"]
-          .concat(state.locations.map(n => `<option value="${String(n).replace(/"/g, "&quot;")}">${n}</option>`));
-        sel.innerHTML = opts.join("");
-      }
-
-      async function loadRecapForSelected() {
-        const sel = document.getElementById("locationSelect");
-        const name = sel.value;
-        state.recap = null;
-        renderConfirmations();
-        if (!name) return;
-
-        const q = encodeURIComponent(name);
-        const { resp, body } = await apiGet(`/staff/recap?locationName=${q}`);
-        if (!resp.ok) {
-          document.getElementById("content").innerHTML = `<div class="muted">Recap error: ${body.error || "unknown_error"}</div>`;
-          return;
-        }
-        state.recap = body.recap || null;
-        renderConfirmations();
-      }
-
-      async function logout() {
-        await fetch("/auth/logout", { method: "POST", credentials: "include" });
-        window.location.href = "/auth/google";
-      }
-
-      document.getElementById("tabs").addEventListener("click", (e) => {
-        const tab = e.target && e.target.dataset ? e.target.dataset.tab : null;
-        if (!tab) return;
-        setActiveTab(tab);
-      });
-
-      document.getElementById("locationSelect").addEventListener("change", () => {
-        if (state.tab !== "confirmations") setActiveTab("confirmations");
-        loadRecapForSelected();
-      });
-
-      document.getElementById("logoutBtn").addEventListener("click", logout);
-
-      (async function boot() {
-        await ensureLoggedIn();
-        await loadLocations();
-        setActiveTab("confirmations");
-      })();
-    </script>
-  </body>
+(async function boot() {
+await ensureLoggedIn();
+await loadLocations();
+setActiveTab("confirmations");
+})();
+</script>
+</body>
 </html>
