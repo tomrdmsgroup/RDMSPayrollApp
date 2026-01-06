@@ -543,14 +543,3 @@ function router(req, res) {
 }
 
 module.exports = { router };
-```
-
----
-
-## What to do right now
-
-1. Overwrite `server/src/api/routes.js` with the block above.
-2. Commit and push.
-3. Let Render redeploy.
-
-If it deploys, then test `/health` and `/staff`.
