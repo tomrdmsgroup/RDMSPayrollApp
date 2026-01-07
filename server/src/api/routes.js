@@ -116,7 +116,7 @@ async function requireAdmin(req, res) {
   const user = await requireStaff(req, res);
   if (!user) return null;
   if (user.role !== 'admin') {
-    json(res, 403, { error: 'admin_only' });
+    json(res, 403, { error: 'forbidden_admin_only' });
     return null;
   }
   return user;
@@ -524,7 +524,7 @@ function router(req, res) {
       const admin = await requireAdmin(req, res);
       if (!admin) return;
       try {
-        const users = await listStaffUsersAsAdminOnly();
+        const users = await listStaffUsersAsAdminOnly(admin.email);
         return json(res, 200, { users });
       } catch (e) {
         return handleError(res, e);
@@ -542,7 +542,7 @@ function router(req, res) {
         const email = (body.email || '').toLowerCase();
         const role = body.role || 'staff';
         if (!email) return json(res, 400, { error: 'email_required' });
-        const user = await upsertStaffUserAsAdminOnly(email, role);
+        const user = await upsertStaffUserAsAdminOnly(admin.email, email, role);
         return json(res, 200, { user });
       } catch (e) {
         return handleError(res, e);
@@ -559,7 +559,7 @@ function router(req, res) {
         const body = await parseBody(req);
         const email = (body.email || '').toLowerCase();
         if (!email) return json(res, 400, { error: 'email_required' });
-        await disableStaffUserAsAdminOnly(email);
+        await disableStaffUserAsAdminOnly(admin.email, email);
         return json(res, 200, { ok: true });
       } catch (e) {
         return handleError(res, e);
