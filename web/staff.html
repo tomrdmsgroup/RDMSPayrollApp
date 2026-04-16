@@ -257,6 +257,38 @@
       .helperList b {
         color: var(--text);
       }
+      .stack {
+        display: grid;
+        gap: 14px;
+      }
+      .panel {
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.03);
+        padding: 14px;
+      }
+      .row {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      .searchResults {
+        margin-top: 10px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        overflow: hidden;
+      }
+      .searchItem {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--border);
+      }
+      .searchItem:last-child {
+        border-bottom: none;
+      }
 
       /* Better readability for long definitions */
       .defClamp {
@@ -364,6 +396,13 @@
         recap: null,
         rules: null,
         rulesLocationName: null,
+        excluded: [],
+        excludedLocationName: null,
+        employeeSearchResults: [],
+        selectedSearchEmployeeId: null,
+        excludedSearchQuery: "",
+        excludedDraftReason: "",
+        excludedDraftNote: "",
       };
 
       function setActiveTab(tab) {
@@ -394,6 +433,13 @@
           return;
         }
 
+        if (tab === "excluded") {
+          document.getElementById("pageSub").textContent =
+            "Manage a short list of staff to skip or handle differently in payroll validation.";
+          loadExcludedForSelected();
+          return;
+        }
+
         document.getElementById("pageSub").textContent = "Coming soon.";
         document.getElementById("content").innerHTML = "<div class='muted'>Coming soon.</div>";
       }
@@ -410,6 +456,26 @@
           headers: { "Content-Type": "application/json" },
           credentials: "include",
           body: JSON.stringify(payload || {}),
+        });
+        const body = await resp.json().catch(() => ({}));
+        return { resp, body };
+      }
+
+      async function apiPost(p, payload) {
+        const resp = await fetch(p, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify(payload || {}),
+        });
+        const body = await resp.json().catch(() => ({}));
+        return { resp, body };
+      }
+
+      async function apiDelete(p) {
+        const resp = await fetch(p, {
+          method: "DELETE",
+          credentials: "include",
         });
         const body = await resp.json().catch(() => ({}));
         return { resp, body };
@@ -823,6 +889,246 @@
         }
       }
 
+      async function loadExcludedForSelected() {
+        const content = document.getElementById("content");
+        const name = document.getElementById("locationSelect").value;
+        state.excluded = [];
+        state.excludedLocationName = name || null;
+        state.employeeSearchResults = [];
+        state.selectedSearchEmployeeId = null;
+        state.excludedSearchQuery = "";
+        state.excludedDraftReason = "";
+        state.excludedDraftNote = "";
+
+        if (!name) {
+          content.innerHTML = "<div class='loading'>Select a location to manage excluded staff.</div>";
+          return;
+        }
+
+        content.innerHTML = "<div class='loading'>Loading excluded staff...</div>";
+        const q = encodeURIComponent(name);
+        const { resp, body } = await apiGet(`/staff/excluded?locationName=${q}`);
+        if (!resp.ok) {
+          content.innerHTML = `<div class="muted">Excluded staff error: ${body.error || "unknown_error"}</div>`;
+          return;
+        }
+        state.excluded = Array.isArray(body.excluded) ? body.excluded : [];
+        renderExcludedTab();
+      }
+
+      function renderExcludedRows() {
+        if (!state.excluded.length) {
+          return `<div class="muted">No one is excluded yet for this location.</div>`;
+        }
+
+        return `
+          <table>
+            <thead>
+              <tr>
+                <th>Employee</th>
+                <th>Exclusion Reason / Note</th>
+                <th>Status</th>
+                <th style="width:150px;">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${state.excluded
+                .map((row) => {
+                  const name = row.employee_name || "Unknown";
+                  const emp = `${name} (${row.toast_employee_id || "n/a"})`;
+                  const reason = [row.reason, row.notes].filter(Boolean).join(" — ");
+                  const status = row.active ? "Active (skipped downstream)" : "Inactive";
+                  return `
+                    <tr data-excluded-id="${escapeAttr(row.id)}">
+                      <td>${escapeHtml(emp)}</td>
+                      <td>${escapeHtml(reason || "No note")}</td>
+                      <td>${escapeHtml(status)}</td>
+                      <td>
+                        <button class="btn" data-action="edit-excluded" type="button">Edit</button>
+                        <button class="btn" data-action="remove-excluded" type="button">Remove</button>
+                      </td>
+                    </tr>
+                  `;
+                })
+                .join("")}
+            </tbody>
+          </table>
+        `;
+      }
+
+      function renderSearchResults() {
+        if (!state.employeeSearchResults.length) {
+          return `<div class="muted" style="margin-top:8px;">Search by name or ID to find one employee.</div>`;
+        }
+
+        return `
+          <div class="searchResults">
+            ${state.employeeSearchResults
+              .map((emp) => {
+                const checked = state.selectedSearchEmployeeId === emp.employeeId ? "checked" : "";
+                return `
+                  <label class="searchItem">
+                    <input type="radio" name="excludedSearchChoice" value="${escapeAttr(emp.employeeId)}" ${checked} />
+                    <span>${escapeHtml(emp.employeeName)} <span class="muted">(${escapeHtml(emp.employeeId)})</span></span>
+                  </label>
+                `;
+              })
+              .join("")}
+          </div>
+        `;
+      }
+
+      function renderExcludedTab() {
+        const content = document.getElementById("content");
+        if (!state.excludedLocationName) {
+          content.innerHTML = "<div class='loading'>Select a location to manage excluded staff.</div>";
+          return;
+        }
+
+        content.innerHTML = `
+          <div class="stack">
+            <div class="panel">
+              <div class="sectionTitle" style="margin-top:0;">Currently Excluded Staff</div>
+              <p class="sectionHelp">These employees are skipped or handled differently in later payroll validation steps.</p>
+              ${renderExcludedRows()}
+            </div>
+
+            <div class="panel">
+              <div class="sectionTitle" style="margin-top:0;">Add Excluded Staff</div>
+              <p class="sectionHelp">Search for one employee, add a reason, then save.</p>
+              <div class="row">
+                <input class="input" id="excludedSearchInput" placeholder="Search Toast employee by name or ID" style="flex:1;min-width:260px;" />
+                <button class="btn" id="excludedSearchBtn" type="button">Search</button>
+              </div>
+              ${renderSearchResults()}
+              <div class="row" style="margin-top:10px;">
+                <input class="input" id="excludedReasonInput" placeholder="Reason (required)" style="flex:1;min-width:220px;" value="${escapeAttr(state.excludedDraftReason)}" />
+                <input class="input" id="excludedNoteInput" placeholder="Note (optional)" style="flex:1;min-width:220px;" value="${escapeAttr(state.excludedDraftNote)}" />
+                <button class="btn primary" id="addExcludedBtn" type="button">Add</button>
+              </div>
+            </div>
+          </div>
+        `;
+
+        const searchBtn = document.getElementById("excludedSearchBtn");
+        const addBtn = document.getElementById("addExcludedBtn");
+        const searchInput = document.getElementById("excludedSearchInput");
+        if (searchInput) searchInput.value = state.excludedSearchQuery;
+        searchBtn.addEventListener("click", searchEmployeesForExcluded);
+        addBtn.addEventListener("click", addSelectedExcludedStaff);
+
+        content.querySelectorAll("input[name='excludedSearchChoice']").forEach((el) => {
+          el.addEventListener("change", () => {
+            state.selectedSearchEmployeeId = el.value;
+          });
+        });
+        content.querySelectorAll("button[data-action='edit-excluded']").forEach((btn) => {
+          btn.addEventListener("click", onEditExcludedRow);
+        });
+        content.querySelectorAll("button[data-action='remove-excluded']").forEach((btn) => {
+          btn.addEventListener("click", onRemoveExcludedRow);
+        });
+      }
+
+      async function searchEmployeesForExcluded() {
+        if (!state.excludedLocationName) return;
+        const input = document.getElementById("excludedSearchInput");
+        const q = (input && input.value ? input.value : "").trim();
+        state.excludedSearchQuery = q;
+        if (!q) {
+          alert("Enter a search term first.");
+          return;
+        }
+
+        const query = new URLSearchParams({
+          locationName: state.excludedLocationName,
+          q,
+          limit: "12",
+        });
+        const { resp, body } = await apiGet(`/staff/toast-employees?${query.toString()}`);
+        if (!resp.ok) {
+          alert(`Employee search failed: ${body.error || "unknown_error"}`);
+          return;
+        }
+        state.employeeSearchResults = Array.isArray(body.employees) ? body.employees : [];
+        state.selectedSearchEmployeeId = state.employeeSearchResults[0]?.employeeId || null;
+        renderExcludedTab();
+      }
+
+      async function addSelectedExcludedStaff() {
+        if (!state.excludedLocationName) return;
+        const employeeId = state.selectedSearchEmployeeId;
+        const selected = state.employeeSearchResults.find((x) => x.employeeId === employeeId);
+        if (!selected) {
+          alert("Pick one employee from search results.");
+          return;
+        }
+
+        const reason = (document.getElementById("excludedReasonInput")?.value || "").trim();
+        const notes = (document.getElementById("excludedNoteInput")?.value || "").trim();
+        state.excludedDraftReason = reason;
+        state.excludedDraftNote = notes;
+        if (!reason) {
+          alert("Reason is required.");
+          return;
+        }
+
+        const { resp, body } = await apiPost("/staff/excluded", {
+          location_name: state.excludedLocationName,
+          toast_employee_id: selected.employeeId,
+          employee_name: selected.employeeName,
+          reason,
+          notes: notes || null,
+          active: true,
+        });
+        if (!resp.ok) {
+          alert(`Add failed: ${body.error || "unknown_error"}`);
+          return;
+        }
+        state.excludedDraftReason = "";
+        state.excludedDraftNote = "";
+        await loadExcludedForSelected();
+      }
+
+      async function onEditExcludedRow(e) {
+        const tr = e.target.closest("tr[data-excluded-id]");
+        if (!tr) return;
+        const id = tr.getAttribute("data-excluded-id");
+        const row = state.excluded.find((x) => String(x.id) === String(id));
+        if (!row) return;
+
+        const reason = window.prompt("Update exclusion reason:", row.reason || "");
+        if (reason === null) return;
+        const notes = window.prompt("Update note (optional):", row.notes || "");
+        if (notes === null) return;
+        const active = window.confirm("Keep this exclusion active?\nPress Cancel to mark inactive.");
+
+        const { resp, body } = await apiPut(`/staff/excluded/${encodeURIComponent(id)}`, {
+          reason: reason.trim(),
+          notes: notes.trim() || null,
+          active,
+        });
+        if (!resp.ok) {
+          alert(`Update failed: ${body.error || "unknown_error"}`);
+          return;
+        }
+        await loadExcludedForSelected();
+      }
+
+      async function onRemoveExcludedRow(e) {
+        const tr = e.target.closest("tr[data-excluded-id]");
+        if (!tr) return;
+        const id = tr.getAttribute("data-excluded-id");
+        const ok = window.confirm("Remove this staff member from active exclusions?");
+        if (!ok) return;
+        const { resp, body } = await apiDelete(`/staff/excluded/${encodeURIComponent(id)}`);
+        if (!resp.ok) {
+          alert(`Remove failed: ${body.error || "unknown_error"}`);
+          return;
+        }
+        await loadExcludedForSelected();
+      }
+
       async function loadRecapForSelected() {
         const sel = document.getElementById("locationSelect");
         const name = sel.value;
@@ -858,6 +1164,10 @@
         }
         if (state.tab === "rules") {
           loadRulesForSelected();
+          return;
+        }
+        if (state.tab === "excluded") {
+          loadExcludedForSelected();
           return;
         }
         setActiveTab("confirmations");
