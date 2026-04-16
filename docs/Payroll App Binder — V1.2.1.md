@@ -12,32 +12,21 @@ Change log (from V1.2)
 • Clarified approval locking semantics (first successful approval locks the period/run; timeout locks all).
 • Clarified that system integrity failures (broken send/buttons/audit rendering) are the critical failures to detect and surface immediately.
 • Clarified Step 1 testing posture: temporary test credentials may be used for ToastProvider bring-up, but Airtable remains stubbed until Step 2.
-1. Authentication (Required)
-1.1 Login Method
-Users authenticate with:
+### 1. Authentication
+- Users authenticate with Google Sign-In.
+- Access is limited to approved internal users only.
+- Authentication must not rely on local password creation or password storage.
+- The system may create or update the user record after successful Google authentication.
+- Authorization is role-based after authentication and is controlled separately from Google sign-in itself.
 
+### 1.2 Password Requirements
+- No local password requirements apply.
+- Authentication is handled through Google Sign-In.
+- The application does not create, store, or manage user passwords.
 
-email (username)
-
-
-password
-
-
-No SSO, no OAuth, no magic links, no MFA requirements in V1.2 unless explicitly added later.
-
-
-1.2 Password Requirements
-Passwords must be stored securely (hashed + salted).
-
-
-Password reset exists (email-based reset link to the user’s email).
-
-
-1.3 Sessions
-After login, the user has an authenticated session.
-
-
-Session expiration is required (reasonable timeout); on expiration user must log in again.
+### 1.3 Sessions
+- After login, the user has an authenticated session.
+- Session expiration is required (reasonable timeout); on expiration user must log in again.
 
 
 
