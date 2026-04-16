@@ -418,7 +418,6 @@ function router(req, res) {
     return;
   }
 
-
   if (url.pathname === '/staff/toast-test' && req.method === 'GET') {
     (async () => {
       const user = await requireStaff(req, res);
