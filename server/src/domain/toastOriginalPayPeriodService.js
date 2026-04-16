@@ -5,6 +5,21 @@
 const { fetchVitalsSnapshot } = require('../providers/vitalsProvider');
 const { fetchToastAnalyticsJobsFromVitals } = require('../providers/toastProvider');
 
+function trimErrorText(value, maxLen = 1800) {
+  const s = String(value || '');
+  if (s.length <= maxLen) return s;
+  return `${s.slice(0, maxLen)}…[truncated ${s.length - maxLen} chars]`;
+}
+
+function formatAnalyticsError(analytics) {
+  const payload = {
+    status: analytics?.status || null,
+    request: analytics?.request || null,
+    details: analytics?.details || null,
+  };
+  return trimErrorText(JSON.stringify(payload));
+}
+
 function listColumnHeaders(rows) {
   const ordered = [];
   const seen = new Set();
@@ -40,7 +55,7 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
   });
 
   if (!analytics.ok) {
-    throw new Error(`toast_analytics_failed:${analytics.error || 'unknown'}`);
+    throw new Error(`toast_analytics_failed:${analytics.error || 'unknown'}:${formatAnalyticsError(analytics)}`);
   }
 
   const payload = analytics.data;
