@@ -35,6 +35,10 @@ const {
   testBuildIdempotencyKeyStable,
   testIsFailureFindingOnlyErrors,
 } = require('./asanaTaskService.test');
+const {
+  testRunValidationFindsNewEmpRateDept,
+  testRunValidationHonorsExclusionsAndActiveRules,
+} = require('./validationEngine.test');
 
 function testTokenLifecycle() {
   const token = issueToken({ action: 'approve', ttlMinutes: 0.001 });
@@ -108,6 +112,8 @@ async function runAll() {
     testCreateAsanaTasksReportsRoutingFailure,
     testBuildIdempotencyKeyStable,
     testIsFailureFindingOnlyErrors,
+    testRunValidationFindsNewEmpRateDept,
+    testRunValidationHonorsExclusionsAndActiveRules,
   ];
   for (const fn of tests) {
     await fn();
