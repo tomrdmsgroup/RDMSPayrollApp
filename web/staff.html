@@ -229,6 +229,34 @@
         color: var(--muted);
         font-size: 13px;
       }
+      .helperPanel {
+        margin-bottom: 12px;
+        padding: 10px 12px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.04);
+      }
+      .helperPanelTitle {
+        margin: 0 0 6px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        color: var(--muted);
+      }
+      .helperList {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: grid;
+        gap: 5px;
+        font-size: 13px;
+      }
+      .helperList li {
+        color: var(--muted);
+      }
+      .helperList b {
+        color: var(--text);
+      }
 
       /* Better readability for long definitions */
       .defClamp {
@@ -361,7 +389,7 @@
         }
 
         if (tab === "rules") {
-          document.getElementById("pageSub").textContent = "This page controls which payroll validation rules are live for the selected location. Use it to decide what the system checks and what actions happen when a rule is triggered.";
+          document.getElementById("pageSub").textContent = "Control which payroll validation rules are live for this location.";
           loadRulesForSelected();
           return;
         }
@@ -629,8 +657,13 @@
               <button class="btn" id="reloadRulesBtn" type="button">Reload</button>
             </div>
           </div>
-          <div class="muted" style="margin-bottom:10px;">
-            Active = whether the rule runs. Create Internal Notification = create an internal notification when a rule hits. Create One Task Per Finding = create one task per finding instead of grouping.
+          <div class="helperPanel">
+            <p class="helperPanelTitle">Column quick guide</p>
+            <ul class="helperList">
+              <li><b>Active:</b> rule runs during payroll validation</li>
+              <li><b>Create Internal Notification:</b> sends an internal alert when the rule is triggered</li>
+              <li><b>Create One Task Per Finding:</b> creates a separate task for each finding instead of grouping them</li>
+            </ul>
           </div>
         `;
 
