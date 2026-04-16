@@ -189,6 +189,33 @@ function findCurrentPeriodRow(rows, nowUtc) {
   return candidates[0];
 }
 
+function sortRowsByStartAsc(rows) {
+  return rows
+    .map((r) => ({
+      record_id: r.id,
+      fields: r.fields || {},
+      start: new Date(r.fields['PR Period Start Date']),
+      submit: new Date(r.fields['PR Period Submit Date']),
+      validation: new Date(r.fields['PR Period Validation Date']),
+      end: new Date(r.fields['PR Period End Date']),
+      check: new Date(r.fields['PR Period Check Date']),
+    }))
+    .filter((x) => !Number.isNaN(x.start.getTime()))
+    .sort((a, b) => a.start.getTime() - b.start.getTime());
+}
+
+function toSelectorPeriod(row) {
+  if (!row) return null;
+  return {
+    record_id: row.record_id,
+    start_date: toYmd(row.fields['PR Period Start Date']),
+    end_date: toYmd(row.fields['PR Period End Date']),
+    validation_date: toYmd(row.fields['PR Period Validation Date']),
+    submit_date: toYmd(row.fields['PR Period Submit Date']),
+    check_date: toYmd(row.fields['PR Period Check Date']),
+  };
+}
+
 function normalizePreviewRecipients(vitals) {
   const emails = [];
   for (let i = 1; i <= 5; i++) {
@@ -327,7 +354,66 @@ async function getRecapForLocationName(locationName) {
   };
 }
 
+async function getPayPeriodSelectorForLocationName(locationName) {
+  const vitalsTable = requireEnv('AIRTABLE_VITALS_TABLE');
+  const locationField = requireEnv('AIRTABLE_VITALS_LOCATION_FIELD');
+  const payrollDetailsTable = requireEnv('AIRTABLE_PAYROLL_CALENDAR_DETAILS_TABLE');
+
+  const name = String(locationName || '').trim();
+  if (!name) throw new Error('location_name_required');
+
+  const filterVitals = `{${locationField}}='${escapeAirtableString(name)}'`;
+  const vitalsRecords = await airtableListAll({ table: vitalsTable, filterByFormula: filterVitals });
+  if (!vitalsRecords.length) throw new Error('location_not_found');
+
+  const vitals = vitalsRecords[0].fields || {};
+  const calendarName =
+    vitals['Payroll Calendar (from PR Calendar)'] ||
+    vitals['Payroll Calendar'] ||
+    vitals['PR Calendar Name'] ||
+    null;
+  if (!calendarName) throw new Error('missing_payroll_calendar_name');
+
+  const filterDetails = `{PR Calendar Name - Master}='${escapeAirtableString(calendarName)}'`;
+  const detailRecords = await airtableListAll({ table: payrollDetailsTable, filterByFormula: filterDetails });
+  const rows = sortRowsByStartAsc(detailRecords);
+  if (!rows.length) throw new Error('no_pay_periods_found');
+
+  const now = new Date();
+  const current = findCurrentPeriodRow(detailRecords, now);
+  const currentIndex = current ? rows.findIndex((r) => r.record_id === current.record_id) : -1;
+  const next = currentIndex >= 0 ? rows[currentIndex + 1] || null : null;
+  const priorRows = currentIndex > 0 ? rows.slice(0, currentIndex).reverse() : [];
+
+  const currentPeriod = toSelectorPeriod(current);
+  const nextPeriod = toSelectorPeriod(next);
+  const priorPeriods = priorRows.map(toSelectorPeriod).filter(Boolean);
+
+  let defaultBucket = 'current';
+  if (currentPeriod && currentPeriod.validation_date) {
+    const todayYmd = toYmd(now.toISOString());
+    if (todayYmd && todayYmd > currentPeriod.validation_date) {
+      defaultBucket = nextPeriod ? 'next' : 'current';
+    }
+  }
+
+  const defaultSelection =
+    defaultBucket === 'next'
+      ? { bucket: 'next', period: nextPeriod }
+      : { bucket: 'current', period: currentPeriod };
+
+  return {
+    location_name: name,
+    calendar_name: calendarName,
+    current_pay_period: currentPeriod,
+    next_pay_period: nextPeriod,
+    prior_pay_periods: priorPeriods,
+    default_selection: defaultSelection,
+  };
+}
+
 module.exports = {
   listLocationNames,
   getRecapForLocationName,
+  getPayPeriodSelectorForLocationName,
 };

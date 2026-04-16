@@ -289,6 +289,17 @@
       .searchItem:last-child {
         border-bottom: none;
       }
+      .gridTwo {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      }
+      .miniCard {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 10px;
+        background: rgba(255, 255, 255, 0.03);
+      }
 
       /* Better readability for long definitions */
       .defClamp {
@@ -356,6 +367,7 @@
       <div class="tabs" id="tabs">
         <div class="tab active" data-tab="confirmations">Client Info Confirmations</div>
         <div class="tab" data-tab="rules">Payroll Validation Rules</div>
+        <div class="tab" data-tab="outcome">Pay Period Validation Outcome</div>
         <div class="tab" data-tab="excluded">Excluded Staff</div>
         <div class="tab" data-tab="reports">RDMS Manual Reporting</div>
       </div>
@@ -403,6 +415,12 @@
         excludedSearchQuery: "",
         excludedDraftReason: "",
         excludedDraftNote: "",
+        outcomeSelector: null,
+        outcomeSelectionBucket: "",
+        outcomeSelectionPriorRecordId: "",
+        outcomeResult: null,
+        outcomeRunError: "",
+        outcomeRunning: false,
       };
 
       function setActiveTab(tab) {
@@ -414,6 +432,7 @@
         const titleMap = {
           confirmations: "Client Info Confirmations",
           rules: "Payroll Validation Rules",
+          outcome: "Pay Period Validation Outcome",
           excluded: "Excluded Staff",
           reports: "RDMS Manual Reporting",
         };
@@ -437,6 +456,13 @@
           document.getElementById("pageSub").textContent =
             "Manage a short list of staff to skip or handle differently in payroll validation.";
           loadExcludedForSelected();
+          return;
+        }
+
+        if (tab === "outcome") {
+          document.getElementById("pageSub").textContent =
+            "Run payroll validation for a selected pay period and review the outcome.";
+          loadOutcomeSelectorForSelected();
           return;
         }
 
@@ -1146,6 +1172,212 @@
         renderConfirmations();
       }
 
+      function outcomeSelectedPeriod() {
+        const selector = state.outcomeSelector || {};
+        if (state.outcomeSelectionBucket === "current") return selector.current_pay_period || null;
+        if (state.outcomeSelectionBucket === "next") return selector.next_pay_period || null;
+        if (state.outcomeSelectionBucket === "prior") {
+          const list = Array.isArray(selector.prior_pay_periods) ? selector.prior_pay_periods : [];
+          return list.find((p) => String(p.record_id) === String(state.outcomeSelectionPriorRecordId)) || null;
+        }
+        return null;
+      }
+
+      function renderOutcomeTab() {
+        const content = document.getElementById("content");
+        const locationName = document.getElementById("locationSelect").value;
+        if (!locationName) {
+          content.innerHTML = "<div class='loading'>Select a location to use Pay Period Validation Outcome.</div>";
+          return;
+        }
+
+        if (!state.outcomeSelector) {
+          content.innerHTML = "<div class='loading'>Loading pay period selector...</div>";
+          return;
+        }
+
+        const selector = state.outcomeSelector;
+        const current = selector.current_pay_period;
+        const next = selector.next_pay_period;
+        const prior = Array.isArray(selector.prior_pay_periods) ? selector.prior_pay_periods : [];
+        const selectedPeriod = outcomeSelectedPeriod();
+        const run = state.outcomeResult ? state.outcomeResult.run : null;
+        const outcome = state.outcomeResult ? state.outcomeResult.outcome : null;
+        const findings = Array.isArray(outcome && outcome.findings) ? outcome.findings : [];
+        const excluded = Array.isArray(outcome && outcome.excluded_staff) ? outcome.excluded_staff : [];
+
+        const priorOptions = ["<option value=''>Select a prior pay period...</option>"]
+          .concat(
+            prior.map(
+              (p) =>
+                `<option value="${escapeAttr(p.record_id)}" ${
+                  String(state.outcomeSelectionPriorRecordId) === String(p.record_id) ? "selected" : ""
+                }>${escapeHtml(fmtDateRange(p.start_date, p.end_date))}</option>`
+            )
+          )
+          .join("");
+
+        const statusPill = run
+          ? pill(run.status || "completed", run.status === "completed" ? "ok" : run.status === "failed" ? "bad" : "warn")
+          : "<span class='muted'>Not run yet</span>";
+
+        const findingsRows = findings.length
+          ? findings
+              .map((f) => {
+                const employee = f.employee_name || f.employee_id || "Not specified";
+                const rule = f.rule_name || f.rule_id || f.code || "Rule";
+                const detail = f.detail || f.message || (f.details ? JSON.stringify(f.details) : "");
+                return `<tr><td>${escapeHtml(String(employee))}</td><td>${escapeHtml(String(rule))}</td><td>${escapeHtml(String(detail || ""))}</td></tr>`;
+              })
+              .join("")
+          : `<tr><td colspan="3" class="muted">No findings for this run.</td></tr>`;
+
+        const excludedBody = excluded.length
+          ? `<ul>${excluded
+              .map(
+                (e) =>
+                  `<li>${escapeHtml(e.employee_name || "Unknown")} (${escapeHtml(
+                    e.toast_employee_id || "n/a"
+                  )}) — ${escapeHtml(e.reason || "Excluded")}</li>`
+              )
+              .join("")}</ul>`
+          : `<div class="muted">No excluded staff were applied for this run.</div>`;
+
+        content.innerHTML = `
+          <div class="stack">
+            <div class="panel">
+              <div class="sectionTitle" style="margin-top:0;">Pay Period to Validate</div>
+              <div class="gridTwo">
+                <label class="miniCard">
+                  <div><input type="radio" name="outcomeBucket" value="current" ${
+                    state.outcomeSelectionBucket === "current" ? "checked" : ""
+                  } /> Current Pay Period</div>
+                  <div class="muted">${escapeHtml(fmtDateRange(current?.start_date, current?.end_date) || "Not available")}</div>
+                </label>
+                <label class="miniCard">
+                  <div><input type="radio" name="outcomeBucket" value="next" ${
+                    state.outcomeSelectionBucket === "next" ? "checked" : ""
+                  } /> Next Pay Period</div>
+                  <div class="muted">${escapeHtml(fmtDateRange(next?.start_date, next?.end_date) || "Not available")}</div>
+                </label>
+              </div>
+              <div class="row" style="margin-top:10px;">
+                <label style="min-width:260px;flex:1;">
+                  <div class="muted" style="margin-bottom:6px;">Prior Pay Period</div>
+                  <select id="outcomePriorSelect">${priorOptions}</select>
+                </label>
+                <button class="btn primary" id="runValidationBtn" type="button" ${state.outcomeRunning ? "disabled" : ""}>${
+                  state.outcomeRunning ? "Running..." : "Run Validation"
+                }</button>
+              </div>
+              ${
+                !selector.current_pay_period && !selector.next_pay_period && !prior.length
+                  ? "<div class='muted' style='margin-top:10px;'>No selector data available for this location.</div>"
+                  : ""
+              }
+              ${
+                state.outcomeSelectionBucket === "prior" && !state.outcomeSelectionPriorRecordId
+                  ? "<div class='muted' style='margin-top:10px;'>Pick a prior pay period from the dropdown before running.</div>"
+                  : ""
+              }
+              ${state.outcomeRunError ? `<div class="muted" style="margin-top:10px;">Run failed: ${escapeHtml(state.outcomeRunError)}</div>` : ""}
+            </div>
+
+            <div class="panel">
+              <div class="sectionTitle" style="margin-top:0;">Validation Outcome</div>
+              <div class="row" style="gap:16px;">
+                <div><span class="muted">Selected location:</span> ${escapeHtml(locationName)}</div>
+                <div><span class="muted">Selected pay period:</span> ${escapeHtml(
+                  fmtDateRange(selectedPeriod?.start_date, selectedPeriod?.end_date) || "Not selected"
+                )}</div>
+                <div><span class="muted">Validation status:</span> ${statusPill}</div>
+              </div>
+
+              <div class="sectionTitle">Excluded Staff</div>
+              <p class="sectionHelp">Excluded staff are not hidden; this section shows who was skipped or handled differently.</p>
+              ${excludedBody}
+
+              <div class="sectionTitle">Findings</div>
+              <table>
+                <thead><tr><th>Employee</th><th>Rule</th><th>Detail</th></tr></thead>
+                <tbody>${findingsRows}</tbody>
+              </table>
+            </div>
+          </div>
+        `;
+
+        content.querySelectorAll("input[name='outcomeBucket']").forEach((el) => {
+          el.addEventListener("change", () => {
+            state.outcomeSelectionBucket = el.value;
+            renderOutcomeTab();
+          });
+        });
+
+        const priorSelect = document.getElementById("outcomePriorSelect");
+        if (priorSelect) {
+          priorSelect.addEventListener("change", () => {
+            state.outcomeSelectionPriorRecordId = priorSelect.value;
+            if (state.outcomeSelectionPriorRecordId) state.outcomeSelectionBucket = "prior";
+            renderOutcomeTab();
+          });
+        }
+
+        const runBtn = document.getElementById("runValidationBtn");
+        if (runBtn) runBtn.addEventListener("click", runOutcomeValidation);
+      }
+
+      async function loadOutcomeSelectorForSelected() {
+        state.outcomeSelector = null;
+        state.outcomeResult = null;
+        state.outcomeRunError = "";
+        state.outcomeSelectionBucket = "";
+        state.outcomeSelectionPriorRecordId = "";
+        renderOutcomeTab();
+        const name = document.getElementById("locationSelect").value;
+        if (!name) return;
+        const q = encodeURIComponent(name);
+        const { resp, body } = await apiGet(`/staff/pay-period-selector?locationName=${q}`);
+        if (!resp.ok) {
+          state.outcomeRunError = body.error || "selector_load_failed";
+          state.outcomeSelector = { current_pay_period: null, next_pay_period: null, prior_pay_periods: [] };
+          renderOutcomeTab();
+          return;
+        }
+        const selector = body.selector || {};
+        state.outcomeSelector = selector;
+        state.outcomeSelectionBucket = selector.default_selection?.bucket || "current";
+        renderOutcomeTab();
+      }
+
+      async function runOutcomeValidation() {
+        const selected = outcomeSelectedPeriod();
+        if (!selected) {
+          state.outcomeRunError = "no_selected_pay_period";
+          renderOutcomeTab();
+          return;
+        }
+        state.outcomeRunning = true;
+        state.outcomeRunError = "";
+        renderOutcomeTab();
+
+        const locationName = document.getElementById("locationSelect").value;
+        const { resp, body } = await apiPost("/staff/validation-outcome/run", {
+          location_name: locationName,
+          period_start: selected.start_date,
+          period_end: selected.end_date,
+          validation_date: selected.validation_date || null,
+        });
+        state.outcomeRunning = false;
+        if (!resp.ok) {
+          state.outcomeRunError = body.error || "run_failed";
+          state.outcomeResult = null;
+          renderOutcomeTab();
+          return;
+        }
+        state.outcomeResult = { run: body.run || null, outcome: body.outcome || null };
+        renderOutcomeTab();
+      }
+
       async function logout() {
         await fetch("/auth/logout", { method: "POST", credentials: "include" });
         window.location.href = "/auth/google";
@@ -1168,6 +1400,10 @@
         }
         if (state.tab === "excluded") {
           loadExcludedForSelected();
+          return;
+        }
+        if (state.tab === "outcome") {
+          loadOutcomeSelectorForSelected();
           return;
         }
         setActiveTab("confirmations");

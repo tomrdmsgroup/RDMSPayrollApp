@@ -5,7 +5,7 @@ const path = require('path');
 const fetch = require('node-fetch');
 
 const { issueToken } = require('../domain/tokenService');
-const { createRunRecord, appendEvent, failRun, getRun } = require('../domain/runManager');
+const { createRun, appendEvent, updateRun, getRunById } = require('../domain/runManager');
 const { approveAction, rerunAction } = require('../domain/approvalService');
 const { IdempotencyService } = require('../domain/idempotencyService');
 const { notifyFailure } = require('../domain/failureService');
@@ -20,7 +20,11 @@ const {
   listStaffUsersAsAdminOnly,
 } = require('../domain/authService');
 
-const { listLocationNames, getRecapForLocationName } = require('../domain/airtableRecapService');
+const {
+  listLocationNames,
+  getRecapForLocationName,
+  getPayPeriodSelectorForLocationName,
+} = require('../domain/airtableRecapService');
 const { runBarrioToastProof, searchToastEmployeesForLocation } = require('../domain/toastBarrioProofService');
 
 const { rulesCatalog } = require('../domain/rulesCatalog');
@@ -32,6 +36,8 @@ const {
   updateExcludedStaffById,
   softDeleteExcludedStaffById,
 } = require('../domain/excludedStaffDb');
+const { buildOutcome, saveOutcome } = require('../domain/outcomeService');
+const { buildArtifacts } = require('../domain/artifactService');
 
 const idempotency = new IdempotencyService();
 
@@ -321,6 +327,90 @@ function router(req, res) {
         if (!locationName) return json(res, 400, { error: 'locationName_required' });
         const recap = await getRecapForLocationName(locationName);
         return json(res, 200, { recap });
+      } catch (e) {
+        return handleError(res, e);
+      }
+    })();
+    return;
+  }
+
+  if (url.pathname === '/staff/pay-period-selector' && req.method === 'GET') {
+    (async () => {
+      const user = await requireStaff(req, res);
+      if (!user) return;
+      try {
+        const locationName = url.searchParams.get('locationName');
+        if (!locationName) return json(res, 400, { error: 'locationName_required' });
+        const selector = await getPayPeriodSelectorForLocationName(locationName);
+        return json(res, 200, { selector });
+      } catch (e) {
+        return handleError(res, e);
+      }
+    })();
+    return;
+  }
+
+  if (url.pathname === '/staff/validation-outcome/run' && req.method === 'POST') {
+    (async () => {
+      const user = await requireStaff(req, res);
+      if (!user) return;
+      try {
+        const body = await parseBody(req);
+        const locationName = String(body.location_name || '').trim();
+        const periodStart = String(body.period_start || '').trim();
+        const periodEnd = String(body.period_end || '').trim();
+        if (!locationName || !periodStart || !periodEnd) {
+          return json(res, 400, { error: 'missing_required_fields' });
+        }
+
+        const run = await createRun({
+          client_location_id: locationName,
+          period_start: periodStart,
+          period_end: periodEnd,
+          payload: {
+            source: 'staff_outcome_tab',
+            selected_period: {
+              period_start: periodStart,
+              period_end: periodEnd,
+              validation_date: body.validation_date || null,
+            },
+            requested_by: user.email,
+          },
+          status: 'running',
+        });
+
+        appendEvent(run, 'staff_outcome_run_created', { requested_by: user.email });
+        await updateRun(run.id, { events: run.events });
+
+        const excluded = await listExcludedStaffByLocation(locationName);
+        const activeExcluded = (Array.isArray(excluded) ? excluded : []).filter((x) => x && x.active);
+
+        const findings = [];
+        const artifacts = buildArtifacts({ run, policySnapshot: {} });
+        const outcome = await buildOutcome(run, findings, artifacts, null);
+        outcome.summary = {
+          ...(outcome.summary || {}),
+          excluded_staff_count: activeExcluded.length,
+        };
+        outcome.excluded_staff = activeExcluded.map((row) => ({
+          id: row.id,
+          toast_employee_id: row.toast_employee_id,
+          employee_name: row.employee_name,
+          reason: row.reason,
+          notes: row.notes,
+          active: row.active,
+        }));
+
+        const savedOutcome = await saveOutcome(run.id, outcome);
+
+        appendEvent(run, 'staff_outcome_saved', {
+          outcome_status: savedOutcome?.status || 'completed',
+          findings_count: Array.isArray(savedOutcome?.findings) ? savedOutcome.findings.length : 0,
+        });
+        await updateRun(run.id, { status: 'completed', events: run.events });
+
+        const latestRun = await getRunById(run.id);
+        return json(res, 200, { ok: true, run: latestRun, outcome: savedOutcome });
       } catch (e) {
         return handleError(res, e);
       }
@@ -638,18 +728,28 @@ function router(req, res) {
           if (existing) return json(res, 200, existing);
         }
 
-        const run = await createRunRecord(body);
-        await appendEvent(run.id, 'run_created', { ok: true });
+        const run = await createRun({
+          client_location_id: body.client_location_id,
+          period_start: body.period_start,
+          period_end: body.period_end,
+          payload: body.payload || null,
+          status: 'running',
+        });
+        appendEvent(run, 'run_created', { ok: true });
+        await updateRun(run.id, { events: run.events });
 
         try {
-          await runValidation(run);
-          await appendEvent(run.id, 'run_completed', { ok: true });
+          await runValidation({ run });
+          appendEvent(run, 'run_completed', { ok: true });
+          await updateRun(run.id, { status: 'completed', events: run.events });
         } catch (e) {
-          await failRun(run.id, e);
+          appendEvent(run, 'run_failed', { error: e?.message || 'run_failed' });
+          await updateRun(run.id, { status: 'failed', events: run.events });
           await notifyFailure(run, e);
         }
 
-        const payload = { ok: true, run: getRun(run.id) };
+        const latestRun = await getRunById(run.id);
+        const payload = { ok: true, run: latestRun };
         if (key) await idempotency.set(key, payload);
 
         return json(res, 200, payload);
@@ -692,7 +792,7 @@ function router(req, res) {
         const parts = url.pathname.split('/').filter(Boolean);
         const id = Number(parts[2]);
         if (!id) return json(res, 400, { error: 'id_required' });
-        const run = getRun(id);
+        const run = await getRunById(id);
         if (!run) return json(res, 404, { error: 'not_found' });
         return json(res, 200, { run });
       } catch (e) {
