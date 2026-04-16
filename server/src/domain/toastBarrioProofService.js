@@ -272,6 +272,85 @@ function toEmployeeSample(rows) {
   }));
 }
 
+function toEmployeeOption(row) {
+  const employeeId = row?.id || row?.employeeId || row?.guid || null;
+  const employeeName =
+    row?.fullName ||
+    row?.name ||
+    [safeStr(row?.firstName), safeStr(row?.lastName)].filter(Boolean).join(' ') ||
+    null;
+
+  return {
+    employeeId: employeeId ? String(employeeId) : null,
+    employeeName: employeeName ? String(employeeName).trim() : null,
+  };
+}
+
+async function searchToastEmployeesForLocation(locationName, query, limit = 10) {
+  const cleanedLocationName = safeStr(locationName);
+  const cleanedQuery = safeStr(query).toLowerCase();
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 10, 25));
+
+  if (!cleanedLocationName) {
+    return { ok: false, error: 'locationName_required' };
+  }
+  if (!cleanedQuery) {
+    return { ok: true, endpointUsed: null, results: [] };
+  }
+
+  const apiConfig = await fetchApiConfigForLocation(cleanedLocationName);
+  if (!apiConfig.found) {
+    return { ok: false, error: 'location_not_found_in_airtable_api_config' };
+  }
+
+  const nonSecretConfig = buildNonSecretToastConfig(apiConfig.fields);
+  const secrets = getBarrioToastSecrets();
+  if (
+    !nonSecretConfig.hostname ||
+    !nonSecretConfig.oauthUrl ||
+    !nonSecretConfig.userAccessType ||
+    (!nonSecretConfig.restaurantGuid && !nonSecretConfig.restaurantExternalId)
+  ) {
+    return { ok: false, error: 'toast_non_secret_config_incomplete' };
+  }
+
+  if (!secrets.standardClientId || !secrets.standardClientSecret) {
+    return { ok: false, error: 'toast_standard_secret_config_incomplete' };
+  }
+
+  const auth = await toastStandardLogin({
+    oauthUrl: nonSecretConfig.oauthUrl,
+    userAccessType: nonSecretConfig.userAccessType,
+    clientId: secrets.standardClientId,
+    clientSecret: secrets.standardClientSecret,
+  });
+  if (!auth.ok) return { ok: false, error: auth.error || 'toast_auth_failed' };
+
+  const employees = await fetchToastEmployees({
+    hostname: nonSecretConfig.hostname,
+    token: auth.token,
+    restaurantGuid: nonSecretConfig.restaurantGuid || nonSecretConfig.restaurantExternalId,
+  });
+  if (!employees.ok) return { ok: false, error: employees.error || 'toast_employees_failed' };
+
+  const results = [];
+  for (const row of employees.rows) {
+    const option = toEmployeeOption(row);
+    if (!option.employeeId || !option.employeeName) continue;
+
+    const haystack = `${option.employeeName} ${option.employeeId}`.toLowerCase();
+    if (!haystack.includes(cleanedQuery)) continue;
+    results.push(option);
+    if (results.length >= safeLimit) break;
+  }
+
+  return {
+    ok: true,
+    endpointUsed: employees.endpointUsed || null,
+    results,
+  };
+}
+
 async function runBarrioToastProof(locationName) {
   const cleanedLocationName = safeStr(locationName);
   if (!cleanedLocationName) {
@@ -387,4 +466,5 @@ async function runBarrioToastProof(locationName) {
 module.exports = {
   TOAST_AIRTABLE_FIELDS,
   runBarrioToastProof,
+  searchToastEmployeesForLocation,
 };

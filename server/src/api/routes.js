@@ -21,7 +21,7 @@ const {
 } = require('../domain/authService');
 
 const { listLocationNames, getRecapForLocationName } = require('../domain/airtableRecapService');
-const { runBarrioToastProof } = require('../domain/toastBarrioProofService');
+const { runBarrioToastProof, searchToastEmployeesForLocation } = require('../domain/toastBarrioProofService');
 
 const { rulesCatalog } = require('../domain/rulesCatalog');
 const { getRuleConfigsForLocation, upsertRuleConfig } = require('../domain/rulesConfigDb');
@@ -339,6 +339,32 @@ function router(req, res) {
 
         const toastTest = await runBarrioToastProof(locationName);
         return json(res, 200, { toastTest });
+      } catch (e) {
+        return handleError(res, e);
+      }
+    })();
+    return;
+  }
+
+  if (url.pathname === '/staff/toast-employees' && req.method === 'GET') {
+    (async () => {
+      const user = await requireStaff(req, res);
+      if (!user) return;
+      try {
+        const locationName = url.searchParams.get('locationName');
+        const q = url.searchParams.get('q');
+        const limit = Number(url.searchParams.get('limit') || 10);
+        if (!locationName) return json(res, 400, { error: 'locationName_required' });
+        const result = await searchToastEmployeesForLocation(locationName, q, limit);
+        if (!result.ok) {
+          const code = String(result.error || '');
+          if (code === 'locationName_required') return json(res, 400, { error: code });
+          return json(res, 422, { error: code || 'toast_search_failed' });
+        }
+        return json(res, 200, {
+          employees: result.results,
+          endpointUsed: result.endpointUsed,
+        });
       } catch (e) {
         return handleError(res, e);
       }
