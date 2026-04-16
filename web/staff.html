@@ -190,11 +190,6 @@
       .pill.bad {
         background: var(--bad);
       }
-      .sectionRow td {
-        background: rgba(255, 255, 255, 0.04);
-        color: var(--muted);
-        font-weight: 600;
-      }
       .input {
         width: 100%;
         padding: 8px 10px;
@@ -215,6 +210,20 @@
       }
       .muted {
         color: var(--muted);
+      }
+      .sectionTitle {
+        margin: 18px 0 8px;
+        font-size: 15px;
+        font-weight: 700;
+      }
+      .sectionHelp {
+        margin: 0 0 10px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .sourceNote {
+        color: var(--muted);
+        font-size: 12px;
       }
       .loading {
         color: var(--muted);
@@ -434,20 +443,27 @@
         return `${startYmd} to ${endYmd}`;
       }
 
-      function addRowsForObject(rows, obj, prefixLabel) {
-        if (!obj || typeof obj !== "object") return;
-        Object.keys(obj).forEach((k) => {
-          const v = obj[k];
-          const label = prefixLabel ? `${prefixLabel}.${k}` : k;
-          const { status, klass, detail } = valStatus(v);
-          rows.push(
-            `<tr>
-              <td style="width:320px;">${escapeHtml(label)}</td>
-              <td style="width:160px;">${pill(status, klass)}</td>
-              <td>${escapeHtml(detail)}</td>
-            </tr>`,
-          );
-        });
+      function displayValue(value) {
+        if (value === null || value === undefined) return "";
+        if (Array.isArray(value)) return value.join(", ");
+        return String(value);
+      }
+
+      function renderFriendlyRows(rows) {
+        return rows
+          .map((row) => {
+            const { status, klass, detail } = valStatus(row.value);
+            const shownValue = detail || "Missing";
+            return `
+              <tr>
+                <td style="width:260px;">${escapeHtml(row.label)}</td>
+                <td style="width:120px;">${pill(status, klass)}</td>
+                <td>${escapeHtml(shownValue)}</td>
+                <td style="width:280px;"><span class="sourceNote">Source: ${escapeHtml(row.source)}</span></td>
+              </tr>
+            `;
+          })
+          .join("");
       }
 
       function renderConfirmations() {
@@ -464,127 +480,94 @@
         const r = state.recap;
         const p = r.current_pay_period || {};
 
-        const rows = [];
-        function addSection(label) {
-          rows.push(`<tr class="sectionRow"><td colspan="3">${escapeHtml(label)}</td></tr>`);
-        }
-        function addRow(label, value) {
-          const { status, klass, detail } = valStatus(value);
-          rows.push(
-            `<tr>
-              <td style="width:320px;">${escapeHtml(label)}</td>
-              <td style="width:160px;">${pill(status, klass)}</td>
-              <td>${escapeHtml(detail)}</td>
-            </tr>`,
-          );
-        }
-
         const isLate = !!p.is_late;
         if (isLate) {
           lateNotice.style.display = "block";
           lateNotice.textContent = p.late_message || "Late warning";
         }
 
-        addSection("Pay Period");
-        addRow("current_pay_period.start_date", p.start_date);
-        addRow("current_pay_period.end_date", p.end_date);
-        addRow("current_pay_period.validation_date", p.validation_date);
-        addRow("current_pay_period.submit_date", p.submit_date);
-        addRow("current_pay_period.check_date", p.check_date);
-        addRow("current_pay_period.cutoff_utc", p.cutoff_utc);
-        addRow("current_pay_period.cutoff_local", p.cutoff_local);
-        addRow("current_pay_period.is_late", truthyYesNo(p.is_late));
-        addRow("current_pay_period.late_message", p.late_message);
-        addRow("derived.pay_period_range", fmtDateRange(p.start_date, p.end_date));
+        const payPeriodRows = [
+          { label: "Pay Period Start", value: p.start_date, source: "Airtable - Payroll Calendar" },
+          { label: "Pay Period End", value: p.end_date, source: "Airtable - Payroll Calendar" },
+          { label: "Validation date", value: p.validation_date, source: "Airtable - Payroll Calendar" },
+          { label: "Submit date", value: p.submit_date, source: "Airtable - Payroll Calendar" },
+          { label: "Check date", value: p.check_date, source: "Airtable - Payroll Calendar" },
+          { label: "Validation Cutoff", value: p.cutoff_local, source: "Airtable - Payroll Calendar + Client Vitals" },
+          { label: "Validation cutoff (UTC)", value: p.cutoff_utc, source: "Airtable - Payroll Calendar + Client Vitals" },
+          { label: "Late Status", value: truthyYesNo(p.is_late), source: "Airtable - Payroll Calendar + Client Vitals" },
+          { label: "Pay Period Range", value: fmtDateRange(p.start_date, p.end_date), source: "Airtable - Payroll Calendar" },
+        ];
 
-        addSection("Vitals and Configuration");
-        addRow("location_name", r.location_name);
-        addRow("calendar_name", r.calendar_name);
-        addRow("app_active", truthyYesNo(r.app_active));
-        addRow("time_zone", r.time_zone);
-        addRow("validation_end_time_next_day", r.validation_end_time_next_day);
-        addRow("payroll_company", r.payroll_company);
-        addRow("pos_type", r.pos_type);
-        addRow("payroll_project_email", r.payroll_project_email);
-        addRow("tip_report_type", r.tip_report_type);
-        addRow("payroll_company_code", r.payroll_company_code);
-        addRow("pay_frequency", r.pay_frequency);
-        addRow("preview_recipients_count", r.preview_recipients_count);
-        addRow("preview_recipients_summary", r.preview_recipients_summary);
-        addRow("asana_connected", truthyYesNo(r.asana_connected));
+        const configRows = [
+          { label: "Location Name", value: r.location_name, source: "Airtable - Client Vitals" },
+          { label: "Payroll Calendar", value: r.calendar_name, source: "Airtable - Client Vitals" },
+          { label: "App Active", value: truthyYesNo(r.app_active), source: "Airtable - Client Vitals" },
+          { label: "Time zone", value: r.time_zone, source: "Airtable - Client Vitals" },
+          { label: "Validation End Time", value: r.validation_end_time_next_day, source: "Airtable - Client Vitals" },
+          { label: "Payroll company", value: r.payroll_company, source: "Airtable - Client Vitals" },
+          { label: "POS type", value: r.pos_type, source: "Airtable - Client Vitals" },
+          { label: "Payroll project email", value: r.payroll_project_email, source: "Airtable - Client Vitals" },
+          { label: "Tip report type", value: r.tip_report_type, source: "Airtable - Client Vitals" },
+          { label: "Payroll company code", value: r.payroll_company_code, source: "Airtable - Client Vitals" },
+          { label: "Pay frequency", value: r.pay_frequency, source: "Airtable - Client Vitals" },
+          { label: "Preview Contacts", value: r.preview_recipients_summary, source: "Airtable - Client Vitals" },
+          { label: "Preview contact email count", value: displayValue(r.preview_recipients_count), source: "Airtable - Client Vitals" },
+          { label: "Asana Setup", value: truthyYesNo(r.asana_connected), source: "Asana Setup" },
+        ];
 
-        // If the API adds more top level fields later, show them automatically
-        const knownTop = new Set([
-          "location_name",
-          "calendar_name",
-          "app_active",
-          "time_zone",
-          "validation_end_time_next_day",
-          "payroll_company",
-          "pos_type",
-          "payroll_project_email",
-          "tip_report_type",
-          "payroll_company_code",
-          "pay_frequency",
-          "preview_recipients_count",
-          "preview_recipients_summary",
-          "asana_connected",
-          "current_pay_period",
-          "items",
-        ]);
-
-        const extra = {};
-        Object.keys(r || {}).forEach((k) => {
-          if (knownTop.has(k)) return;
-          extra[k] = r[k];
-        });
-
-        const extraKeys = Object.keys(extra);
-        if (extraKeys.length) {
-          addSection("Extra Fields");
-          addRowsForObject(rows, extra, "recap");
-        }
-
-        addSection("Client Info Confirmations");
+        const itemRows = [];
         const items = Array.isArray(r.items) ? r.items : [];
         if (!items.length) {
-          rows.push(
-            `<tr>
-              <td style="width:320px;">items</td>
-              <td style="width:160px;">${pill("MISSING", "bad")}</td>
-              <td>No confirmation checks returned for this location.</td>
-            </tr>`,
-          );
+          itemRows.push({
+            label: "Additional setup checks",
+            value: null,
+            source: "Asana Setup",
+          });
         } else {
           items.forEach((it, idx) => {
-            const name = it.name || `Item ${idx + 1}`;
-            const status = String(it.status || "").toUpperCase();
-            const klass = status === "OK" ? "ok" : status === "WARN" ? "warn" : "bad";
-            rows.push(
-              `<tr>
-                <td style="width:320px;">${escapeHtml(name)}</td>
-                <td style="width:160px;">${pill(status || "UNKNOWN", klass)}</td>
-                <td>${escapeHtml(it.detail || "")}</td>
-              </tr>`,
-            );
+            itemRows.push({
+              label: it.name || `Additional check ${idx + 1}`,
+              value: it.detail || it.status || null,
+              source: "Asana Setup",
+            });
           });
         }
 
         content.innerHTML = `
+          <div class="sectionTitle">Pay Period</div>
+          <p class="sectionHelp">Use this section first. It shows the exact payroll period and validation timing for this location.</p>
           <table>
             <thead>
               <tr>
                 <th>Item</th>
                 <th>Status</th>
-                <th>Details</th>
+                <th>Value</th>
+                <th>Where to fix</th>
               </tr>
             </thead>
             <tbody>
-              ${rows.join("")}
+              ${renderFriendlyRows(payPeriodRows)}
+            </tbody>
+          </table>
+
+          <div class="sectionTitle">Setup / Configuration Confirmations</div>
+          <p class="sectionHelp">Review this section second. Missing items here should be fixed in the source listed in the right column.</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Status</th>
+                <th>Value</th>
+                <th>Where to fix</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${renderFriendlyRows(configRows)}
+              ${renderFriendlyRows(itemRows)}
             </tbody>
           </table>
           <div class="muted" style="margin-top:10px;">
-            Goal: show every required field and flag missing values in one place.
+            Goal: help payroll staff quickly understand what is set up, what is missing, and where to fix it.
           </div>
         `;
       }
