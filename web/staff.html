@@ -361,7 +361,7 @@
         }
 
         if (tab === "rules") {
-          document.getElementById("pageSub").textContent = "Configure which rules are active for this location.";
+          document.getElementById("pageSub").textContent = "This page controls which payroll validation rules are live for the selected location. Use it to decide what the system checks and what actions happen when a rule is triggered.";
           loadRulesForSelected();
           return;
         }
@@ -629,6 +629,9 @@
               <button class="btn" id="reloadRulesBtn" type="button">Reload</button>
             </div>
           </div>
+          <div class="muted" style="margin-bottom:10px;">
+            Active = whether the rule runs. Create Internal Notification = create an internal notification when a rule hits. Create One Task Per Finding = create one task per finding instead of grouping.
+          </div>
         `;
 
         const tableHead = `
@@ -637,11 +640,11 @@
               <tr>
                 <th style="width:140px;">Rule ID</th>
                 <th style="width:220px;">Rule Name</th>
-                <th style="width:170px;">Params</th>
-                <th>Definition</th>
+                <th style="width:170px;">Threshold / Setting</th>
+                <th>What it checks</th>
                 <th style="width:140px;">Active</th>
-                <th style="width:190px;">Internal Notification</th>
-                <th style="width:210px;">One Task Per Finding</th>
+                <th style="width:210px;">Create Internal Notification</th>
+                <th style="width:230px;">Create One Task Per Finding</th>
                 <th style="width:120px;">Save</th>
               </tr>
             </thead>
@@ -659,7 +662,7 @@
             const paramsVal = r.params === null || r.params === undefined ? "" : String(r.params);
             const paramsCell = paramsRequired
               ? `<input class="input" data-field="params" placeholder="${paramsHint || "Enter value"}" value="${escapeAttr(paramsVal)}" />`
-              : `<span class="muted">None</span>`;
+              : `<span class="muted">No setting needed</span>`;
 
             const active = normalizeYesNo(!!r.active);
             const internal = normalizeYesNo(!!r.internal_notification);
