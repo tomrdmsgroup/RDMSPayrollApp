@@ -517,21 +517,13 @@
 
         const itemRows = [];
         const items = Array.isArray(r.items) ? r.items : [];
-        if (!items.length) {
+        items.forEach((it, idx) => {
           itemRows.push({
-            label: "Additional setup checks",
-            value: null,
+            label: it.name || `Additional check ${idx + 1}`,
+            value: it.detail || it.status || null,
             source: "Asana Setup",
           });
-        } else {
-          items.forEach((it, idx) => {
-            itemRows.push({
-              label: it.name || `Additional check ${idx + 1}`,
-              value: it.detail || it.status || null,
-              source: "Asana Setup",
-            });
-          });
-        }
+        });
 
         content.innerHTML = `
           <div class="sectionTitle">Pay Period</div>
