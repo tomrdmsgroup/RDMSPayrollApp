@@ -1330,6 +1330,7 @@
         state.outcomeSelector = null;
         state.outcomeResult = null;
         state.outcomeRunError = "";
+        state.outcomeRunning = false;
         state.outcomeSelectionBucket = "";
         state.outcomeSelectionPriorRecordId = "";
         renderOutcomeTab();
@@ -1352,6 +1353,7 @@
       async function runOutcomeValidation() {
         const selected = outcomeSelectedPeriod();
         if (!selected) {
+          state.outcomeRunning = false;
           state.outcomeRunError = "no_selected_pay_period";
           renderOutcomeTab();
           return;
@@ -1361,21 +1363,26 @@
         renderOutcomeTab();
 
         const locationName = document.getElementById("locationSelect").value;
-        const { resp, body } = await apiPost("/staff/validation-outcome/run", {
-          location_name: locationName,
-          period_start: selected.start_date,
-          period_end: selected.end_date,
-          validation_date: selected.validation_date || null,
-        });
-        state.outcomeRunning = false;
-        if (!resp.ok) {
-          state.outcomeRunError = body.error || "run_failed";
+        try {
+          const { resp, body } = await apiPost("/staff/validation-outcome/run", {
+            location_name: locationName,
+            period_start: selected.start_date,
+            period_end: selected.end_date,
+            validation_date: selected.validation_date || null,
+          });
+          if (!resp.ok) {
+            state.outcomeRunError = body.error || "run_failed";
+            state.outcomeResult = null;
+            return;
+          }
+          state.outcomeResult = { run: body.run || null, outcome: body.outcome || null };
+        } catch (err) {
+          state.outcomeRunError = (err && err.message) || "run_failed";
           state.outcomeResult = null;
+        } finally {
+          state.outcomeRunning = false;
           renderOutcomeTab();
-          return;
         }
-        state.outcomeResult = { run: body.run || null, outcome: body.outcome || null };
-        renderOutcomeTab();
       }
 
       async function logout() {
