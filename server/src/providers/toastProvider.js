@@ -8,6 +8,8 @@
 //    (B) ANALYTICS labor jobs via ERA
 // - Never return secrets or tokens.
 
+const { fetchAirtableRecords } = require('./airtableClient');
+
 function normalizeHostname(raw) {
   if (!raw) return null;
 
@@ -36,6 +38,87 @@ function normalizeHostname(raw) {
 
   // Otherwise assume it's already a hostname.
   return s;
+}
+
+function safeStr(v) {
+  if (v === undefined || v === null) return '';
+  return String(v).trim();
+}
+
+function normalizeMatchString(v) {
+  return safeStr(v).toLowerCase();
+}
+
+function escapeAirtableString(v) {
+  return String(v || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+function buildLocationCandidates(locationName) {
+  const full = safeStr(locationName);
+  const root = safeStr(full.split(' - ')[0]);
+  if (root && root !== full) return [full, root];
+  return [full];
+}
+
+function scoreApiConfigMatch(fields, locationName, clientNameField, displayNameField) {
+  const locationNorm = normalizeMatchString(locationName);
+  const rootNorm = normalizeMatchString(buildLocationCandidates(locationName)[1] || '');
+  const displayNorm = normalizeMatchString(fields[displayNameField]);
+  const clientNorm = normalizeMatchString(fields[clientNameField]);
+
+  if (displayNorm && displayNorm === locationNorm) return 500;
+  if (clientNorm && clientNorm === locationNorm) return 450;
+  if (rootNorm && displayNorm && displayNorm === rootNorm) return 400;
+  if (rootNorm && clientNorm && clientNorm === rootNorm) return 350;
+  if (displayNorm && locationNorm.includes(displayNorm)) return 250;
+  if (clientNorm && locationNorm.includes(clientNorm)) return 200;
+  return 0;
+}
+
+function getAirtableApiConfig() {
+  return {
+    baseId: safeStr(process.env.AIRTABLE_API_CONFIG_BASE || process.env.AIRTABLE_VITALS_BASE),
+    apiKey: safeStr(
+      process.env.AIRTABLE_API_CONFIG_API_KEY || process.env.AIRTABLE_VITALS_API_KEY || process.env.AIRTABLE_API_KEY
+    ),
+    tableName: safeStr(process.env.AIRTABLE_API_CONFIG_TABLE || 'API Config'),
+    clientNameField: safeStr(process.env.AIRTABLE_API_CONFIG_CLIENT_NAME_FIELD || 'Client Name'),
+    displayNameField: safeStr(process.env.AIRTABLE_API_CONFIG_DISPLAY_NAME_FIELD || 'Display Name'),
+  };
+}
+
+async function fetchApiConfigFieldsForLocation(locationName) {
+  const cfg = getAirtableApiConfig();
+  if (!cfg.baseId || !cfg.apiKey || !safeStr(locationName)) return null;
+
+  const candidates = buildLocationCandidates(locationName).filter(Boolean);
+  const clauses = [];
+  for (const candidate of candidates) {
+    const escaped = escapeAirtableString(candidate);
+    clauses.push(`{${cfg.clientNameField}}='${escaped}'`);
+    clauses.push(`{${cfg.displayNameField}}='${escaped}'`);
+  }
+  if (!clauses.length) return null;
+
+  const filterByFormula = clauses.length > 1 ? `OR(${clauses.join(',')})` : clauses[0];
+
+  const { records } = await fetchAirtableRecords({
+    baseId: cfg.baseId,
+    tableName: cfg.tableName,
+    apiKey: cfg.apiKey,
+    filterByFormula,
+  });
+
+  if (!records.length) return null;
+
+  const ranked = records
+    .map((record) => ({
+      fields: record.fields || {},
+      score: scoreApiConfigMatch(record.fields || {}, locationName, cfg.clientNameField, cfg.displayNameField),
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  return ranked[0]?.fields || records[0]?.fields || null;
 }
 
 function getToastConfigFromVitals(vitalsRecord, mode = 'standard') {
@@ -75,6 +158,32 @@ function getToastConfigFromVitals(vitalsRecord, mode = 'standard') {
     oauthUrl,
     locationId,
     mgmtGroupGuid,
+  };
+}
+
+function isBarrioLocationName(locationName) {
+  return normalizeMatchString(locationName).startsWith('barrio');
+}
+
+async function resolveAnalyticsConfigForValidation({ vitalsRecord, locationName }) {
+  const fallback = getToastConfigFromVitals(vitalsRecord, 'analytics');
+  if (!isBarrioLocationName(locationName)) return fallback;
+
+  const apiFields = await fetchApiConfigFieldsForLocation(locationName);
+  if (!apiFields) return fallback;
+
+  const clientId = safeStr(process.env.TOAST_AN_CLIENT_ID_BARRIO) || null;
+  const clientSecret = safeStr(process.env.TOAST_AN_CLIENT_SECRET_BARRIO) || null;
+
+  return {
+    hostname: normalizeHostname(apiFields['Toast API Hostname'] || null),
+    clientId,
+    clientSecret,
+    userAccessType: apiFields['Toast API User Access Type'] || null,
+    restaurantGuid: apiFields['Toast API Restaurant GUID'] || apiFields['Toast API Restaurant External ID'] || null,
+    oauthUrl: apiFields['Toast API OAuth URL'] || null,
+    locationId: apiFields['Toast Location ID'] || null,
+    mgmtGroupGuid: apiFields['Toast Management Group GUID'] || null,
   };
 }
 
@@ -221,8 +330,8 @@ async function fetchToastTimeEntriesFromVitals({ vitalsRecord, periodStart, peri
   };
 }
 
-async function fetchToastAnalyticsJobsFromVitals({ vitalsRecord, periodStart, periodEnd }) {
-  const cfg = getToastConfigFromVitals(vitalsRecord, 'analytics');
+async function fetchToastAnalyticsJobsFromVitals({ vitalsRecord, periodStart, periodEnd, locationName = null }) {
+  const cfg = await resolveAnalyticsConfigForValidation({ vitalsRecord, locationName });
 
   if (!cfg.hostname || !cfg.clientId || !cfg.clientSecret || !cfg.userAccessType || !cfg.restaurantGuid || !cfg.oauthUrl) {
     return {
