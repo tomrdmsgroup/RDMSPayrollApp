@@ -150,6 +150,7 @@ async function fetchToastRowsForPeriods({ clientLocationId, periods = [] }) {
       vitalsRecord,
       periodStart: period.period_start,
       periodEnd: period.period_end,
+      locationName: clientLocationId,
     });
 
     if (!analytics.ok) {
