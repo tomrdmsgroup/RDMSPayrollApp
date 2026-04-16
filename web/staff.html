@@ -512,15 +512,19 @@
           { label: "Pay frequency", value: r.pay_frequency, source: "Client Vitals" },
           { label: "Preview Contacts", value: r.preview_recipients_summary, source: "Preview Contact Emails" },
           { label: "Preview contact email count", value: displayValue(r.preview_recipients_count), source: "Preview Contact Emails" },
-          { label: "Asana Setup", value: truthyYesNo(r.asana_connected), source: "Asana Setup" },
+          { label: "Asana Project GUID", value: r.asana_project_guid, source: "Airtable - Client Vitals" },
+          { label: "Asana Inbox Section GUID", value: r.asana_inbox_section_guid, source: "Airtable - Client Vitals" },
         ];
 
         const itemRows = [];
         const items = Array.isArray(r.items) ? r.items : [];
-        items.forEach((it, idx) => {
+        items.forEach((it) => {
+          const label = (it && it.name ? String(it.name).trim() : "");
+          const value = it ? (it.detail || it.status || null) : null;
+          if (!label) return;
           itemRows.push({
-            label: it.name || `Additional check ${idx + 1}`,
-            value: it.detail || it.status || null,
+            label,
+            value,
             source: "Asana Setup",
           });
         });
