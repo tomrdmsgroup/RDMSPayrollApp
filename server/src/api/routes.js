@@ -385,12 +385,56 @@ function router(req, res) {
         const excluded = await listExcludedStaffByLocation(locationName);
         const activeExcluded = (Array.isArray(excluded) ? excluded : []).filter((x) => x && x.active);
 
-        const findings = [];
+        const { byRuleId, defaults } = await getRuleConfigsForLocation(locationName);
+        const activeRuleIds = rulesCatalog
+          .filter((rule) => {
+            const cfg = byRuleId[rule.rule_id] || {};
+            const isActive = typeof cfg.active === 'boolean' ? cfg.active : defaults.active;
+            return isActive === true;
+          })
+          .map((rule) => rule.rule_id);
+
+        const selector = await getPayPeriodSelectorForLocationName(locationName);
+        const selectorPeriods = [
+          ...(Array.isArray(selector?.prior_pay_periods) ? selector.prior_pay_periods : []),
+          selector?.current_pay_period || null,
+          selector?.next_pay_period || null,
+        ]
+          .filter((p) => p && p.start_date && p.end_date)
+          .sort((a, b) => String(a.start_date).localeCompare(String(b.start_date)));
+
+        const selectedIndex = selectorPeriods.findIndex(
+          (p) => String(p.start_date) === periodStart && String(p.end_date) === periodEnd
+        );
+        const comparisonPeriods =
+          selectedIndex > 0
+            ? selectorPeriods
+                .slice(Math.max(0, selectedIndex - 6), selectedIndex)
+                .map((p) => ({
+                  period_start: p.start_date,
+                  period_end: p.end_date,
+                }))
+            : [];
+
+        const validationResult = await runValidation({
+          run,
+          context: {
+            periodStart,
+            periodEnd,
+            active_rule_ids: activeRuleIds,
+            comparison_periods: comparisonPeriods,
+          },
+          exclusions: activeExcluded,
+          ruleCatalog: rulesCatalog,
+        });
+        const findings = Array.isArray(validationResult?.findings) ? validationResult.findings : [];
         const artifacts = buildArtifacts({ run, policySnapshot: {} });
         const outcome = await buildOutcome(run, findings, artifacts, null);
         outcome.summary = {
           ...(outcome.summary || {}),
           excluded_staff_count: activeExcluded.length,
+          active_rules_count: activeRuleIds.length,
+          comparison_periods_used: comparisonPeriods.length,
         };
         outcome.excluded_staff = activeExcluded.map((row) => ({
           id: row.id,
@@ -400,6 +444,16 @@ function router(req, res) {
           notes: row.notes,
           active: row.active,
         }));
+        outcome.validation_context = {
+          selected_period: {
+            period_start: periodStart,
+            period_end: periodEnd,
+            validation_date: body.validation_date || null,
+          },
+          comparison_periods: comparisonPeriods,
+          active_rule_ids: activeRuleIds,
+          data_sources: validationResult?.data_sources || [],
+        };
 
         const savedOutcome = await saveOutcome(run.id, outcome);
 
