@@ -39,7 +39,7 @@ Admin
 Can access everything.
 
 
-Can manage users (create/disable/reset).
+Can manage users (create/disable)
 
 
 Can change all client/location app-owned configuration:
@@ -97,7 +97,7 @@ update exclusions
 The only features reserved for Admin:
 
 
-user management (create, disable, reset password)
+user management (create, disable)
 
 
 any “override” capability if one is ever introduced (none exist by default)
@@ -157,22 +157,6 @@ manual runs/sends/resends
 token reissue actions
 
 
-
-Payroll App Binder — V1.2 Complete
-This adds internal authentication and a minimal role model:
-Email + password
-
-
-Two roles (Admin, User)
-
-
-Admin-managed accounts
-
-
-Audit logging tied to identity
-
-
-No additional complexity is introduced.
 
 9. Clarifications (V1.2.1)
 9.1 Approval and Locking Semantics
