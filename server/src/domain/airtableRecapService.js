@@ -306,6 +306,8 @@ async function getRecapForLocationName(locationName) {
     preview_recipients_count: preview.count,
     preview_recipients_summary: preview.summary,
 
+    asana_project_guid: asanaProjectGuid || null,
+    asana_inbox_section_guid: asanaInboxGuid || null,
     asana_connected: asanaConnected,
 
     current_pay_period: {
