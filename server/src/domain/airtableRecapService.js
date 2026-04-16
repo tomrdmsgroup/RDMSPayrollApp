@@ -189,6 +189,66 @@ function findCurrentPeriodRow(rows, nowUtc) {
   return candidates[0];
 }
 
+function parsePeriodRows(rows) {
+  return (rows || [])
+    .map((r) => {
+      const fields = r.fields || {};
+      const startDate = toYmd(fields['PR Period Start Date']);
+      const endDate = toYmd(fields['PR Period End Date']);
+      const validationDate = toYmd(fields['PR Period Validation Date']);
+      const submitDate = toYmd(fields['PR Period Submit Date']);
+      if (!startDate || !endDate || !validationDate || !submitDate) return null;
+
+      return {
+        record_id: r.id,
+        start_date: startDate,
+        end_date: endDate,
+        validation_date: validationDate,
+        submit_date: submitDate,
+        check_date: toYmd(fields['PR Period Check Date']),
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => (a.start_date < b.start_date ? -1 : a.start_date > b.start_date ? 1 : 0));
+}
+
+function toSelectorPeriod(period) {
+  if (!period) return null;
+  return {
+    record_id: period.record_id,
+    start_date: period.start_date,
+    end_date: period.end_date,
+    validation_date: period.validation_date,
+    submit_date: period.submit_date,
+    check_date: period.check_date,
+    date_range: `${period.start_date} to ${period.end_date}`,
+  };
+}
+
+function buildPayPeriodSelectorModel(rows, nowUtc = new Date()) {
+  const periods = parsePeriodRows(rows);
+  if (!periods.length) return null;
+
+  const nowYmd = toYmd(nowUtc.toISOString());
+  const current = periods.find((p) => nowYmd >= p.start_date && nowYmd <= p.submit_date) || periods[periods.length - 1];
+  const currentIndex = periods.findIndex((p) => p.record_id === current.record_id);
+  const next = currentIndex >= 0 && currentIndex < periods.length - 1 ? periods[currentIndex + 1] : null;
+  const prior = currentIndex > 0 ? periods.slice(0, currentIndex).reverse() : [];
+
+  const defaultOption =
+    nowYmd <= current.validation_date ? 'current_pay_period' : (next ? 'next_pay_period' : 'current_pay_period');
+  const defaultPeriod = defaultOption === 'next_pay_period' ? next : current;
+
+  return {
+    as_of_date: nowYmd,
+    default_option: defaultOption,
+    selected_period: toSelectorPeriod(defaultPeriod),
+    current_pay_period: toSelectorPeriod(current),
+    next_pay_period: toSelectorPeriod(next),
+    prior_pay_periods: prior.map((p) => toSelectorPeriod(p)),
+  };
+}
+
 function normalizePreviewRecipients(vitals) {
   const emails = [];
   for (let i = 1; i <= 5; i++) {
@@ -327,7 +387,42 @@ async function getRecapForLocationName(locationName) {
   };
 }
 
+async function getPayPeriodSelectorForLocationName(locationName, nowUtc = new Date()) {
+  const vitalsTable = requireEnv('AIRTABLE_VITALS_TABLE');
+  const locationField = requireEnv('AIRTABLE_VITALS_LOCATION_FIELD');
+  const payrollDetailsTable = requireEnv('AIRTABLE_PAYROLL_CALENDAR_DETAILS_TABLE');
+
+  const name = String(locationName || '').trim();
+  if (!name) throw new Error('location_name_required');
+
+  const filterVitals = `{${locationField}}='${escapeAirtableString(name)}'`;
+  const vitalsRecords = await airtableListAll({ table: vitalsTable, filterByFormula: filterVitals });
+  if (!vitalsRecords.length) throw new Error('location_not_found');
+
+  const vitals = vitalsRecords[0].fields || {};
+  const calendarName =
+    vitals['Payroll Calendar (from PR Calendar)'] ||
+    vitals['Payroll Calendar'] ||
+    vitals['PR Calendar Name'] ||
+    null;
+  if (!calendarName) throw new Error('missing_payroll_calendar_name');
+
+  const filterDetails = `{PR Calendar Name - Master}='${escapeAirtableString(calendarName)}'`;
+  const detailRecords = await airtableListAll({ table: payrollDetailsTable, filterByFormula: filterDetails });
+
+  const selector = buildPayPeriodSelectorModel(detailRecords, nowUtc);
+  if (!selector) throw new Error('no_pay_periods_found');
+
+  return {
+    location_name: name,
+    calendar_name: calendarName,
+    selector,
+  };
+}
+
 module.exports = {
   listLocationNames,
   getRecapForLocationName,
+  getPayPeriodSelectorForLocationName,
+  buildPayPeriodSelectorModel,
 };

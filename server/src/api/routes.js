@@ -20,7 +20,11 @@ const {
   listStaffUsersAsAdminOnly,
 } = require('../domain/authService');
 
-const { listLocationNames, getRecapForLocationName } = require('../domain/airtableRecapService');
+const {
+  listLocationNames,
+  getRecapForLocationName,
+  getPayPeriodSelectorForLocationName,
+} = require('../domain/airtableRecapService');
 const { runBarrioToastProof, searchToastEmployeesForLocation } = require('../domain/toastBarrioProofService');
 
 const { rulesCatalog } = require('../domain/rulesCatalog');
@@ -321,6 +325,22 @@ function router(req, res) {
         if (!locationName) return json(res, 400, { error: 'locationName_required' });
         const recap = await getRecapForLocationName(locationName);
         return json(res, 200, { recap });
+      } catch (e) {
+        return handleError(res, e);
+      }
+    })();
+    return;
+  }
+
+  if (url.pathname === '/staff/pay-period-selector' && req.method === 'GET') {
+    (async () => {
+      const user = await requireStaff(req, res);
+      if (!user) return;
+      try {
+        const locationName = url.searchParams.get('locationName');
+        if (!locationName) return json(res, 400, { error: 'locationName_required' });
+        const payPeriodSelector = await getPayPeriodSelectorForLocationName(locationName);
+        return json(res, 200, { payPeriodSelector });
       } catch (e) {
         return handleError(res, e);
       }
