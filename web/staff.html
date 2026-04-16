@@ -368,6 +368,7 @@
         <div class="tab active" data-tab="confirmations">Client Info Confirmations</div>
         <div class="tab" data-tab="rules">Payroll Validation Rules</div>
         <div class="tab" data-tab="outcome">Pay Period Validation Outcome</div>
+        <div class="tab" data-tab="toastOriginal">Toast Pay Period Data - Original</div>
         <div class="tab" data-tab="excluded">Excluded Staff</div>
         <div class="tab" data-tab="reports">RDMS Manual Reporting</div>
       </div>
@@ -421,6 +422,12 @@
         outcomeResult: null,
         outcomeRunError: "",
         outcomeRunning: false,
+        toastOriginalSelector: null,
+        toastOriginalSelectionBucket: "",
+        toastOriginalSelectionPriorRecordId: "",
+        toastOriginalData: null,
+        toastOriginalLoadError: "",
+        toastOriginalLoading: false,
       };
 
       function setActiveTab(tab) {
@@ -433,6 +440,7 @@
           confirmations: "Client Info Confirmations",
           rules: "Payroll Validation Rules",
           outcome: "Pay Period Validation Outcome",
+          toastOriginal: "Toast Pay Period Data - Original",
           excluded: "Excluded Staff",
           reports: "RDMS Manual Reporting",
         };
@@ -463,6 +471,13 @@
           document.getElementById("pageSub").textContent =
             "Run payroll validation for a selected pay period and review the outcome.";
           loadOutcomeSelectorForSelected();
+          return;
+        }
+
+        if (tab === "toastOriginal") {
+          document.getElementById("pageSub").textContent =
+            "Audit raw/original Toast pay-period export rows before RDMS reshaping.";
+          loadToastOriginalSelectorForSelected();
           return;
         }
 
@@ -1183,6 +1198,17 @@
         return null;
       }
 
+      function toastOriginalSelectedPeriod() {
+        const selector = state.toastOriginalSelector || {};
+        if (state.toastOriginalSelectionBucket === "current") return selector.current_pay_period || null;
+        if (state.toastOriginalSelectionBucket === "next") return selector.next_pay_period || null;
+        if (state.toastOriginalSelectionBucket === "prior") {
+          const list = Array.isArray(selector.prior_pay_periods) ? selector.prior_pay_periods : [];
+          return list.find((p) => String(p.record_id) === String(state.toastOriginalSelectionPriorRecordId)) || null;
+        }
+        return null;
+      }
+
       function renderOutcomeTab() {
         const content = document.getElementById("content");
         const locationName = document.getElementById("locationSelect").value;
@@ -1385,6 +1411,195 @@
         }
       }
 
+      function renderToastOriginalTable(columns, rows) {
+        const head = columns.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
+        const body = rows.length
+          ? rows
+              .map((row) => {
+                const cells = columns
+                  .map((col) => {
+                    const value = row && Object.prototype.hasOwnProperty.call(row, col) ? row[col] : "";
+                    const rendered =
+                      value === null || value === undefined
+                        ? ""
+                        : typeof value === "object"
+                        ? JSON.stringify(value)
+                        : String(value);
+                    return `<td>${escapeHtml(rendered)}</td>`;
+                  })
+                  .join("");
+                return `<tr>${cells}</tr>`;
+              })
+              .join("")
+          : `<tr><td colspan="${Math.max(columns.length, 1)}" class="muted">No rows returned for this pay period.</td></tr>`;
+
+        return `<div style="overflow:auto;"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+      }
+
+      function renderToastOriginalTab() {
+        const content = document.getElementById("content");
+        const locationName = document.getElementById("locationSelect").value;
+        if (!locationName) {
+          content.innerHTML = "<div class='loading'>Select a location to use Toast Pay Period Data - Original.</div>";
+          return;
+        }
+        if (!state.toastOriginalSelector) {
+          content.innerHTML = "<div class='loading'>Loading pay period selector...</div>";
+          return;
+        }
+
+        const selector = state.toastOriginalSelector;
+        const current = selector.current_pay_period;
+        const next = selector.next_pay_period;
+        const prior = Array.isArray(selector.prior_pay_periods) ? selector.prior_pay_periods : [];
+        const selectedPeriod = toastOriginalSelectedPeriod();
+        const priorOptions = ["<option value=''>Select a prior pay period...</option>"]
+          .concat(
+            prior.map(
+              (p) =>
+                `<option value="${escapeAttr(p.record_id)}" ${
+                  String(state.toastOriginalSelectionPriorRecordId) === String(p.record_id) ? "selected" : ""
+                }>${escapeHtml(fmtDateRange(p.start_date, p.end_date))}</option>`
+            )
+          )
+          .join("");
+
+        const data = state.toastOriginalData;
+        const columns = Array.isArray(data?.columns) ? data.columns : [];
+        const rows = Array.isArray(data?.rows) ? data.rows : [];
+
+        content.innerHTML = `
+          <div class="stack">
+            <div class="panel">
+              <div class="sectionTitle" style="margin-top:0;">View Control</div>
+              <div class="row" style="gap:8px;">
+                <button class="btn primary" type="button">See Original</button>
+                <button class="btn" type="button" disabled title="Coming later">See RDMS Format (Coming Soon)</button>
+              </div>
+              <div class="sectionTitle">Pay Period to Load</div>
+              <div class="gridTwo">
+                <label class="miniCard">
+                  <div><input type="radio" name="toastOriginalBucket" value="current" ${
+                    state.toastOriginalSelectionBucket === "current" ? "checked" : ""
+                  } /> Current Pay Period</div>
+                  <div class="muted">${escapeHtml(fmtDateRange(current?.start_date, current?.end_date) || "Not available")}</div>
+                </label>
+                <label class="miniCard">
+                  <div><input type="radio" name="toastOriginalBucket" value="next" ${
+                    state.toastOriginalSelectionBucket === "next" ? "checked" : ""
+                  } /> Next Pay Period</div>
+                  <div class="muted">${escapeHtml(fmtDateRange(next?.start_date, next?.end_date) || "Not available")}</div>
+                </label>
+              </div>
+              <div class="row" style="margin-top:10px;">
+                <label style="min-width:260px;flex:1;">
+                  <div class="muted" style="margin-bottom:6px;">Prior Pay Period</div>
+                  <select id="toastOriginalPriorSelect">${priorOptions}</select>
+                </label>
+                <button class="btn primary" id="loadToastOriginalBtn" type="button" ${state.toastOriginalLoading ? "disabled" : ""}>
+                  ${state.toastOriginalLoading ? "Loading..." : "Load Original Toast Data"}
+                </button>
+              </div>
+              ${
+                state.toastOriginalSelectionBucket === "prior" && !state.toastOriginalSelectionPriorRecordId
+                  ? "<div class='muted' style='margin-top:10px;'>Pick a prior pay period from the dropdown before loading.</div>"
+                  : ""
+              }
+              ${state.toastOriginalLoadError ? `<div class="muted" style="margin-top:10px;">Load failed: ${escapeHtml(state.toastOriginalLoadError)}</div>` : ""}
+            </div>
+
+            <div class="panel">
+              <div class="sectionTitle" style="margin-top:0;">Original Toast Pay Period Rows</div>
+              <div class="row" style="gap:16px;margin-bottom:8px;">
+                <div><span class="muted">Location:</span> ${escapeHtml(locationName)}</div>
+                <div><span class="muted">Selected pay period:</span> ${escapeHtml(
+                  fmtDateRange(selectedPeriod?.start_date, selectedPeriod?.end_date) || "Not selected"
+                )}</div>
+                <div><span class="muted">Rows:</span> ${escapeHtml(String(data?.row_count ?? 0))}</div>
+              </div>
+              <p class="sectionHelp" style="margin-top:0;">Raw/original Toast row payload rendered directly as a table for auditing.</p>
+              ${renderToastOriginalTable(columns, rows)}
+            </div>
+          </div>
+        `;
+
+        content.querySelectorAll("input[name='toastOriginalBucket']").forEach((el) => {
+          el.addEventListener("change", () => {
+            state.toastOriginalSelectionBucket = el.value;
+            renderToastOriginalTab();
+          });
+        });
+
+        const priorSelect = document.getElementById("toastOriginalPriorSelect");
+        if (priorSelect) {
+          priorSelect.addEventListener("change", () => {
+            state.toastOriginalSelectionPriorRecordId = priorSelect.value;
+            if (state.toastOriginalSelectionPriorRecordId) state.toastOriginalSelectionBucket = "prior";
+            renderToastOriginalTab();
+          });
+        }
+
+        const loadBtn = document.getElementById("loadToastOriginalBtn");
+        if (loadBtn) loadBtn.addEventListener("click", loadToastOriginalData);
+      }
+
+      async function loadToastOriginalSelectorForSelected() {
+        state.toastOriginalSelector = null;
+        state.toastOriginalData = null;
+        state.toastOriginalLoadError = "";
+        state.toastOriginalLoading = false;
+        state.toastOriginalSelectionBucket = "";
+        state.toastOriginalSelectionPriorRecordId = "";
+        renderToastOriginalTab();
+
+        const name = document.getElementById("locationSelect").value;
+        if (!name) return;
+        const q = encodeURIComponent(name);
+        const { resp, body } = await apiGet(`/staff/pay-period-selector?locationName=${q}`);
+        if (!resp.ok) {
+          state.toastOriginalLoadError = body.error || "selector_load_failed";
+          state.toastOriginalSelector = { current_pay_period: null, next_pay_period: null, prior_pay_periods: [] };
+          renderToastOriginalTab();
+          return;
+        }
+        const selector = body.selector || {};
+        state.toastOriginalSelector = selector;
+        state.toastOriginalSelectionBucket = selector.default_selection?.bucket || "current";
+        renderToastOriginalTab();
+      }
+
+      async function loadToastOriginalData() {
+        const selected = toastOriginalSelectedPeriod();
+        if (!selected) {
+          state.toastOriginalLoadError = "no_selected_pay_period";
+          renderToastOriginalTab();
+          return;
+        }
+        const locationName = document.getElementById("locationSelect").value;
+        state.toastOriginalLoading = true;
+        state.toastOriginalLoadError = "";
+        renderToastOriginalTab();
+        try {
+          const { resp, body } = await apiPost("/staff/toast-original-pay-period", {
+            location_name: locationName,
+            period_start: selected.start_date,
+            period_end: selected.end_date,
+          });
+          if (!resp.ok) {
+            state.toastOriginalLoadError = body.error || "load_failed";
+            state.toastOriginalData = null;
+            return;
+          }
+          state.toastOriginalData = body.data || null;
+        } catch (err) {
+          state.toastOriginalLoadError = (err && err.message) || "load_failed";
+          state.toastOriginalData = null;
+        } finally {
+          state.toastOriginalLoading = false;
+          renderToastOriginalTab();
+        }
+      }
+
       async function logout() {
         await fetch("/auth/logout", { method: "POST", credentials: "include" });
         window.location.href = "/auth/google";
@@ -1411,6 +1626,10 @@
         }
         if (state.tab === "outcome") {
           loadOutcomeSelectorForSelected();
+          return;
+        }
+        if (state.tab === "toastOriginal") {
+          loadToastOriginalSelectorForSelected();
           return;
         }
         setActiveTab("confirmations");
