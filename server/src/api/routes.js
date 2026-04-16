@@ -21,6 +21,7 @@ const {
 } = require('../domain/authService');
 
 const { listLocationNames, getRecapForLocationName } = require('../domain/airtableRecapService');
+const { runBarrioToastProof } = require('../domain/toastBarrioProofService');
 
 const { rulesCatalog } = require('../domain/rulesCatalog');
 const { getRuleConfigsForLocation, upsertRuleConfig } = require('../domain/rulesConfigDb');
@@ -320,6 +321,24 @@ function router(req, res) {
         if (!locationName) return json(res, 400, { error: 'locationName_required' });
         const recap = await getRecapForLocationName(locationName);
         return json(res, 200, { recap });
+      } catch (e) {
+        return handleError(res, e);
+      }
+    })();
+    return;
+  }
+
+
+  if (url.pathname === '/staff/toast-test' && req.method === 'GET') {
+    (async () => {
+      const user = await requireStaff(req, res);
+      if (!user) return;
+      try {
+        const locationName = url.searchParams.get('locationName');
+        if (!locationName) return json(res, 400, { error: 'locationName_required' });
+
+        const toastTest = await runBarrioToastProof(locationName);
+        return json(res, 200, { toastTest });
       } catch (e) {
         return handleError(res, e);
       }
