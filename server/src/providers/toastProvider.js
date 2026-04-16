@@ -195,6 +195,37 @@ async function safeJson(res) {
   }
 }
 
+async function safeText(res) {
+  try {
+    return await res.text();
+  } catch (_) {
+    return '';
+  }
+}
+
+function trimDebugValue(value, maxLen = 3000) {
+  const s = String(value || '');
+  if (s.length <= maxLen) return s;
+  return `${s.slice(0, maxLen)}…[truncated ${s.length - maxLen} chars]`;
+}
+
+async function readToastErrorBody(res) {
+  const contentType = String(res.headers?.get('content-type') || '').toLowerCase();
+
+  if (contentType.includes('application/json')) {
+    const jsonBody = await safeJson(res);
+    if (jsonBody !== null) return jsonBody;
+  }
+
+  const textBody = await safeText(res);
+  if (!textBody) return null;
+
+  return {
+    raw: trimDebugValue(textBody),
+    contentType: contentType || null,
+  };
+}
+
 function ymdToBusinessDate(ymd) {
   return Number(String(ymd || '').replaceAll('-', ''));
 }
@@ -380,8 +411,35 @@ async function fetchToastAnalyticsJobsFromVitals({ vitalsRecord, periodStart, pe
   });
 
   if (!createRes.ok) {
-    const j = await safeJson(createRes);
-    return { ok: false, error: 'toast_analytics_create_failed', status: createRes.status, details: j || null };
+    const errorBody = await readToastErrorBody(createRes);
+    const requestMeta = {
+      url: createUrl.toString(),
+      range: rangePick.range,
+      body: createBody,
+      identifiers: {
+        restaurantGuid: cfg.restaurantGuid || null,
+        locationId: cfg.locationId || null,
+        mgmtGroupGuid: cfg.mgmtGroupGuid || null,
+      },
+    };
+
+    console.error(
+      '[toast_analytics_create_failed]',
+      JSON.stringify({
+        status: createRes.status,
+        statusText: createRes.statusText || null,
+        request: requestMeta,
+        response: errorBody,
+      })
+    );
+
+    return {
+      ok: false,
+      error: 'toast_analytics_create_failed',
+      status: createRes.status,
+      details: errorBody || null,
+      request: requestMeta,
+    };
   }
 
   const createJson = await safeJson(createRes);
