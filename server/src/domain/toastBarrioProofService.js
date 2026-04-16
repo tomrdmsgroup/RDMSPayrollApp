@@ -3,12 +3,16 @@ const fetch = require('node-fetch');
 const { fetchAirtableRecords } = require('../providers/airtableClient');
 
 const TOAST_AIRTABLE_FIELDS = {
+  clientName: 'Client Name',
+  displayName: 'Display Name',
   hostname: 'Toast API Hostname',
   oauthUrl: 'Toast API OAuth URL',
   userAccessType: 'Toast API User Access Type',
   restaurantGuid: 'Toast API Restaurant GUID',
   restaurantExternalId: 'Toast API Restaurant External ID',
   locationId: 'Toast Location ID',
+  managementGroupGuid: 'Toast Management Group GUID',
+  analyticsScope: 'Toast Analytics Scope',
 };
 
 function safeStr(v) {
@@ -49,12 +53,15 @@ function getRequiredEnv(key) {
   return value;
 }
 
-function getAirtableVitalsConfig() {
+function getAirtableApiConfig() {
   return {
-    baseId: getRequiredEnv('AIRTABLE_VITALS_BASE'),
-    apiKey: safeStr(process.env.AIRTABLE_VITALS_API_KEY || process.env.AIRTABLE_API_KEY),
-    tableName: safeStr(process.env.AIRTABLE_VITALS_TABLE || 'Vitals'),
-    locationField: safeStr(process.env.AIRTABLE_VITALS_LOCATION_FIELD || 'Name'),
+    baseId: safeStr(process.env.AIRTABLE_API_CONFIG_BASE || process.env.AIRTABLE_VITALS_BASE),
+    apiKey: safeStr(
+      process.env.AIRTABLE_API_CONFIG_API_KEY || process.env.AIRTABLE_VITALS_API_KEY || process.env.AIRTABLE_API_KEY
+    ),
+    tableName: safeStr(process.env.AIRTABLE_API_CONFIG_TABLE || 'API Config'),
+    clientNameField: safeStr(process.env.AIRTABLE_API_CONFIG_CLIENT_NAME_FIELD || TOAST_AIRTABLE_FIELDS.clientName),
+    displayNameField: safeStr(process.env.AIRTABLE_API_CONFIG_DISPLAY_NAME_FIELD || TOAST_AIRTABLE_FIELDS.displayName),
   };
 }
 
@@ -79,21 +86,28 @@ function getBarrioToastSecrets() {
 }
 
 function buildNonSecretToastConfig(fields) {
+  const clientName = safeStr(fields[TOAST_AIRTABLE_FIELDS.clientName]) || null;
+  const displayName = safeStr(fields[TOAST_AIRTABLE_FIELDS.displayName]) || null;
   const hostname = normalizeHostname(fields[TOAST_AIRTABLE_FIELDS.hostname]);
   const oauthUrl = safeStr(fields[TOAST_AIRTABLE_FIELDS.oauthUrl]) || null;
   const userAccessType = safeStr(fields[TOAST_AIRTABLE_FIELDS.userAccessType]) || null;
-  const restaurantGuid =
-    safeStr(fields[TOAST_AIRTABLE_FIELDS.restaurantGuid]) ||
-    safeStr(fields[TOAST_AIRTABLE_FIELDS.restaurantExternalId]) ||
-    null;
+  const restaurantGuid = safeStr(fields[TOAST_AIRTABLE_FIELDS.restaurantGuid]) || null;
+  const restaurantExternalId = safeStr(fields[TOAST_AIRTABLE_FIELDS.restaurantExternalId]) || null;
   const locationId = safeStr(fields[TOAST_AIRTABLE_FIELDS.locationId]) || null;
+  const managementGroupGuid = safeStr(fields[TOAST_AIRTABLE_FIELDS.managementGroupGuid]) || null;
+  const analyticsScope = safeStr(fields[TOAST_AIRTABLE_FIELDS.analyticsScope]) || null;
 
   return {
+    clientName,
+    displayName,
     hostname,
     oauthUrl,
     userAccessType,
     restaurantGuid,
+    restaurantExternalId,
     locationId,
+    managementGroupGuid,
+    analyticsScope,
   };
 }
 
@@ -105,11 +119,46 @@ async function safeJson(response) {
   }
 }
 
-async function fetchVitalsForLocation(locationName) {
-  const cfg = getAirtableVitalsConfig();
-  if (!cfg.apiKey) throw new Error('missing_AIRTABLE_VITALS_API_KEY');
+function normalizeMatchString(v) {
+  return safeStr(v).toLowerCase();
+}
 
-  const filterByFormula = `{${cfg.locationField}}='${escapeAirtableString(locationName)}'`;
+function buildLocationCandidates(locationName) {
+  const full = safeStr(locationName);
+  const root = safeStr(full.split(' - ')[0]);
+  if (root && root !== full) return [full, root];
+  return [full];
+}
+
+function scoreApiConfigMatch(fields, locationName) {
+  const locationNorm = normalizeMatchString(locationName);
+  const rootNorm = normalizeMatchString(buildLocationCandidates(locationName)[1] || '');
+  const displayNorm = normalizeMatchString(fields[TOAST_AIRTABLE_FIELDS.displayName]);
+  const clientNorm = normalizeMatchString(fields[TOAST_AIRTABLE_FIELDS.clientName]);
+
+  if (displayNorm && displayNorm === locationNorm) return 500;
+  if (clientNorm && clientNorm === locationNorm) return 450;
+  if (rootNorm && displayNorm && displayNorm === rootNorm) return 400;
+  if (rootNorm && clientNorm && clientNorm === rootNorm) return 350;
+  if (displayNorm && locationNorm.includes(displayNorm)) return 250;
+  if (clientNorm && locationNorm.includes(clientNorm)) return 200;
+  return 0;
+}
+
+async function fetchApiConfigForLocation(locationName) {
+  const cfg = getAirtableApiConfig();
+  if (!cfg.baseId) throw new Error('missing_AIRTABLE_API_CONFIG_BASE');
+  if (!cfg.apiKey) throw new Error('missing_AIRTABLE_API_CONFIG_API_KEY');
+
+  const candidates = buildLocationCandidates(locationName).filter(Boolean);
+  const clauses = [];
+  for (const candidate of candidates) {
+    const escaped = escapeAirtableString(candidate);
+    clauses.push(`{${cfg.clientNameField}}='${escaped}'`);
+    clauses.push(`{${cfg.displayNameField}}='${escaped}'`);
+  }
+
+  const filterByFormula = clauses.length > 1 ? `OR(${clauses.join(',')})` : clauses[0];
 
   const { records } = await fetchAirtableRecords({
     baseId: cfg.baseId,
@@ -118,13 +167,20 @@ async function fetchVitalsForLocation(locationName) {
     filterByFormula,
   });
 
-  if (!records.length) return { found: false, recordId: null, fields: null };
+  if (!records.length) return { found: false, recordId: null, fields: null, matchStrategy: null };
 
-  const record = records[0];
+  const ranked = records
+    .map((record) => ({ record, score: scoreApiConfigMatch(record.fields || {}, locationName) }))
+    .sort((a, b) => b.score - a.score);
+
+  const selected = ranked[0] || null;
+  const record = selected?.record || records[0];
+
   return {
     found: true,
     recordId: record.id,
     fields: record.fields || {},
+    matchStrategy: selected ? `scored_candidate_${selected.score}` : 'first_record',
   };
 }
 
@@ -231,14 +287,17 @@ async function runBarrioToastProof(locationName) {
     employeeSample: [],
     failureReason: null,
     airtableFieldsUsed: {
-      locationFieldFromEnv: safeStr(process.env.AIRTABLE_VITALS_LOCATION_FIELD || 'Name'),
+      apiConfigTableFromEnv: safeStr(process.env.AIRTABLE_API_CONFIG_TABLE || 'API Config'),
+      clientNameFieldFromEnv: safeStr(process.env.AIRTABLE_API_CONFIG_CLIENT_NAME_FIELD || TOAST_AIRTABLE_FIELDS.clientName),
+      displayNameFieldFromEnv: safeStr(process.env.AIRTABLE_API_CONFIG_DISPLAY_NAME_FIELD || TOAST_AIRTABLE_FIELDS.displayName),
       toastFields: Object.values(TOAST_AIRTABLE_FIELDS),
     },
     envVarsRead: [
-      'AIRTABLE_VITALS_BASE',
-      'AIRTABLE_VITALS_API_KEY (fallback AIRTABLE_API_KEY)',
-      'AIRTABLE_VITALS_TABLE',
-      'AIRTABLE_VITALS_LOCATION_FIELD',
+      'AIRTABLE_API_CONFIG_BASE (fallback AIRTABLE_VITALS_BASE)',
+      'AIRTABLE_API_CONFIG_API_KEY (fallback AIRTABLE_VITALS_API_KEY, AIRTABLE_API_KEY)',
+      'AIRTABLE_API_CONFIG_TABLE',
+      'AIRTABLE_API_CONFIG_CLIENT_NAME_FIELD',
+      'AIRTABLE_API_CONFIG_DISPLAY_NAME_FIELD',
       'TOAST_STD_CLIENT_ID_BARRIO',
       'TOAST_STD_CLIENT_SECRET_BARRIO',
       'TOAST_AN_CLIENT_ID_BARRIO',
@@ -247,27 +306,38 @@ async function runBarrioToastProof(locationName) {
   };
 
   try {
-    const vitals = await fetchVitalsForLocation(cleanedLocationName);
-    result.airtableConfigFound = vitals.found;
+    const apiConfig = await fetchApiConfigForLocation(cleanedLocationName);
+    result.airtableConfigFound = apiConfig.found;
+    result.matchStrategy = apiConfig.matchStrategy || null;
 
-    if (!vitals.found) {
-      result.failureReason = 'location_not_found_in_airtable_vitals';
+    if (!apiConfig.found) {
+      result.failureReason = 'location_not_found_in_airtable_api_config';
       return result;
     }
 
-    const nonSecretConfig = buildNonSecretToastConfig(vitals.fields);
+    const nonSecretConfig = buildNonSecretToastConfig(apiConfig.fields);
     result.nonSecretConfig = {
+      hasClientName: !!nonSecretConfig.clientName,
+      hasDisplayName: !!nonSecretConfig.displayName,
       hasHostname: !!nonSecretConfig.hostname,
       hasOauthUrl: !!nonSecretConfig.oauthUrl,
       hasUserAccessType: !!nonSecretConfig.userAccessType,
       hasRestaurantGuid: !!nonSecretConfig.restaurantGuid,
+      hasRestaurantExternalId: !!nonSecretConfig.restaurantExternalId,
       hasLocationId: !!nonSecretConfig.locationId,
+      hasManagementGroupGuid: !!nonSecretConfig.managementGroupGuid,
+      hasAnalyticsScope: !!nonSecretConfig.analyticsScope,
     };
 
     const secrets = getBarrioToastSecrets();
     result.secretConfig = secrets.summary;
 
-    if (!nonSecretConfig.hostname || !nonSecretConfig.oauthUrl || !nonSecretConfig.userAccessType || !nonSecretConfig.restaurantGuid) {
+    if (
+      !nonSecretConfig.hostname ||
+      !nonSecretConfig.oauthUrl ||
+      !nonSecretConfig.userAccessType ||
+      (!nonSecretConfig.restaurantGuid && !nonSecretConfig.restaurantExternalId)
+    ) {
       result.failureReason = 'toast_non_secret_config_incomplete';
       return result;
     }
@@ -294,7 +364,7 @@ async function runBarrioToastProof(locationName) {
     const employees = await fetchToastEmployees({
       hostname: nonSecretConfig.hostname,
       token: auth.token,
-      restaurantGuid: nonSecretConfig.restaurantGuid,
+      restaurantGuid: nonSecretConfig.restaurantGuid || nonSecretConfig.restaurantExternalId,
     });
 
     if (!employees.ok) {
