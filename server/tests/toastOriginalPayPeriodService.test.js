@@ -16,7 +16,7 @@ function testNormalizeEmployeeIdentityUsesFallbackMappings() {
   assert.equal(row.external_employee_id, 'PAY-42');
 }
 
-function testJoinAndBuildPayrollExportRowsKeepsFinerRowGrain() {
+function testJoinAndBuildPayrollExportRowsAggregatesToEmployeeJobLocationGrain() {
   const employeeByKey = new Map([
     ['e-1', { employee_id: 'E-1', employee_name: 'Alex Able', external_employee_id: 'PAY-1' }],
   ]);
@@ -80,9 +80,9 @@ function testJoinAndBuildPayrollExportRowsKeepsFinerRowGrain() {
 
   const joined = __test.joinLaborRowsToEmployees(analyticsRows, employeeByKey);
   const rows = __test.buildPayrollExportRows(joined, 'L1');
-  assert.equal(rows.length, 3, 'must preserve row grain beyond employee + job title');
+  assert.equal(rows.length, 2, 'must aggregate to employee + job + location row grain');
 
-  const serverRow = rows.find((r) => r['Job Title'] === 'Server');
+  const serverRow = rows.find((r) => r['Job Title'] === 'Server' && r.Location === 'Barrio');
   const bartenderRow = rows.find((r) => r['Job Title'] === 'Bartender');
   assert.ok(serverRow);
   assert.ok(bartenderRow);
@@ -90,13 +90,19 @@ function testJoinAndBuildPayrollExportRowsKeepsFinerRowGrain() {
   assert.equal(serverRow.Employee, 'Alex Able');
   assert.equal(serverRow['Employee ID'], 'PAY-1');
   assert.equal(serverRow['Job Code'], 'JC-1');
-  assert.equal(serverRow['Business Date'], '2026-03-31');
-  assert.equal(serverRow['Pay Type'], 'Regular');
+  assert.equal(serverRow['Regular Hours'], 6);
+  assert.equal(serverRow['Overtime Hours'], 1);
+  assert.equal(serverRow['Regular Pay'], 75);
+  assert.equal(serverRow['Overtime Pay'], 18.75);
+  assert.equal(serverRow['Total Pay'], 93.75);
+  assert.equal(serverRow['Declared Tips'], 15);
+  assert.equal(serverRow['Non-Cash Tips'], 5);
+  assert.equal(serverRow['Total Tips'], 20);
   assert.equal(serverRow.Location, 'Barrio');
   assert.equal(serverRow['Location Code'], 'L1');
 }
 
 module.exports = {
   testNormalizeEmployeeIdentityUsesFallbackMappings,
-  testJoinAndBuildPayrollExportRowsKeepsFinerRowGrain,
+  testJoinAndBuildPayrollExportRowsAggregatesToEmployeeJobLocationGrain,
 };
