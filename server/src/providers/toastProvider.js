@@ -438,6 +438,7 @@ function extractToastRows(payload) {
   if (Array.isArray(payload.rows)) return payload.rows;
   if (Array.isArray(payload.data)) return payload.data;
   if (Array.isArray(payload.employees)) return payload.employees;
+  if (Array.isArray(payload.jobs)) return payload.jobs;
   return [];
 }
 
@@ -488,6 +489,56 @@ async function fetchToastEmployeesFromVitals({ vitalsRecord, locationName = null
   return {
     ok: false,
     error: 'toast_employees_failed',
+  };
+}
+
+async function fetchToastJobsFromVitals({ vitalsRecord, locationName = null }) {
+  const cfg = await resolveStandardConfigForTimeEntries({ vitalsRecord, locationName });
+
+  if (!cfg.hostname || !cfg.clientId || !cfg.clientSecret || !cfg.userAccessType || !cfg.restaurantGuid || !cfg.oauthUrl) {
+    return {
+      ok: false,
+      error: 'toast_missing_required_config',
+      config: sanitizeToastConfig(cfg),
+    };
+  }
+
+  const auth = await loginToast({
+    oauthUrl: cfg.oauthUrl,
+    clientId: cfg.clientId,
+    clientSecret: cfg.clientSecret,
+    userAccessType: cfg.userAccessType,
+  });
+
+  if (!auth.ok) {
+    return { ok: false, error: auth.error, status: auth.status || null, details: auth.details || null };
+  }
+
+  const base = `https://${cfg.hostname}`;
+  const headers = standardHeaders({ token: auth.token, restaurantGuid: cfg.restaurantGuid });
+  const endpoints = ['/labor/v1/jobs', '/configuration/v1/jobs'];
+
+  for (const endpoint of endpoints) {
+    const url = new URL(endpoint, base);
+    const res = await fetch(url.toString(), { method: 'GET', headers });
+    if (!res.ok) continue;
+
+    const data = await safeJson(res);
+    return {
+      ok: true,
+      mode: 'standard_jobs',
+      endpoint,
+      identifiers: {
+        restaurantGuid: cfg.restaurantGuid,
+        locationId: cfg.locationId || null,
+      },
+      data: extractToastRows(data),
+    };
+  }
+
+  return {
+    ok: false,
+    error: 'toast_jobs_failed',
   };
 }
 
@@ -658,5 +709,6 @@ async function fetchToastAnalyticsJobsFromVitals({ vitalsRecord, periodStart, pe
 module.exports = {
   fetchToastTimeEntriesFromVitals,
   fetchToastEmployeesFromVitals,
+  fetchToastJobsFromVitals,
   fetchToastAnalyticsJobsFromVitals,
 };

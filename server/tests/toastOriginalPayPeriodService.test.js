@@ -102,7 +102,51 @@ function testJoinAndBuildPayrollExportRowsAggregatesToEmployeeJobLocationGrain()
   assert.equal(serverRow['Location Code'], 'L1');
 }
 
+function testJoinEnrichesRateAndJobFromEmployeeOverridesAndJobLookup() {
+  const employeeByKey = new Map([
+    [
+      'e-9',
+      {
+        employee_id: 'E-9',
+        employee_name: 'Jordan Smith',
+        external_employee_id: 'PAY-9',
+        wage_overrides: [{ job_guid: 'JG-1', wage: 21.5 }],
+        wage_by_job_guid: new Map([['jg-1', 21.5]]),
+      },
+    ],
+  ]);
+  const jobByKey = new Map([
+    ['jg-1', { job_guid: 'JG-1', job_code: 'SRV', job_name: 'Server' }],
+  ]);
+
+  const analyticsRows = [
+    {
+      employee_id: 'E-9',
+      external_employee_id: null,
+      employee_name: null,
+      job_guid: 'JG-1',
+      job_code: null,
+      job_name: null,
+      hourly_rate: null,
+      location_name: 'Barrio',
+      location_display_name: 'Barrio',
+      location_code: 'L1',
+      regular_hours: 8,
+      overtime_hours: 0,
+      regular_pay: 172,
+      overtime_pay: 0,
+      total_pay: 172,
+    },
+  ];
+
+  const joined = __test.joinLaborRowsToEmployees(analyticsRows, employeeByKey, jobByKey);
+  assert.equal(joined[0].job_name, 'Server');
+  assert.equal(joined[0].job_code, 'SRV');
+  assert.equal(joined[0].hourly_rate, 21.5);
+}
+
 module.exports = {
   testNormalizeEmployeeIdentityUsesFallbackMappings,
   testJoinAndBuildPayrollExportRowsAggregatesToEmployeeJobLocationGrain,
+  testJoinEnrichesRateAndJobFromEmployeeOverridesAndJobLookup,
 };

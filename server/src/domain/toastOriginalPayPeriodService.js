@@ -4,7 +4,7 @@
 // Toast Payroll Export CSV output as closely as possible from available APIs.
 
 const { fetchVitalsSnapshot } = require('../providers/vitalsProvider');
-const { fetchToastAnalyticsJobsFromVitals, fetchToastEmployeesFromVitals } = require('../providers/toastProvider');
+const { fetchToastAnalyticsJobsFromVitals, fetchToastEmployeesFromVitals, fetchToastJobsFromVitals } = require('../providers/toastProvider');
 const inFlightPayPeriodLoads = new Map();
 
 function trimErrorText(value, maxLen = 1800) {
@@ -64,6 +64,27 @@ function fullNameFromParts(first, last) {
   return [safeTrim(first), safeTrim(last)].filter(Boolean).join(' ').trim() || null;
 }
 
+function buildEmployeeName(row) {
+  const hasChosen = safeTrim(row?.chosenName);
+  const chosenLast = hasChosen ? fullNameFromParts(row?.chosenName, row?.lastName) : null;
+  if (chosenLast) return chosenLast;
+  const firstLast = fullNameFromParts(row?.firstName, row?.lastName);
+  if (firstLast) return firstLast;
+  return safeTrim(
+    pick(row, ['fullName', 'displayName', 'name', 'employeeName', 'employee_name', 'lastNameFirstName'])
+  );
+}
+
+function extractWageOverrides(row) {
+  const source = Array.isArray(row?.wageOverrides) ? row.wageOverrides : [];
+  return source
+    .map((entry) => ({
+      job_guid: safeTrim(pick(entry, ['jobReference.guid', 'jobReference.id', 'jobGuid', 'job_guid'])),
+      wage: toNum(pick(entry, ['wage', 'hourlyRate', 'payRate'])),
+    }))
+    .filter((entry) => entry.job_guid && entry.wage !== null);
+}
+
 function normalizeEmployeeIdentity(row) {
   const toastEmployeeId =
     safeTrim(
@@ -71,9 +92,12 @@ function normalizeEmployeeIdentity(row) {
         'id',
         'guid',
         'employeeId',
+        'employee_id',
         'employeeGuid',
+        'employee_guid',
         'employeeUuid',
         'uuid',
+        'employee.uuid',
       ])
     ) || null;
 
@@ -85,27 +109,26 @@ function normalizeEmployeeIdentity(row) {
       'payrollNumber',
       'employeeNumber',
       'employeeCode',
+      'employee_code',
       'externalEmployeeId',
+      'external_employee_id',
       'externalId',
+      'external_id',
+      'posEmployeeId',
+      'pos_employee_id',
     ])
   );
 
-  const employeeName =
-    safeTrim(
-      pick(row, [
-        'fullName',
-        'name',
-        'displayName',
-        'chosenName',
-        'employeeName',
-        'lastNameFirstName',
-      ])
-    ) || fullNameFromParts(row?.firstName, row?.lastName);
+  const employeeName = buildEmployeeName(row);
+  const wageOverrides = extractWageOverrides(row);
+  const wageByJobGuid = new Map(wageOverrides.map((x) => [String(x.job_guid).toLowerCase(), x.wage]));
 
   return {
     employee_id: toastEmployeeId,
     external_employee_id: payrollEmployeeId,
     employee_name: employeeName,
+    wage_overrides: wageOverrides,
+    wage_by_job_guid: wageByJobGuid,
   };
 }
 
@@ -125,7 +148,9 @@ function normalizeAnalyticsLaborRow(row, { location, periodStart, periodEnd, fal
   const analyticsEmployeeId = safeTrim(
     pick(row, [
       'employeeGuid',
+      'employee_guid',
       'employeeId',
+      'employee_id',
       'employeeUUID',
       'employee.id',
       'employee.guid',
@@ -135,8 +160,11 @@ function normalizeAnalyticsLaborRow(row, { location, periodStart, periodEnd, fal
   const analyticsExternalEmployeeId = safeTrim(
     pick(row, [
       'employeeExternalId',
+      'employee_external_id',
       'externalEmployeeId',
+      'external_employee_id',
       'employee.externalEmployeeId',
+      'employee.external_employee_id',
       'employee.employeeCode',
       'employee.employeeNumber',
     ])
@@ -146,7 +174,9 @@ function normalizeAnalyticsLaborRow(row, { location, periodStart, periodEnd, fal
     safeTrim(
       pick(row, [
         'employeeName',
+        'employee_name',
         'employeeFullName',
+        'employee_full_name',
         'fullName',
         'name',
         'employee.fullName',
@@ -158,13 +188,30 @@ function normalizeAnalyticsLaborRow(row, { location, periodStart, periodEnd, fal
     safeTrim(
       pick(row, [
         'jobCode',
+        'job_code',
         'jobId',
+        'job_id',
         'jobGuid',
+        'job_guid',
         'departmentCode',
+        'department_code',
         'departmentGuid',
+        'department_guid',
         'job.id',
         'job.guid',
         'job.code',
+      ])
+    ) || null;
+
+  const jobGuid =
+    safeTrim(
+      pick(row, [
+        'jobGuid',
+        'job_guid',
+        'departmentGuid',
+        'department_guid',
+        'job.id',
+        'job.guid',
       ])
     ) || null;
 
@@ -172,11 +219,15 @@ function normalizeAnalyticsLaborRow(row, { location, periodStart, periodEnd, fal
     safeTrim(
       pick(row, [
         'jobName',
+        'job_name',
         'jobTitle',
+        'job_title',
         'job',
         'departmentName',
+        'department_name',
         'department',
         'laborDepartmentName',
+        'labor_department_name',
         'job.name',
         'job.title',
       ])
@@ -205,13 +256,14 @@ function normalizeAnalyticsLaborRow(row, { location, periodStart, periodEnd, fal
     external_employee_id: analyticsExternalEmployeeId,
     employee_name: analyticsEmployeeName,
     job_code: jobCode,
+    job_guid: jobGuid,
     job_name: jobTitle,
-    regular_hours: toNum(pick(row, ['regularHours', 'hoursRegular', 'hours'])) || 0,
-    overtime_hours: toNum(pick(row, ['overtimeHours', 'otHours'])) || 0,
-    hourly_rate: toNum(pick(row, ['hourlyRate', 'payRate', 'rate'])),
-    regular_pay: toNum(pick(row, ['regularPay', 'regularCost', 'wageCost', 'laborCost'])) || 0,
-    overtime_pay: toNum(pick(row, ['overtimePay', 'overtimeCost', 'otCost'])) || 0,
-    total_pay: toNum(pick(row, ['totalPay', 'grossPay', 'totalLaborCost'])),
+    regular_hours: toNum(pick(row, ['regularHours', 'regular_hours', 'hoursRegular', 'hours'])) || 0,
+    overtime_hours: toNum(pick(row, ['overtimeHours', 'overtime_hours', 'otHours', 'ot_hours'])) || 0,
+    hourly_rate: toNum(pick(row, ['hourlyRate', 'hourly_rate', 'payRate', 'pay_rate', 'rate'])),
+    regular_pay: toNum(pick(row, ['regularPay', 'regular_pay', 'regularCost', 'regular_cost', 'wageCost', 'laborCost'])) || 0,
+    overtime_pay: toNum(pick(row, ['overtimePay', 'overtime_pay', 'overtimeCost', 'overtime_cost', 'otCost', 'ot_cost'])) || 0,
+    total_pay: toNum(pick(row, ['totalPay', 'total_pay', 'grossPay', 'gross_pay', 'totalLaborCost', 'total_labor_cost'])),
     net_sales: toNum(pick(row, ['netSales', 'salesNet'])),
     declared_tips: toNum(pick(row, ['declaredTips', 'tipsDeclared'])) || 0,
     non_cash_tips: toNum(pick(row, ['nonCashTips', 'chargedTips', 'tipsNonCash'])) || 0,
@@ -240,18 +292,129 @@ function normalizeBusinessDate(value) {
   return raw;
 }
 
-function joinLaborRowsToEmployees(laborRows, employeeByKey) {
+function sampleRows(rows, limit = 5) {
+  return (Array.isArray(rows) ? rows : []).slice(0, limit);
+}
+
+function lookupKeysForRow(row) {
+  return [row?.employee_id, row?.external_employee_id]
+    .filter(Boolean)
+    .map((x) => String(x).toLowerCase());
+}
+
+function buildJoinDiagnostics({ employeeRows, employeeByKey, jobRows, rawAnalyticsRows, normalizedLaborRows }) {
+  const normalizedEmployeeRows = sampleRows(employeeRows, 25).map((row) => normalizeEmployeeIdentity(row));
+  const normalizedJobRows = sampleRows(jobRows, 25).map((row) => normalizeJobIdentity(row));
+  const normalizedAnalyticsRows = sampleRows(rawAnalyticsRows, 25).map((row) =>
+    normalizeAnalyticsLaborRow(row, {
+      location: safeTrim(pick(row, ['locationName', 'restaurantName'])) || null,
+      periodStart: safeTrim(pick(row, ['startBusinessDate'])) || null,
+      periodEnd: safeTrim(pick(row, ['endBusinessDate'])) || null,
+      fallbackLocationCode: null,
+    })
+  );
+
+  const joinedStats = {
+    total_analytics_rows: normalizedLaborRows.length,
+    matched_rows: 0,
+    unmatched_rows: 0,
+    match_rate: 0,
+  };
+
+  const unmatchedSamples = [];
+  const joinKeySamples = [];
+
+  for (const row of normalizedLaborRows) {
+    const keys = lookupKeysForRow(row);
+    const match = keys.map((k) => employeeByKey.get(k)).find(Boolean) || null;
+    if (match) {
+      joinedStats.matched_rows += 1;
+    } else {
+      joinedStats.unmatched_rows += 1;
+      if (unmatchedSamples.length < 10) unmatchedSamples.push(row);
+    }
+    if (joinKeySamples.length < 25) {
+      joinKeySamples.push({
+        analytics_lookup_keys: keys,
+        matched_employee_id: match?.employee_id || null,
+        matched_external_employee_id: match?.external_employee_id || null,
+      });
+    }
+  }
+
+  if (joinedStats.total_analytics_rows > 0) {
+    joinedStats.match_rate = Number(((joinedStats.matched_rows / joinedStats.total_analytics_rows) * 100).toFixed(2));
+  }
+
+  return {
+    sample_raw_employee_rows: sampleRows(employeeRows, 5),
+    sample_raw_employee_row_0_full: employeeRows[0] || null,
+    sample_raw_employee_row_1_full: employeeRows[1] || null,
+    sample_raw_job_rows: sampleRows(jobRows, 5),
+    sample_raw_job_row_0_full: jobRows[0] || null,
+    sample_raw_analytics_rows: sampleRows(rawAnalyticsRows, 5),
+    sample_normalized_employee_identity: normalizedEmployeeRows.slice(0, 10),
+    sample_normalized_employee_identity_0: normalizedEmployeeRows[0] || null,
+    sample_normalized_job_identity: normalizedJobRows.slice(0, 10),
+    sample_normalized_job_identity_0: normalizedJobRows[0] || null,
+    sample_normalized_analytics_labor: normalizedAnalyticsRows.slice(0, 10),
+    employee_index_key_sample: Array.from(employeeByKey.keys()).slice(0, 30),
+    analytics_join_key_sample: joinKeySamples,
+    join_summary: joinedStats,
+    unmatched_analytics_rows_sample: unmatchedSamples,
+  };
+}
+
+function normalizeJobIdentity(row) {
+  return {
+    job_guid: safeTrim(pick(row, ['guid', 'id', 'jobGuid', 'job_guid', 'referenceGuid', 'jobReference.guid'])),
+    job_code: safeTrim(pick(row, ['code', 'jobCode', 'job_code', 'externalId', 'external_id'])),
+    job_name: safeTrim(pick(row, ['name', 'jobName', 'job_name', 'title', 'displayName', 'departmentName'])),
+  };
+}
+
+function buildJobIndex(jobRows) {
+  const byKey = new Map();
+  for (const row of jobRows) {
+    const job = normalizeJobIdentity(row);
+    const keys = [job.job_guid, job.job_code].filter(Boolean).map((x) => String(x).toLowerCase());
+    for (const key of keys) {
+      if (!byKey.has(key)) byKey.set(key, job);
+    }
+  }
+  return byKey;
+}
+
+function joinLaborRowsToEmployees(laborRows, employeeByKey, jobByKey = new Map()) {
   return laborRows.map((row) => {
     const lookupKeys = [row.employee_id, row.external_employee_id]
       .filter(Boolean)
       .map((x) => String(x).toLowerCase());
     const matched = lookupKeys.map((k) => employeeByKey.get(k)).find(Boolean) || null;
+    const jobLookupKeys = [row.job_guid, row.job_code].filter(Boolean).map((x) => String(x).toLowerCase());
+    const matchedJob = jobLookupKeys.map((k) => jobByKey.get(k)).find(Boolean) || null;
+    const matchedWageByJob =
+      row.job_guid && matched?.wage_by_job_guid
+        ? matched.wage_by_job_guid.get(String(row.job_guid).toLowerCase()) ?? null
+        : null;
+    const matchedSingleWage =
+      matchedWageByJob === null && Array.isArray(matched?.wage_overrides) && matched.wage_overrides.length === 1
+        ? matched.wage_overrides[0].wage
+        : null;
     return {
       ...row,
       employee_id: matched?.employee_id || row.employee_id || null,
-      employee_name: matched?.employee_name || row.employee_name || row.employee_id || null,
+      employee_name: matched?.employee_name || row.employee_name || null,
       toast_employee_id: matched?.employee_id || row.employee_id || null,
       export_employee_id: matched?.external_employee_id || row.external_employee_id || null,
+      job_code: row.job_code || matchedJob?.job_code || null,
+      job_name: row.job_name || matchedJob?.job_name || null,
+      hourly_rate:
+        row.hourly_rate !== null && row.hourly_rate !== undefined
+          ? row.hourly_rate
+          : matchedWageByJob !== null
+          ? matchedWageByJob
+          : matchedSingleWage,
     };
   });
 }
@@ -275,7 +438,7 @@ function buildPayrollExportRows(detailRows, fallbackLocationCode = null) {
     if (!byEmployeeJobLocation.has(key)) {
       byEmployeeJobLocation.set(key, {
         'Toast Employee ID': toastEmployeeId || null,
-        Employee: employeeName || toastEmployeeId || null,
+        Employee: employeeName || null,
         'Job Title': jobTitle || jobCode || 'Unassigned',
         'Regular Hours': 0,
         'Overtime Hours': 0,
@@ -290,7 +453,7 @@ function buildPayrollExportRows(detailRows, fallbackLocationCode = null) {
         'Non-Cash Tips': 0,
         'Tips Withheld': null,
         'Total Gratuity': null,
-        'Employee ID': exportEmployeeId || toastEmployeeId || null,
+        'Employee ID': exportEmployeeId || null,
         'Job Code': jobCode || null,
         Location: locationName || null,
         'Location Code': locationCode || null,
@@ -394,7 +557,7 @@ function detectReturnedRowGrain(rows) {
   return 'one row per Employee (job/location not reliably returned by analytics payload) for selected pay period';
 }
 
-async function fetchOriginalToastPayPeriodData({ locationName, periodStart, periodEnd }) {
+async function fetchOriginalToastPayPeriodData({ locationName, periodStart, periodEnd, includeDebug = false }) {
   const location = String(locationName || '').trim();
   const start = String(periodStart || '').trim();
   const end = String(periodEnd || '').trim();
@@ -410,7 +573,7 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
     const vitalsRecord = (snapshot && snapshot.data && snapshot.data[0]) || null;
     if (!vitalsRecord) throw new Error('toast_vitals_not_found');
 
-    const [employees, analytics] = await Promise.all([
+    const [employees, analytics, jobs] = await Promise.all([
       fetchToastEmployeesFromVitals({ vitalsRecord, locationName: location }),
       fetchToastAnalyticsJobsFromVitals({
         vitalsRecord,
@@ -418,6 +581,7 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
         periodEnd: end,
         locationName: location,
       }),
+      fetchToastJobsFromVitals({ vitalsRecord, locationName: location }),
     ]);
 
     if (!employees.ok) {
@@ -430,6 +594,8 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
 
     const employeeRows = extractRows(employees.data);
     const employeeByKey = buildEmployeeIndex(employeeRows);
+    const jobRows = jobs?.ok ? extractRows(jobs.data) : [];
+    const jobByKey = buildJobIndex(jobRows);
     const rawAnalyticsRows = extractRows(analytics.data);
     const normalizedLaborRows = rawAnalyticsRows.map((row) =>
       normalizeAnalyticsLaborRow(row, {
@@ -439,7 +605,7 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
         fallbackLocationCode: vitalsRecord['Toast Location ID'] ? String(vitalsRecord['Toast Location ID']) : null,
       })
     );
-    const joinedRows = joinLaborRowsToEmployees(normalizedLaborRows, employeeByKey);
+    const joinedRows = joinLaborRowsToEmployees(normalizedLaborRows, employeeByKey, jobByKey);
     const rows = buildPayrollExportRows(
       joinedRows,
       vitalsRecord['Toast Location ID'] ? String(vitalsRecord['Toast Location ID']) : null
@@ -468,6 +634,18 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
       'Location Code',
     ];
 
+    const isBarrio = /barrio/i.test(location);
+    const debug =
+      includeDebug && isBarrio
+        ? buildJoinDiagnostics({
+            employeeRows,
+            employeeByKey,
+            jobRows,
+            rawAnalyticsRows,
+            normalizedLaborRows,
+          })
+        : null;
+
     return {
       location_name: location,
       period_start: start,
@@ -479,6 +657,7 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
         source_row_grain_before_transform: 'one row per Toast ERA labor row grouped by EMPLOYEE for selected period',
         employee_identity_source: 'Toast Standard labor/hr employees endpoint',
         labor_totals_source: 'Toast Analytics ERA labor report (groupBy: EMPLOYEE) for selected pay period',
+        job_metadata_source: jobs?.ok ? `Toast Standard jobs endpoint (${jobs.endpoint || 'unknown'})` : null,
         employee_column_mapping: 'Employee column prefers Toast Standard employee full name; falls back to analytics name, then Toast employee id only when no name is available',
         employee_id_column_mapping:
           'Employee ID column prefers payrollEmployeeId/payrollId/payrollEmployeeNumber/employeeNumber/employeeCode/externalEmployeeId from Toast Standard employees; remains blank when unavailable',
@@ -501,6 +680,7 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
       row_count: rows.length,
       columns,
       rows,
+      debug,
     };
   })();
 
