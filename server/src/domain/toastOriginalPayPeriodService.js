@@ -139,9 +139,13 @@ function sumNullable(current, next) {
 function buildPayrollExportRows(detailRows, fallbackLocationCode = null) {
   const byEmployeeJob = new Map();
   for (const row of detailRows) {
+    const employeeId = row.employee_id || '';
     const employeeName = row.employee_name || '';
+    const jobCode = row.job_code || '';
     const jobTitle = row.job_name || '';
-    const key = `${employeeName}|||${jobTitle}`;
+    const locationName = row.location_display_name || row.location_name || '';
+    const locationCode = row.location_code || fallbackLocationCode || '';
+    const key = [employeeId, employeeName, jobCode, jobTitle, locationName, locationCode].join('|||');
     if (!byEmployeeJob.has(key)) {
       byEmployeeJob.set(key, {
         Employee: row.employee_name || null,
@@ -159,10 +163,10 @@ function buildPayrollExportRows(detailRows, fallbackLocationCode = null) {
         'Non-Cash Tips': 0,
         'Tips Withheld': null,
         'Total Gratuity': null,
-        'Employee ID': row.employee_id || null,
-        'Job Code': row.job_code || null,
-        Location: row.location_display_name || row.location_name || null,
-        'Location Code': row.location_code || fallbackLocationCode || null,
+        'Employee ID': employeeId || null,
+        'Job Code': jobCode || null,
+        Location: locationName || null,
+        'Location Code': locationCode || null,
       });
     }
     const agg = byEmployeeJob.get(key);
@@ -219,9 +223,17 @@ function buildPayrollExportRows(detailRows, fallbackLocationCode = null) {
   });
 
   result.sort((a, b) => {
+    const empId = String(a['Employee ID'] || '').localeCompare(String(b['Employee ID'] || ''));
+    if (empId !== 0) return empId;
     const emp = String(a.Employee || '').localeCompare(String(b.Employee || ''));
     if (emp !== 0) return emp;
-    return String(a['Job Title'] || '').localeCompare(String(b['Job Title'] || ''));
+    const jobCode = String(a['Job Code'] || '').localeCompare(String(b['Job Code'] || ''));
+    if (jobCode !== 0) return jobCode;
+    const jobTitle = String(a['Job Title'] || '').localeCompare(String(b['Job Title'] || ''));
+    if (jobTitle !== 0) return jobTitle;
+    const location = String(a.Location || '').localeCompare(String(b.Location || ''));
+    if (location !== 0) return location;
+    return String(a['Location Code'] || '').localeCompare(String(b['Location Code'] || ''));
   });
 
   return result;
@@ -280,7 +292,7 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
       provider: 'toast',
       api_mode: 'standard_time_entries_reconstructed_for_payroll_export',
       label: 'Toast Labor /timeEntries transformed to payroll-export-like rows',
-      row_grain: 'one row per employee + job title combination for selected pay period',
+      row_grain: 'one row per Employee ID + Employee Name + Job Code + Job Title + Location + Location Code for selected pay period',
       exact_payroll_export_endpoint_available: false,
       note:
         'Direct Toast Payroll Export endpoint is not configured in this codebase; data is reconstructed from labor/v1/timeEntries and aggregated to payroll-export grain.',
