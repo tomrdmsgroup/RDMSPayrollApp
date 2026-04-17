@@ -271,6 +271,51 @@ function singleGroupBy(group) {
   return [String(group || 'EMPLOYEE').trim() || 'EMPLOYEE'];
 }
 
+function parseRetryAfterMs(headers) {
+  const raw = String(headers?.get('retry-after') || '').trim();
+  if (!raw) return null;
+
+  const asSeconds = Number(raw);
+  if (Number.isFinite(asSeconds) && asSeconds >= 0) return Math.round(asSeconds * 1000);
+
+  const asDate = Date.parse(raw);
+  if (Number.isFinite(asDate)) {
+    const ms = asDate - Date.now();
+    return ms > 0 ? ms : 0;
+  }
+
+  return null;
+}
+
+function backoffMs(attemptIndex, retryAfterMs = null) {
+  if (Number.isFinite(retryAfterMs) && retryAfterMs !== null) return Math.max(500, Math.min(retryAfterMs, 20000));
+  const exp = Math.min(1000 * Math.pow(2, Math.max(0, attemptIndex)), 20000);
+  const jitter = Math.floor(Math.random() * 250);
+  return exp + jitter;
+}
+
+async function waitMs(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWith429Retry(url, options, { label, maxAttempts = 4 } = {}) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const response = await fetch(url, options);
+    if (response.status !== 429 || attempt === maxAttempts - 1) {
+      return { response, attemptCount: attempt + 1 };
+    }
+
+    const delay = backoffMs(attempt, parseRetryAfterMs(response.headers));
+    console.warn(
+      `[${label || 'toast_request'}_rate_limited_retry]`,
+      JSON.stringify({ status: response.status, attempt: attempt + 1, retryInMs: delay, url })
+    );
+    await waitMs(delay);
+  }
+
+  return { response: null, attemptCount: maxAttempts };
+}
+
 async function loginToast({ oauthUrl, clientId, clientSecret, userAccessType }) {
   const res = await fetch(oauthUrl, {
     method: 'POST',
@@ -487,15 +532,28 @@ async function fetchToastAnalyticsJobsFromVitals({ vitalsRecord, periodStart, pe
     groupBy: singleGroupBy('EMPLOYEE'),
   };
 
-  const createRes = await fetch(createUrl.toString(), {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${auth.token}`,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
+  const { response: createRes } = await fetchWith429Retry(
+    createUrl.toString(),
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${auth.token}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify(createBody),
     },
-    body: JSON.stringify(createBody),
-  });
+    { label: 'toast_analytics_create', maxAttempts: 4 }
+  );
+
+  if (!createRes) {
+    return {
+      ok: false,
+      error: 'toast_analytics_rate_limited',
+      status: 429,
+      details: { message: 'Toast create request was rate-limited after retries.' },
+    };
+  }
 
   if (!createRes.ok) {
     const errorBody = await readToastErrorBody(createRes);
@@ -522,7 +580,7 @@ async function fetchToastAnalyticsJobsFromVitals({ vitalsRecord, periodStart, pe
 
     return {
       ok: false,
-      error: 'toast_analytics_create_failed',
+      error: createRes.status === 429 ? 'toast_analytics_rate_limited' : 'toast_analytics_create_failed',
       status: createRes.status,
       details: errorBody || null,
       request: requestMeta,
@@ -544,10 +602,23 @@ async function fetchToastAnalyticsJobsFromVitals({ vitalsRecord, periodStart, pe
   const getUrl = new URL(`/era/v1/labor/${encodeURIComponent(reportGuid)}`, base);
 
   for (let i = 0; i < 28; i++) {
-    const r = await fetch(getUrl.toString(), {
-      method: 'GET',
-      headers: { Authorization: `Bearer ${auth.token}`, Accept: 'application/json' },
-    });
+    const { response: r } = await fetchWith429Retry(
+      getUrl.toString(),
+      {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${auth.token}`, Accept: 'application/json' },
+      },
+      { label: 'toast_analytics_poll', maxAttempts: 4 }
+    );
+
+    if (!r) {
+      return {
+        ok: false,
+        error: 'toast_analytics_rate_limited',
+        status: 429,
+        details: { reportGuid, message: 'Toast poll request was rate-limited after retries.' },
+      };
+    }
 
     if (r.ok) {
       const rows = await safeJson(r);
@@ -567,7 +638,18 @@ async function fetchToastAnalyticsJobsFromVitals({ vitalsRecord, periodStart, pe
       };
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 850));
+    if (r.status === 429) {
+      const details = await readToastErrorBody(r);
+      console.error('[toast_analytics_poll_failed]', JSON.stringify({ status: r.status, reportGuid, response: details }));
+      return {
+        ok: false,
+        error: 'toast_analytics_rate_limited',
+        status: 429,
+        details: details || { reportGuid },
+      };
+    }
+
+    await waitMs(850);
   }
 
   return { ok: false, error: 'toast_analytics_timeout', details: { reportGuid } };
