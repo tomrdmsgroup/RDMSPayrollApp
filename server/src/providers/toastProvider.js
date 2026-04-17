@@ -187,6 +187,28 @@ async function resolveAnalyticsConfigForValidation({ vitalsRecord, locationName 
   };
 }
 
+async function resolveStandardConfigForTimeEntries({ vitalsRecord, locationName }) {
+  const fallback = getToastConfigFromVitals(vitalsRecord, 'standard');
+  if (!isBarrioLocationName(locationName)) return fallback;
+
+  const apiFields = await fetchApiConfigFieldsForLocation(locationName);
+  if (!apiFields) return fallback;
+
+  const clientId = safeStr(process.env.TOAST_STD_CLIENT_ID_BARRIO) || null;
+  const clientSecret = safeStr(process.env.TOAST_STD_CLIENT_SECRET_BARRIO) || null;
+
+  return {
+    hostname: normalizeHostname(apiFields['Toast API Hostname'] || null),
+    clientId,
+    clientSecret,
+    userAccessType: apiFields['Toast API User Access Type'] || null,
+    restaurantGuid: apiFields['Toast API Restaurant GUID'] || apiFields['Toast API Restaurant External ID'] || null,
+    oauthUrl: apiFields['Toast API OAuth URL'] || null,
+    locationId: apiFields['Toast Location ID'] || null,
+    mgmtGroupGuid: apiFields['Toast Management Group GUID'] || null,
+  };
+}
+
 async function safeJson(res) {
   try {
     return await res.json();
@@ -303,8 +325,8 @@ function sanitizeToastConfig(cfg) {
   };
 }
 
-async function fetchToastTimeEntriesFromVitals({ vitalsRecord, periodStart, periodEnd }) {
-  const cfg = getToastConfigFromVitals(vitalsRecord, 'standard');
+async function fetchToastTimeEntriesFromVitals({ vitalsRecord, periodStart, periodEnd, locationName = null }) {
+  const cfg = await resolveStandardConfigForTimeEntries({ vitalsRecord, locationName });
 
   if (!cfg.hostname || !cfg.clientId || !cfg.clientSecret || !cfg.userAccessType || !cfg.restaurantGuid || !cfg.oauthUrl) {
     return {

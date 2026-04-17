@@ -146,6 +146,7 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
     vitalsRecord,
     periodStart: start,
     periodEnd: end,
+    locationName: location,
   });
 
   if (!standard.ok) {
