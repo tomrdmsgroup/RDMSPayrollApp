@@ -27,9 +27,9 @@
         color: var(--text);
       }
       .wrap {
-        max-width: min(1800px, calc(100vw - 32px));
+        width: min(2000px, 100%);
         margin: 0 auto;
-        padding: 18px 0 44px;
+        padding: 18px 16px 44px;
       }
       .topbar {
         position: sticky;
@@ -1657,6 +1657,21 @@
       }
 
       async function loadToastOriginalData() {
+        if (state.toastOriginalLoading) return;
+
+        const friendlyToastOriginalError = (raw) => {
+          const msg = String(raw || "");
+          if (
+            msg.includes("toast_analytics_rate_limited") ||
+            msg.includes("toast_rate_limited") ||
+            msg.includes('"status":429') ||
+            msg.includes("429 Too Many Requests")
+          ) {
+            return "Toast rate-limited this request. Wait a moment and try again.";
+          }
+          return msg || "load_failed";
+        };
+
         const selected = toastOriginalSelectedPeriod();
         if (!selected) {
           state.toastOriginalLoadError = "no_selected_pay_period";
@@ -1674,13 +1689,15 @@
             period_end: selected.end_date,
           });
           if (!resp.ok) {
-            state.toastOriginalLoadError = body.error || "load_failed";
+            console.error("[toast_original_load_failed]", body.error || "load_failed");
+            state.toastOriginalLoadError = friendlyToastOriginalError(body.error || "load_failed");
             state.toastOriginalData = null;
             return;
           }
           state.toastOriginalData = body.data || null;
         } catch (err) {
-          state.toastOriginalLoadError = (err && err.message) || "load_failed";
+          console.error("[toast_original_load_failed]", err);
+          state.toastOriginalLoadError = friendlyToastOriginalError((err && err.message) || "load_failed");
           state.toastOriginalData = null;
         } finally {
           state.toastOriginalLoading = false;
