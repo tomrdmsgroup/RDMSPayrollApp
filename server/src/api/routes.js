@@ -360,6 +360,7 @@ function router(req, res) {
         const locationName = String(body.location_name || '').trim();
         const periodStart = String(body.period_start || '').trim();
         const periodEnd = String(body.period_end || '').trim();
+        const includeDebug = body.debug_toast_mapping === true;
         if (!locationName || !periodStart || !periodEnd) {
           return json(res, 400, { error: 'missing_required_fields' });
         }
@@ -368,6 +369,7 @@ function router(req, res) {
           locationName,
           periodStart,
           periodEnd,
+          includeDebug,
         });
         return json(res, 200, { data });
       } catch (e) {
