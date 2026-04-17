@@ -452,8 +452,10 @@
         toastOriginalSelectionBucket: "",
         toastOriginalSelectionPriorRecordId: "",
         toastOriginalData: null,
+        toastOriginalDebugData: null,
         toastOriginalLoadError: "",
         toastOriginalLoading: false,
+        toastOriginalDebugLoading: false,
       };
 
       function setActiveTab(tab) {
@@ -1579,6 +1581,9 @@
                 <button class="btn primary" id="loadToastOriginalBtn" type="button" ${state.toastOriginalLoading ? "disabled" : ""}>
                   ${state.toastOriginalLoading ? "Loading..." : "Load Original Toast Data"}
                 </button>
+                <button class="btn" id="loadToastOriginalDebugBtn" type="button" ${state.toastOriginalDebugLoading ? "disabled" : ""}>
+                  ${state.toastOriginalDebugLoading ? "Loading Debug..." : "Load Barrio Debug Payload"}
+                </button>
               </div>
               ${
                 state.toastOriginalSelectionBucket === "prior" && !state.toastOriginalSelectionPriorRecordId
@@ -1586,6 +1591,16 @@
                   : ""
               }
               ${state.toastOriginalLoadError ? `<div class="muted" style="margin-top:10px;">Load failed: ${escapeHtml(state.toastOriginalLoadError)}</div>` : ""}
+              ${
+                state.toastOriginalDebugData
+                  ? `<div style="margin-top:10px;">
+                      <div class="muted" style="margin-bottom:6px;">Barrio debug payload (paste this back for mapping review):</div>
+                      <textarea id="toastOriginalDebugPayload" readonly style="width:100%;min-height:240px;font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:12px;">${escapeHtml(
+                        JSON.stringify(state.toastOriginalDebugData, null, 2)
+                      )}</textarea>
+                    </div>`
+                  : ""
+              }
             </div>
 
             <div class="panel toastOriginalDataPanel">
@@ -1629,13 +1644,17 @@
 
         const loadBtn = document.getElementById("loadToastOriginalBtn");
         if (loadBtn) loadBtn.addEventListener("click", loadToastOriginalData);
+        const loadDebugBtn = document.getElementById("loadToastOriginalDebugBtn");
+        if (loadDebugBtn) loadDebugBtn.addEventListener("click", loadToastOriginalDebugData);
       }
 
       async function loadToastOriginalSelectorForSelected() {
         state.toastOriginalSelector = null;
         state.toastOriginalData = null;
+        state.toastOriginalDebugData = null;
         state.toastOriginalLoadError = "";
         state.toastOriginalLoading = false;
+        state.toastOriginalDebugLoading = false;
         state.toastOriginalSelectionBucket = "";
         state.toastOriginalSelectionPriorRecordId = "";
         renderToastOriginalTab();
@@ -1654,6 +1673,41 @@
         state.toastOriginalSelector = selector;
         state.toastOriginalSelectionBucket = selector.default_selection?.bucket || "current";
         renderToastOriginalTab();
+      }
+
+      async function loadToastOriginalDebugData() {
+        if (state.toastOriginalDebugLoading) return;
+        const selected = toastOriginalSelectedPeriod();
+        if (!selected) {
+          state.toastOriginalLoadError = "no_selected_pay_period";
+          renderToastOriginalTab();
+          return;
+        }
+
+        const locationName = document.getElementById("locationSelect").value;
+        state.toastOriginalDebugLoading = true;
+        state.toastOriginalLoadError = "";
+        renderToastOriginalTab();
+        try {
+          const { resp, body } = await apiPost("/staff/toast-original-pay-period", {
+            location_name: locationName,
+            period_start: selected.start_date,
+            period_end: selected.end_date,
+            debug_toast_mapping: true,
+          });
+          if (!resp.ok) {
+            state.toastOriginalLoadError = body.error || "debug_load_failed";
+            state.toastOriginalDebugData = null;
+            return;
+          }
+          state.toastOriginalDebugData = body?.data?.debug || null;
+        } catch (err) {
+          state.toastOriginalLoadError = (err && err.message) || "debug_load_failed";
+          state.toastOriginalDebugData = null;
+        } finally {
+          state.toastOriginalDebugLoading = false;
+          renderToastOriginalTab();
+        }
       }
 
       async function loadToastOriginalData() {
@@ -1681,6 +1735,7 @@
         const locationName = document.getElementById("locationSelect").value;
         state.toastOriginalLoading = true;
         state.toastOriginalLoadError = "";
+        state.toastOriginalDebugData = null;
         renderToastOriginalTab();
         try {
           const { resp, body } = await apiPost("/staff/toast-original-pay-period", {
