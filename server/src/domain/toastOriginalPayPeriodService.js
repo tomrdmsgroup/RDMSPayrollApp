@@ -167,11 +167,19 @@ function normalizeAnalyticsLaborRow(row, { location, periodStart, periodEnd, fal
     pick(row, ['locationId', 'locationCode', 'restaurantGuid', 'restaurantExternalId', 'location.id', 'location.guid'])
   );
   const locationName = safeTrim(pick(row, ['locationName', 'restaurantName', 'location.name', 'location.displayName'])) || location;
+  const businessDate = normalizeBusinessDate(
+    pick(row, ['businessDate', 'business_date', 'date', 'workDate', 'shiftDate', 'day', 'reportDate'])
+  );
+  const payType = safeTrim(
+    pick(row, ['payType', 'wageType', 'earningType', 'compensationType', 'pay.type', 'wage.type'])
+  );
 
   return {
     location_name: location,
     location_code: locationCode || fallbackLocationCode || null,
     location_display_name: locationName || location,
+    business_date: businessDate,
+    pay_type: payType,
     pay_period_start: periodStart,
     pay_period_end: periodEnd,
     employee_id: analyticsEmployeeId,
@@ -202,6 +210,16 @@ function normalizeGroupPart(value, fallback = '') {
   return normalized || fallback;
 }
 
+function normalizeBusinessDate(value) {
+  const raw = safeTrim(value);
+  if (!raw) return null;
+  const digits = raw.replace(/[^\d]/g, '');
+  if (digits.length === 8) return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  return raw;
+}
+
 function joinLaborRowsToEmployees(laborRows, employeeByKey) {
   return laborRows.map((row) => {
     const lookupKeys = [row.employee_id].filter(Boolean).map((x) => String(x).toLowerCase());
@@ -227,9 +245,18 @@ function buildPayrollExportRows(detailRows, fallbackLocationCode = null) {
     const jobCode = String(row.job_code || '').trim();
     const locationName = row.location_display_name || row.location_name || '';
     const locationCode = row.location_code || fallbackLocationCode || '';
+    const businessDate = row.business_date || null;
+    const payType = row.pay_type || null;
+    const hourlyRateBucket = row.hourly_rate !== null && row.hourly_rate !== undefined ? Number(row.hourly_rate).toFixed(4) : '';
     const employeeKey = normalizeGroupPart(toastEmployeeId, normalizeGroupPart(employeeId, '__unknown_employee__'));
     const jobKey = normalizeGroupPart(jobTitle, normalizeGroupPart(jobCode, '__unassigned_job__'));
-    const key = [employeeKey, jobKey].join('|||');
+    const key = [
+      employeeKey,
+      jobKey,
+      normalizeGroupPart(businessDate, '__all_dates__'),
+      normalizeGroupPart(payType, '__all_pay_types__'),
+      hourlyRateBucket,
+    ].join('|||');
 
     if (!byEmployeeJob.has(key)) {
       byEmployeeJob.set(key, {
@@ -251,6 +278,8 @@ function buildPayrollExportRows(detailRows, fallbackLocationCode = null) {
         'Total Gratuity': null,
         'Employee ID': exportEmployeeId || toastEmployeeId || null,
         'Job Code': jobCode || null,
+        'Business Date': businessDate,
+        'Pay Type': payType,
         Location: locationName || null,
         'Location Code': locationCode || null,
       });
@@ -262,6 +291,8 @@ function buildPayrollExportRows(detailRows, fallbackLocationCode = null) {
     if (!agg['Employee ID'] && exportEmployeeId) agg['Employee ID'] = exportEmployeeId;
     if ((!agg['Job Title'] || agg['Job Title'] === 'Unassigned') && jobTitle) agg['Job Title'] = jobTitle;
     if (!agg['Job Code'] && jobCode) agg['Job Code'] = jobCode;
+    if (!agg['Business Date'] && businessDate) agg['Business Date'] = businessDate;
+    if (!agg['Pay Type'] && payType) agg['Pay Type'] = payType;
     if (!agg.Location && locationName) agg.Location = locationName;
     if (!agg['Location Code'] && locationCode) agg['Location Code'] = locationCode;
 
@@ -314,6 +345,8 @@ function buildPayrollExportRows(detailRows, fallbackLocationCode = null) {
       'Total Gratuity': agg['Total Gratuity'] !== null ? Number(agg['Total Gratuity'].toFixed(2)) : null,
       'Employee ID': agg['Employee ID'],
       'Job Code': agg['Job Code'],
+      'Business Date': agg['Business Date'],
+      'Pay Type': agg['Pay Type'],
       Location: agg.Location,
       'Location Code': agg['Location Code'],
     };
@@ -328,6 +361,10 @@ function buildPayrollExportRows(detailRows, fallbackLocationCode = null) {
     if (jobTitle !== 0) return jobTitle;
     const jobCode = String(a['Job Code'] || '').localeCompare(String(b['Job Code'] || ''));
     if (jobCode !== 0) return jobCode;
+    const businessDate = String(a['Business Date'] || '').localeCompare(String(b['Business Date'] || ''));
+    if (businessDate !== 0) return businessDate;
+    const payType = String(a['Pay Type'] || '').localeCompare(String(b['Pay Type'] || ''));
+    if (payType !== 0) return payType;
     const location = String(a.Location || '').localeCompare(String(b.Location || ''));
     if (location !== 0) return location;
     return String(a['Location Code'] || '').localeCompare(String(b['Location Code'] || ''));
@@ -399,6 +436,8 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
     'Total Gratuity',
     'Employee ID',
     'Job Code',
+    'Business Date',
+    'Pay Type',
     'Location',
     'Location Code',
   ];
@@ -411,11 +450,13 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
       provider: 'toast',
       api_mode: 'standard_employees_plus_analytics_jobs_reconstructed_for_payroll_export',
       label: 'Toast Standard employees joined to Toast Analytics labor jobs and aggregated to payroll-export-like rows',
-      source_row_grain_before_transform: 'one row per Toast ERA labor row grouped by JOB for selected period',
+      source_row_grain_before_transform: 'one row per Toast ERA labor row grouped by EMPLOYEE + JOB for selected period',
       employee_identity_source: 'Toast Standard labor/hr employees endpoint',
       join_key_between_sources: 'analytics.employeeGuid/employeeId/externalEmployeeId -> standard employee id/externalEmployeeId (case-insensitive string match)',
-      grouping_key_after_transform: 'lower(toast_employee_id), lower(job_title OR job_code)',
-      row_grain: 'one row per Employee + Job Title for selected pay period',
+      grouping_key_after_transform:
+        'lower(toast_employee_id), lower(job_title OR job_code), business_date, pay_type, rounded(hourly_rate, 4)',
+      row_grain:
+        'one row per Employee + Job (+ business_date/pay_type/rate bucket when present in analytics rows) for selected pay period',
       exact_payroll_export_endpoint_available: false,
       note:
         'Direct Toast Payroll Export endpoint is not configured in this codebase; data is reconstructed from Standard employees + Analytics labor rows.',

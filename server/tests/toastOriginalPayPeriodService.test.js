@@ -16,7 +16,7 @@ function testNormalizeEmployeeIdentityUsesFallbackMappings() {
   assert.equal(row.external_employee_id, 'PAY-42');
 }
 
-function testJoinAndBuildPayrollExportRowsGroupsByEmployeeAndJobTitle() {
+function testJoinAndBuildPayrollExportRowsKeepsFinerRowGrain() {
   const employeeByKey = new Map([
     ['e-1', { employee_id: 'E-1', employee_name: 'Alex Able', external_employee_id: 'PAY-1' }],
   ]);
@@ -30,6 +30,8 @@ function testJoinAndBuildPayrollExportRowsGroupsByEmployeeAndJobTitle() {
       location_name: 'Barrio',
       location_display_name: 'Barrio',
       location_code: 'L1',
+      business_date: '2026-03-31',
+      pay_type: 'Regular',
       regular_hours: 4,
       overtime_hours: 0,
       regular_pay: 50,
@@ -46,6 +48,8 @@ function testJoinAndBuildPayrollExportRowsGroupsByEmployeeAndJobTitle() {
       location_name: 'Barrio',
       location_display_name: 'Barrio',
       location_code: 'L1',
+      business_date: '2026-04-01',
+      pay_type: 'Overtime',
       regular_hours: 2,
       overtime_hours: 1,
       regular_pay: 25,
@@ -62,6 +66,8 @@ function testJoinAndBuildPayrollExportRowsGroupsByEmployeeAndJobTitle() {
       location_name: 'Barrio',
       location_display_name: 'Barrio',
       location_code: 'L1',
+      business_date: '2026-04-02',
+      pay_type: 'Regular',
       regular_hours: 3,
       overtime_hours: 0,
       regular_pay: 40,
@@ -74,7 +80,7 @@ function testJoinAndBuildPayrollExportRowsGroupsByEmployeeAndJobTitle() {
 
   const joined = __test.joinLaborRowsToEmployees(analyticsRows, employeeByKey);
   const rows = __test.buildPayrollExportRows(joined, 'L1');
-  assert.equal(rows.length, 2, 'must produce one row per employee + job title');
+  assert.equal(rows.length, 3, 'must preserve row grain beyond employee + job title');
 
   const serverRow = rows.find((r) => r['Job Title'] === 'Server');
   const bartenderRow = rows.find((r) => r['Job Title'] === 'Bartender');
@@ -84,11 +90,13 @@ function testJoinAndBuildPayrollExportRowsGroupsByEmployeeAndJobTitle() {
   assert.equal(serverRow.Employee, 'Alex Able');
   assert.equal(serverRow['Employee ID'], 'PAY-1');
   assert.equal(serverRow['Job Code'], 'JC-1');
+  assert.equal(serverRow['Business Date'], '2026-03-31');
+  assert.equal(serverRow['Pay Type'], 'Regular');
   assert.equal(serverRow.Location, 'Barrio');
   assert.equal(serverRow['Location Code'], 'L1');
 }
 
 module.exports = {
   testNormalizeEmployeeIdentityUsesFallbackMappings,
-  testJoinAndBuildPayrollExportRowsGroupsByEmployeeAndJobTitle,
+  testJoinAndBuildPayrollExportRowsKeepsFinerRowGrain,
 };
