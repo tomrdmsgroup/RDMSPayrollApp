@@ -478,7 +478,7 @@ async function fetchToastAnalyticsJobsFromVitals({ vitalsRecord, periodStart, pe
     endBusinessDate: endBD,
     restaurantIds: [cfg.restaurantGuid],
     excludedRestaurantIds: [],
-    groupBy: ['JOB'],
+    groupBy: ['EMPLOYEE', 'JOB'],
   };
 
   const createRes = await fetch(createUrl.toString(), {

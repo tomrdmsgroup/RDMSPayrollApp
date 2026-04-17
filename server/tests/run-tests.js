@@ -41,7 +41,7 @@ const {
 } = require('./validationEngine.test');
 const {
   testNormalizeTimeEntryUsesFallbackMappings,
-  testBuildPayrollExportRowsGroupsByEmployeeAndJobTitle,
+  testJoinAndBuildPayrollExportRowsKeepsFinerRowGrain,
 } = require('./toastOriginalPayPeriodService.test');
 
 function testTokenLifecycle() {
@@ -119,7 +119,7 @@ async function runAll() {
     testRunValidationFindsNewEmpRateDept,
     testRunValidationHonorsExclusionsAndActiveRules,
     testNormalizeTimeEntryUsesFallbackMappings,
-    testBuildPayrollExportRowsGroupsByEmployeeAndJobTitle,
+    testJoinAndBuildPayrollExportRowsKeepsFinerRowGrain,
   ];
   for (const fn of tests) {
     await fn();
