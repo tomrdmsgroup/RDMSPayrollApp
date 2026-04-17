@@ -86,6 +86,7 @@ function testBuildPayrollExportRowsGroupsByEmployeeAndJobTitle() {
   const bartenderRow = rows.find((r) => r['Job Title'] === 'Bartender');
   assert.ok(serverRow);
   assert.ok(bartenderRow);
+  assert.equal(serverRow['Toast Employee ID'], 'E-1');
   assert.equal(serverRow.Employee, 'Alex Able');
   assert.equal(serverRow['Employee ID'], 'E-1');
   assert.equal(serverRow['Job Code'], 'JC-1');
