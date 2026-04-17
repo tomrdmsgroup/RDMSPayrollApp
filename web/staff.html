@@ -300,6 +300,18 @@
         padding: 10px;
         background: rgba(255, 255, 255, 0.03);
       }
+      .tableScroll {
+        overflow: auto;
+        max-width: 100%;
+        max-height: 62vh;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+      }
+      .tableScroll table {
+        min-width: 1100px;
+        border: none;
+        border-radius: 0;
+      }
 
       /* Better readability for long definitions */
       .defClamp {
@@ -1411,14 +1423,48 @@
         }
       }
 
+      function getToastStableIdentityField(columns, rows) {
+        const candidates = [
+          { outputLabel: "Toast Employee ID", sourceField: "Toast Employee ID" },
+          { outputLabel: "Toast Employee ID", sourceField: "Employee ID" },
+          { outputLabel: "Toast Employee GUID", sourceField: "Employee GUID" },
+          { outputLabel: "Toast Employee GUID", sourceField: "Employee Guid" },
+        ];
+        for (const candidate of candidates) {
+          const inColumns = columns.includes(candidate.sourceField);
+          const inRows = rows.some(
+            (row) =>
+              row &&
+              Object.prototype.hasOwnProperty.call(row, candidate.sourceField) &&
+              row[candidate.sourceField] !== null &&
+              row[candidate.sourceField] !== undefined &&
+              String(row[candidate.sourceField]).trim() !== ""
+          );
+          if (inColumns || inRows) return candidate;
+        }
+        return null;
+      }
+
       function renderToastOriginalTable(columns, rows) {
-        const head = columns.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
+        const identityField = getToastStableIdentityField(columns, rows);
+        const displayColumns = columns.slice();
+        if (identityField && !displayColumns.includes(identityField.outputLabel)) {
+          displayColumns.splice(0, 0, identityField.outputLabel);
+        }
+
+        const head = displayColumns.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
         const body = rows.length
           ? rows
               .map((row) => {
-                const cells = columns
+                const cells = displayColumns
                   .map((col) => {
-                    const value = row && Object.prototype.hasOwnProperty.call(row, col) ? row[col] : "";
+                    let value = row && Object.prototype.hasOwnProperty.call(row, col) ? row[col] : "";
+                    if (identityField && col === identityField.outputLabel && !Object.prototype.hasOwnProperty.call(row || {}, col)) {
+                      value =
+                        row && Object.prototype.hasOwnProperty.call(row, identityField.sourceField)
+                          ? row[identityField.sourceField]
+                          : "";
+                    }
                     const rendered =
                       value === null || value === undefined
                         ? ""
@@ -1431,9 +1477,12 @@
                 return `<tr>${cells}</tr>`;
               })
               .join("")
-          : `<tr><td colspan="${Math.max(columns.length, 1)}" class="muted">No rows returned for this pay period.</td></tr>`;
+          : `<tr><td colspan="${Math.max(displayColumns.length, 1)}" class="muted">No rows returned for this pay period.</td></tr>`;
 
-        return `<div style="overflow:auto;"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+        return {
+          html: `<div class="tableScroll"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`,
+          identityField,
+        };
       }
 
       function renderToastOriginalTab() {
@@ -1518,7 +1567,15 @@
                 <div><span class="muted">Rows:</span> ${escapeHtml(String(data?.row_count ?? 0))}</div>
               </div>
               <p class="sectionHelp" style="margin-top:0;">Raw/original Toast row payload rendered directly as a table for auditing.</p>
-              ${renderToastOriginalTable(columns, rows)}
+              ${(() => {
+                const tableRender = renderToastOriginalTable(columns, rows);
+                const identityNote = tableRender.identityField
+                  ? `<p class="sourceNote" style="margin-top:0;margin-bottom:8px;">Stable identity column shown: <b>${escapeHtml(
+                      tableRender.identityField.outputLabel
+                    )}</b> (sourced from <b>${escapeHtml(tableRender.identityField.sourceField)}</b>).</p>`
+                  : "<p class='sourceNote' style='margin-top:0;margin-bottom:8px;'>No stable Toast employee identity field was found in the current row payload.</p>";
+                return `${identityNote}${tableRender.html}`;
+              })()}
             </div>
           </div>
         `;
