@@ -1493,8 +1493,25 @@
               .join("")
           : `<tr><td colspan="${Math.max(displayColumns.length, 1)}" class="muted">No rows returned for this pay period.</td></tr>`;
 
+        const regularHoursTotal = rows.reduce((sum, row) => {
+          const val = Number(row?.["Regular Hours"]);
+          return sum + (Number.isFinite(val) ? val : 0);
+        }, 0);
+        const overtimeHoursTotal = rows.reduce((sum, row) => {
+          const val = Number(row?.["Overtime Hours"]);
+          return sum + (Number.isFinite(val) ? val : 0);
+        }, 0);
+
         return {
-          html: `<div class="tableScroll"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`,
+          html: `
+            <div class="tableScroll"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>
+            <div class="miniCard" style="margin-top:10px;">
+              <div><span class="muted">Regular Hours Total:</span> <b>${escapeHtml(regularHoursTotal.toFixed(2))}</b></div>
+              <div style="margin-top:4px;"><span class="muted">Overtime Hours Total:</span> <b>${escapeHtml(
+                overtimeHoursTotal.toFixed(2)
+              )}</b></div>
+            </div>
+          `,
           identityField,
         };
       }

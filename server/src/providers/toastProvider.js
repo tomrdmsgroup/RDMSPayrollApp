@@ -267,6 +267,10 @@ function chooseEraRange(ymdStart, ymdEnd) {
   return { ok: true, range: d <= 7 ? 'week' : 'month', days: d };
 }
 
+function singleGroupBy(group) {
+  return [String(group || 'EMPLOYEE').trim() || 'EMPLOYEE'];
+}
+
 async function loginToast({ oauthUrl, clientId, clientSecret, userAccessType }) {
   const res = await fetch(oauthUrl, {
     method: 'POST',
@@ -480,7 +484,7 @@ async function fetchToastAnalyticsJobsFromVitals({ vitalsRecord, periodStart, pe
     excludedRestaurantIds: [],
     // Toast ERA create only accepts a single groupBy option.
     // We group by EMPLOYEE for stable identity and reconstruct job/location grain downstream when fields are present.
-    groupBy: ['EMPLOYEE'],
+    groupBy: singleGroupBy('EMPLOYEE'),
   };
 
   const createRes = await fetch(createUrl.toString(), {

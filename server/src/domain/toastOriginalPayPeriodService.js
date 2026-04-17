@@ -64,19 +64,30 @@ function fullNameFromParts(first, last) {
 }
 
 function normalizeEmployeeIdentity(row) {
-  const employeeId =
+  const toastEmployeeId =
     safeTrim(
       pick(row, [
         'id',
         'guid',
         'employeeId',
         'employeeGuid',
-        'externalEmployeeId',
-        'payrollEmployeeId',
+        'employeeUuid',
+        'uuid',
       ])
     ) || null;
 
-  const externalEmployeeId = safeTrim(pick(row, ['externalEmployeeId', 'employeeNumber', 'employeeCode']));
+  const payrollEmployeeId = safeTrim(
+    pick(row, [
+      'payrollEmployeeId',
+      'payrollId',
+      'payrollEmployeeNumber',
+      'payrollNumber',
+      'employeeNumber',
+      'employeeCode',
+      'externalEmployeeId',
+      'externalId',
+    ])
+  );
 
   const employeeName =
     safeTrim(
@@ -91,8 +102,8 @@ function normalizeEmployeeIdentity(row) {
     ) || fullNameFromParts(row?.firstName, row?.lastName);
 
   return {
-    employee_id: employeeId,
-    external_employee_id: externalEmployeeId,
+    employee_id: toastEmployeeId,
+    external_employee_id: payrollEmployeeId,
     employee_name: employeeName,
   };
 }
@@ -239,7 +250,7 @@ function joinLaborRowsToEmployees(laborRows, employeeByKey) {
       employee_id: matched?.employee_id || row.employee_id || null,
       employee_name: matched?.employee_name || row.employee_name || row.employee_id || null,
       toast_employee_id: matched?.employee_id || row.employee_id || null,
-      export_employee_id: matched?.external_employee_id || matched?.employee_id || row.employee_id || null,
+      export_employee_id: matched?.external_employee_id || row.external_employee_id || null,
     };
   });
 }
@@ -250,7 +261,7 @@ function buildPayrollExportRows(detailRows, fallbackLocationCode = null) {
     const employeeName = String(row.employee_name || '').trim();
     const employeeId = String(row.employee_id || '').trim();
     const toastEmployeeId = String(row.toast_employee_id || employeeId || '').trim();
-    const exportEmployeeId = String(row.export_employee_id || employeeId || '').trim();
+    const exportEmployeeId = String(row.export_employee_id || '').trim();
     const jobTitle = String(row.job_name || '').trim();
     const jobCode = String(row.job_code || '').trim();
     const locationName = row.location_display_name || row.location_name || '';
@@ -461,6 +472,9 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
       source_row_grain_before_transform: 'one row per Toast ERA labor row grouped by EMPLOYEE for selected period',
       employee_identity_source: 'Toast Standard labor/hr employees endpoint',
       labor_totals_source: 'Toast Analytics ERA labor report (groupBy: EMPLOYEE) for selected pay period',
+      employee_column_mapping: 'Employee column prefers Toast Standard employee full name; falls back to analytics name, then Toast employee id only when no name is available',
+      employee_id_column_mapping:
+        'Employee ID column prefers payrollEmployeeId/payrollId/payrollEmployeeNumber/employeeNumber/employeeCode/externalEmployeeId from Toast Standard employees; remains blank when unavailable',
       join_key_between_sources:
         'analytics.employeeGuid/employeeId + analytics.employeeExternalId -> standard employee id/externalEmployeeId (case-insensitive string match)',
       grouping_key_after_transform: 'lower(toast_employee_id), lower(job_title OR job_code), lower(location_code OR location_name)',
