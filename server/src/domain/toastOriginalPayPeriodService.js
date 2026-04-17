@@ -21,23 +21,6 @@ function formatAnalyticsError(analytics) {
   return trimErrorText(JSON.stringify(payload));
 }
 
-function listColumnHeaders(rows) {
-  const ordered = [];
-  const seen = new Set();
-
-  for (const row of rows) {
-    if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
-    for (const key of Object.keys(row)) {
-      if (!seen.has(key)) {
-        seen.add(key);
-        ordered.push(key);
-      }
-    }
-  }
-
-  return ordered;
-}
-
 function toNum(v) {
   if (v === null || v === undefined || v === '') return null;
   const n = Number(v);
@@ -96,6 +79,8 @@ function normalizeTimeEntry(entry, { location, periodStart, periodEnd }) {
   ]);
   const jobCode = pick(entry, ['job.id', 'job.guid', 'jobCode', 'job.id']);
   const jobName = pick(entry, ['job.name', 'jobName', 'jobTitle', 'departmentName']);
+  const locationCode = pick(entry, ['location.id', 'location.guid', 'locationCode', 'restaurantGuid']);
+  const locationName = pick(entry, ['location.name', 'locationName']) || location;
 
   const businessDate =
     toIsoDate(pick(entry, ['businessDate'])) ||
@@ -106,13 +91,21 @@ function normalizeTimeEntry(entry, { location, periodStart, periodEnd }) {
   const totalHours = toNum(pick(entry, ['totalHours'])) ?? ((regularHours || 0) + (overtimeHours || 0) || null);
   const hourlyRate = toNum(pick(entry, ['hourlyRate', 'regularRate', 'wageRate']));
   const wageAmount = toNum(pick(entry, ['wage', 'wageCost', 'regularCost', 'laborCost']));
+  const regularPay = toNum(pick(entry, ['regularPay', 'pay.regular', 'regularWage']));
+  const overtimePay = toNum(pick(entry, ['overtimePay', 'pay.overtime', 'otPay']));
+  const totalPay = toNum(pick(entry, ['totalPay', 'pay.total', 'grossPay'])) || wageAmount;
 
   const cashTips = toNum(pick(entry, ['cashTips', 'tips.cash', 'tips']));
   const declaredTips = toNum(pick(entry, ['declaredTips', 'tips.declared']));
   const nonCashTips = toNum(pick(entry, ['nonCashTips', 'tips.nonCash']));
+  const tipsWithheld = toNum(pick(entry, ['tipsWithheld', 'withheldTips']));
+  const totalGratuity = toNum(pick(entry, ['totalGratuity', 'gratuity', 'autoGratuity']));
+  const netSales = toNum(pick(entry, ['netSales', 'sales.net']));
 
   return {
     location_name: location,
+    location_code: locationCode ? String(locationCode) : null,
+    location_display_name: locationName ? String(locationName).trim() : location,
     pay_period_start: periodStart,
     pay_period_end: periodEnd,
     business_date: businessDate,
@@ -125,11 +118,113 @@ function normalizeTimeEntry(entry, { location, periodStart, periodEnd }) {
     total_hours: totalHours,
     hourly_rate: hourlyRate,
     wage_amount: wageAmount,
+    regular_pay: regularPay,
+    overtime_pay: overtimePay,
+    total_pay: totalPay,
+    net_sales: netSales,
     cash_tips: cashTips,
     declared_tips: declaredTips,
     non_cash_tips: nonCashTips,
+    tips_withheld: tipsWithheld,
+    total_gratuity: totalGratuity,
     source_time_entry_id: pick(entry, ['id', 'guid', 'timeEntryId']) || null,
   };
+}
+
+function sumNullable(current, next) {
+  if (next === null || next === undefined) return current;
+  return (current || 0) + next;
+}
+
+function buildPayrollExportRows(detailRows, fallbackLocationCode = null) {
+  const byEmployeeJob = new Map();
+  for (const row of detailRows) {
+    const employeeName = row.employee_name || '';
+    const jobTitle = row.job_name || '';
+    const key = `${employeeName}|||${jobTitle}`;
+    if (!byEmployeeJob.has(key)) {
+      byEmployeeJob.set(key, {
+        Employee: row.employee_name || null,
+        'Job Title': row.job_name || null,
+        'Regular Hours': 0,
+        'Overtime Hours': 0,
+        HourlyRateWeightedSum: 0,
+        HourlyRateWeight: 0,
+        HourlyRateSamples: 0,
+        'Regular Pay': 0,
+        'Overtime Pay': 0,
+        TotalPayFromSource: null,
+        'Net Sales': null,
+        'Declared Tips': 0,
+        'Non-Cash Tips': 0,
+        'Tips Withheld': null,
+        'Total Gratuity': null,
+        'Employee ID': row.employee_id || null,
+        'Job Code': row.job_code || null,
+        Location: row.location_display_name || row.location_name || null,
+        'Location Code': row.location_code || fallbackLocationCode || null,
+      });
+    }
+    const agg = byEmployeeJob.get(key);
+    agg['Regular Hours'] += row.regular_hours || 0;
+    agg['Overtime Hours'] += row.overtime_hours || 0;
+    if (row.hourly_rate !== null && row.hourly_rate !== undefined) {
+      const weight = (row.regular_hours || 0) + (row.overtime_hours || 0) || 1;
+      agg.HourlyRateWeightedSum += row.hourly_rate * weight;
+      agg.HourlyRateWeight += weight;
+      agg.HourlyRateSamples += 1;
+    }
+
+    agg['Regular Pay'] += row.regular_pay || 0;
+    agg['Overtime Pay'] += row.overtime_pay || 0;
+    agg.TotalPayFromSource = sumNullable(agg.TotalPayFromSource, row.total_pay);
+    agg['Net Sales'] = sumNullable(agg['Net Sales'], row.net_sales);
+    agg['Declared Tips'] += row.declared_tips || 0;
+    agg['Non-Cash Tips'] += row.non_cash_tips || 0;
+    agg['Tips Withheld'] = sumNullable(agg['Tips Withheld'], row.tips_withheld);
+    agg['Total Gratuity'] = sumNullable(agg['Total Gratuity'], row.total_gratuity);
+  }
+
+  const result = Array.from(byEmployeeJob.values()).map((agg) => {
+    const hourlyRate =
+      agg.HourlyRateSamples > 0 && agg.HourlyRateWeight > 0
+        ? agg.HourlyRateWeightedSum / agg.HourlyRateWeight
+        : null;
+
+    const derivedRegularPay = agg['Regular Pay'] || ((agg['Regular Hours'] || 0) * (hourlyRate || 0));
+    const derivedOvertimePay = agg['Overtime Pay'] || ((agg['Overtime Hours'] || 0) * (hourlyRate || 0) * 1.5);
+    const totalPay = agg.TotalPayFromSource !== null ? agg.TotalPayFromSource : derivedRegularPay + derivedOvertimePay;
+    const totalTips = (agg['Declared Tips'] || 0) + (agg['Non-Cash Tips'] || 0);
+
+    return {
+      Employee: agg.Employee,
+      'Job Title': agg['Job Title'],
+      'Regular Hours': Number((agg['Regular Hours'] || 0).toFixed(2)),
+      'Overtime Hours': Number((agg['Overtime Hours'] || 0).toFixed(2)),
+      'Hourly Rate': hourlyRate !== null ? Number(hourlyRate.toFixed(2)) : null,
+      'Regular Pay': Number((derivedRegularPay || 0).toFixed(2)),
+      'Overtime Pay': Number((derivedOvertimePay || 0).toFixed(2)),
+      'Total Pay': Number((totalPay || 0).toFixed(2)),
+      'Net Sales': agg['Net Sales'] !== null ? Number(agg['Net Sales'].toFixed(2)) : null,
+      'Declared Tips': Number((agg['Declared Tips'] || 0).toFixed(2)),
+      'Non-Cash Tips': Number((agg['Non-Cash Tips'] || 0).toFixed(2)),
+      'Total Tips': Number(totalTips.toFixed(2)),
+      'Tips Withheld': agg['Tips Withheld'] !== null ? Number(agg['Tips Withheld'].toFixed(2)) : null,
+      'Total Gratuity': agg['Total Gratuity'] !== null ? Number(agg['Total Gratuity'].toFixed(2)) : null,
+      'Employee ID': agg['Employee ID'],
+      'Job Code': agg['Job Code'],
+      Location: agg.Location,
+      'Location Code': agg['Location Code'],
+    };
+  });
+
+  result.sort((a, b) => {
+    const emp = String(a.Employee || '').localeCompare(String(b.Employee || ''));
+    if (emp !== 0) return emp;
+    return String(a['Job Title'] || '').localeCompare(String(b['Job Title'] || ''));
+  });
+
+  return result;
 }
 
 async function fetchOriginalToastPayPeriodData({ locationName, periodStart, periodEnd }) {
@@ -154,7 +249,28 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
   }
 
   const rawRows = extractTimeEntryRows(standard.data);
-  const rows = rawRows.map((row) => normalizeTimeEntry(row, { location, periodStart: start, periodEnd: end }));
+  const detailRows = rawRows.map((row) => normalizeTimeEntry(row, { location, periodStart: start, periodEnd: end }));
+  const rows = buildPayrollExportRows(detailRows, vitalsRecord['Toast Location ID'] ? String(vitalsRecord['Toast Location ID']) : null);
+  const columns = [
+    'Employee',
+    'Job Title',
+    'Regular Hours',
+    'Overtime Hours',
+    'Hourly Rate',
+    'Regular Pay',
+    'Overtime Pay',
+    'Total Pay',
+    'Net Sales',
+    'Declared Tips',
+    'Non-Cash Tips',
+    'Total Tips',
+    'Tips Withheld',
+    'Total Gratuity',
+    'Employee ID',
+    'Job Code',
+    'Location',
+    'Location Code',
+  ];
 
   return {
     location_name: location,
@@ -164,13 +280,19 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
       provider: 'toast',
       api_mode: 'standard_time_entries_reconstructed_for_payroll_export',
       label: 'Toast Labor /timeEntries transformed to payroll-export-like rows',
-      row_grain: 'time-entry-level rows normalized to payroll-export-like columns',
+      row_grain: 'one row per employee + job title combination for selected pay period',
       exact_payroll_export_endpoint_available: false,
       note:
-        'Direct Toast Payroll Export endpoint is not configured in this codebase; data is reconstructed from labor/v1/timeEntries.',
+        'Direct Toast Payroll Export endpoint is not configured in this codebase; data is reconstructed from labor/v1/timeEntries and aggregated to payroll-export grain.',
+      approximation_notes: [
+        'Hourly Rate is a weighted average of available time-entry rates.',
+        'Regular Pay and Overtime Pay are summed from source when available, otherwise derived from hours x rate.',
+        'Total Pay is summed from source when available, otherwise derived as Regular Pay + Overtime Pay.',
+        'Net Sales, Tips Withheld, and Total Gratuity are included only when present in source rows; otherwise null.',
+      ],
     },
     row_count: rows.length,
-    columns: listColumnHeaders(rows),
+    columns,
     rows,
   };
 }
