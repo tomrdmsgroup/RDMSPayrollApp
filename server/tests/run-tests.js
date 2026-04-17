@@ -39,6 +39,10 @@ const {
   testRunValidationFindsNewEmpRateDept,
   testRunValidationHonorsExclusionsAndActiveRules,
 } = require('./validationEngine.test');
+const {
+  testNormalizeTimeEntryUsesFallbackMappings,
+  testBuildPayrollExportRowsGroupsByEmployeeAndJobTitle,
+} = require('./toastOriginalPayPeriodService.test');
 
 function testTokenLifecycle() {
   const token = issueToken({ action: 'approve', ttlMinutes: 0.001 });
@@ -114,6 +118,8 @@ async function runAll() {
     testIsFailureFindingOnlyErrors,
     testRunValidationFindsNewEmpRateDept,
     testRunValidationHonorsExclusionsAndActiveRules,
+    testNormalizeTimeEntryUsesFallbackMappings,
+    testBuildPayrollExportRowsGroupsByEmployeeAndJobTitle,
   ];
   for (const fn of tests) {
     await fn();

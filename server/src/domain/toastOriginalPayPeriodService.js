@@ -69,18 +69,81 @@ function extractTimeEntryRows(payload) {
 }
 
 function normalizeTimeEntry(entry, { location, periodStart, periodEnd }) {
-  const employeeId = pick(entry, ['employee.id', 'employee.guid', 'employeeId', 'employeeGuid', 'employee.id']);
+  const employeeId =
+    pick(entry, [
+      'employee.id',
+      'employee.guid',
+      'employee.employeeGuid',
+      'employee.employeeId',
+      'employee.externalEmployeeId',
+      'employee.payrollEmployeeId',
+      'employeeId',
+      'employeeGuid',
+      'externalEmployeeId',
+      'payrollEmployeeId',
+    ]) || (typeof entry?.employee === 'string' ? entry.employee : null);
   const employeeName = pick(entry, [
     'employee.fullName',
     'employee.name',
+    'employee.displayName',
+    'employee.employeeName',
+    'employee.chosenName',
+    'employee.lastNameFirstName',
     'employeeName',
     'employeeFullName',
+    'employeeDisplayName',
     'name',
-  ]);
-  const jobCode = pick(entry, ['job.id', 'job.guid', 'jobCode', 'job.id']);
-  const jobName = pick(entry, ['job.name', 'jobName', 'jobTitle', 'departmentName']);
-  const locationCode = pick(entry, ['location.id', 'location.guid', 'locationCode', 'restaurantGuid']);
-  const locationName = pick(entry, ['location.name', 'locationName']) || location;
+  ]) ||
+    [pick(entry, ['employee.firstName']), pick(entry, ['employee.lastName'])].filter(Boolean).join(' ').trim() ||
+    [pick(entry, ['firstName']), pick(entry, ['lastName'])].filter(Boolean).join(' ').trim() ||
+    null;
+  const jobCode =
+    pick(entry, [
+      'job.id',
+      'job.guid',
+      'job.jobGuid',
+      'job.jobCode',
+      'job.code',
+      'jobCode',
+      'jobGuid',
+      'departmentGuid',
+      'departmentCode',
+    ]) || (typeof entry?.job === 'string' ? entry.job : null);
+  const jobName =
+    pick(entry, [
+      'job.name',
+      'job.title',
+      'job.jobName',
+      'job.displayName',
+      'jobName',
+      'jobTitle',
+      'departmentName',
+      'wage.name',
+      'wage.title',
+      'wageName',
+    ]) || (typeof entry?.job === 'object' ? null : typeof entry?.jobName === 'string' ? entry.jobName : null);
+  const locationCode =
+    pick(entry, [
+      'location.id',
+      'location.guid',
+      'location.locationGuid',
+      'location.externalId',
+      'locationCode',
+      'locationId',
+      'restaurantGuid',
+      'restaurantId',
+      'storeGuid',
+      'storeId',
+    ]) || (typeof entry?.location === 'string' ? entry.location : null);
+  const locationName =
+    pick(entry, [
+      'location.name',
+      'location.displayName',
+      'location.locationName',
+      'restaurantName',
+      'storeName',
+      'locationName',
+    ]) || location;
 
   const businessDate =
     toIsoDate(pick(entry, ['businessDate'])) ||
@@ -139,17 +202,19 @@ function sumNullable(current, next) {
 function buildPayrollExportRows(detailRows, fallbackLocationCode = null) {
   const byEmployeeJob = new Map();
   for (const row of detailRows) {
-    const employeeId = row.employee_id || '';
-    const employeeName = row.employee_name || '';
-    const jobCode = row.job_code || '';
-    const jobTitle = row.job_name || '';
+    const employeeName = String(row.employee_name || '').trim();
+    const employeeId = String(row.employee_id || '').trim();
+    const jobTitle = String(row.job_name || '').trim();
+    const jobCode = String(row.job_code || '').trim();
     const locationName = row.location_display_name || row.location_name || '';
     const locationCode = row.location_code || fallbackLocationCode || '';
-    const key = [employeeId, employeeName, jobCode, jobTitle, locationName, locationCode].join('|||');
+    const employeeKey = employeeId || employeeName || `row:${row.source_time_entry_id || ''}`;
+    const jobKey = jobTitle || jobCode || 'Unassigned';
+    const key = [employeeKey, jobKey].join('|||');
     if (!byEmployeeJob.has(key)) {
       byEmployeeJob.set(key, {
-        Employee: row.employee_name || null,
-        'Job Title': row.job_name || null,
+        Employee: employeeName || employeeId || null,
+        'Job Title': jobTitle || jobCode || 'Unassigned',
         'Regular Hours': 0,
         'Overtime Hours': 0,
         HourlyRateWeightedSum: 0,
@@ -170,6 +235,12 @@ function buildPayrollExportRows(detailRows, fallbackLocationCode = null) {
       });
     }
     const agg = byEmployeeJob.get(key);
+    if (!agg.Employee && employeeName) agg.Employee = employeeName;
+    if (!agg['Employee ID'] && employeeId) agg['Employee ID'] = employeeId;
+    if ((!agg['Job Title'] || agg['Job Title'] === 'Unassigned') && jobTitle) agg['Job Title'] = jobTitle;
+    if (!agg['Job Code'] && jobCode) agg['Job Code'] = jobCode;
+    if (!agg.Location && locationName) agg.Location = locationName;
+    if (!agg['Location Code'] && locationCode) agg['Location Code'] = locationCode;
     agg['Regular Hours'] += row.regular_hours || 0;
     agg['Overtime Hours'] += row.overtime_hours || 0;
     if (row.hourly_rate !== null && row.hourly_rate !== undefined) {
@@ -292,7 +363,7 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
       provider: 'toast',
       api_mode: 'standard_time_entries_reconstructed_for_payroll_export',
       label: 'Toast Labor /timeEntries transformed to payroll-export-like rows',
-      row_grain: 'one row per Employee ID + Employee Name + Job Code + Job Title + Location + Location Code for selected pay period',
+      row_grain: 'one row per Employee + Job Title for selected pay period (identity stabilized using Employee ID and Job Code when available)',
       exact_payroll_export_endpoint_available: false,
       note:
         'Direct Toast Payroll Export endpoint is not configured in this codebase; data is reconstructed from labor/v1/timeEntries and aggregated to payroll-export grain.',
@@ -311,4 +382,8 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
 
 module.exports = {
   fetchOriginalToastPayPeriodData,
+  __test: {
+    normalizeTimeEntry,
+    buildPayrollExportRows,
+  },
 };
