@@ -199,6 +199,11 @@ function sumNullable(current, next) {
   return (current || 0) + next;
 }
 
+function normalizeGroupPart(value, fallback = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized || fallback;
+}
+
 function buildPayrollExportRows(detailRows, fallbackLocationCode = null) {
   const byEmployeeJob = new Map();
   for (const row of detailRows) {
@@ -208,11 +213,13 @@ function buildPayrollExportRows(detailRows, fallbackLocationCode = null) {
     const jobCode = String(row.job_code || '').trim();
     const locationName = row.location_display_name || row.location_name || '';
     const locationCode = row.location_code || fallbackLocationCode || '';
-    const employeeKey = employeeId || employeeName || `row:${row.source_time_entry_id || ''}`;
-    const jobKey = jobTitle || jobCode || 'Unassigned';
-    const key = [employeeKey, jobKey].join('|||');
+    const employeeKey = normalizeGroupPart(employeeId, normalizeGroupPart(employeeName, '__unknown_employee__'));
+    const jobKey = normalizeGroupPart(jobCode, normalizeGroupPart(jobTitle, '__unassigned_job__'));
+    const locationKey = normalizeGroupPart(locationCode, normalizeGroupPart(locationName, '__unknown_location__'));
+    const key = [employeeKey, jobKey, locationKey].join('|||');
     if (!byEmployeeJob.has(key)) {
       byEmployeeJob.set(key, {
+        'Toast Employee ID': employeeId || null,
         Employee: employeeName || employeeId || null,
         'Job Title': jobTitle || jobCode || 'Unassigned',
         'Regular Hours': 0,
@@ -235,6 +242,7 @@ function buildPayrollExportRows(detailRows, fallbackLocationCode = null) {
       });
     }
     const agg = byEmployeeJob.get(key);
+    if (!agg['Toast Employee ID'] && employeeId) agg['Toast Employee ID'] = employeeId;
     if (!agg.Employee && employeeName) agg.Employee = employeeName;
     if (!agg['Employee ID'] && employeeId) agg['Employee ID'] = employeeId;
     if ((!agg['Job Title'] || agg['Job Title'] === 'Unassigned') && jobTitle) agg['Job Title'] = jobTitle;
@@ -272,6 +280,7 @@ function buildPayrollExportRows(detailRows, fallbackLocationCode = null) {
     const totalTips = (agg['Declared Tips'] || 0) + (agg['Non-Cash Tips'] || 0);
 
     return {
+      'Toast Employee ID': agg['Toast Employee ID'],
       Employee: agg.Employee,
       'Job Title': agg['Job Title'],
       'Regular Hours': Number((agg['Regular Hours'] || 0).toFixed(2)),
@@ -335,6 +344,7 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
   const detailRows = rawRows.map((row) => normalizeTimeEntry(row, { location, periodStart: start, periodEnd: end }));
   const rows = buildPayrollExportRows(detailRows, vitalsRecord['Toast Location ID'] ? String(vitalsRecord['Toast Location ID']) : null);
   const columns = [
+    'Toast Employee ID',
     'Employee',
     'Job Title',
     'Regular Hours',
@@ -363,6 +373,8 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
       provider: 'toast',
       api_mode: 'standard_time_entries_reconstructed_for_payroll_export',
       label: 'Toast Labor /timeEntries transformed to payroll-export-like rows',
+      source_row_grain_before_transform: 'one row per Toast labor/v1/time-entries record (time-entry detail/punch-level labor row)',
+      grouping_key_after_transform: 'lower(employee_id OR employee_name), lower(job_code OR job_name), lower(location_code OR location_name)',
       row_grain: 'one row per Employee + Job Title for selected pay period (identity stabilized using Employee ID and Job Code when available)',
       exact_payroll_export_endpoint_available: false,
       note:
