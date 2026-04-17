@@ -478,7 +478,9 @@ async function fetchToastAnalyticsJobsFromVitals({ vitalsRecord, periodStart, pe
     endBusinessDate: endBD,
     restaurantIds: [cfg.restaurantGuid],
     excludedRestaurantIds: [],
-    groupBy: ['EMPLOYEE', 'JOB'],
+    // Toast ERA create only accepts a single groupBy option.
+    // We group by EMPLOYEE for stable identity and reconstruct job/location grain downstream when fields are present.
+    groupBy: ['EMPLOYEE'],
   };
 
   const createRes = await fetch(createUrl.toString(), {

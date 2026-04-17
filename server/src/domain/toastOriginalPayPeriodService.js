@@ -365,6 +365,23 @@ function buildPayrollExportRows(detailRows, fallbackLocationCode = null) {
   return result;
 }
 
+function detectReturnedRowGrain(rows) {
+  const hasJobSplit = rows.some((row) => {
+    const title = safeTrim(row['Job Title']);
+    const code = safeTrim(row['Job Code']);
+    return (title && title.toLowerCase() !== 'unassigned') || !!code;
+  });
+  const hasLocationSplit = rows.some((row) => {
+    const name = safeTrim(row.Location);
+    const code = safeTrim(row['Location Code']);
+    return !!(name || code);
+  });
+
+  if (hasJobSplit && hasLocationSplit) return 'one row per Employee + Job Title + Location for selected pay period';
+  if (hasJobSplit) return 'one row per Employee + Job Title (location approximated) for selected pay period';
+  return 'one row per Employee (job/location not reliably returned by analytics payload) for selected pay period';
+}
+
 async function fetchOriginalToastPayPeriodData({ locationName, periodStart, periodEnd }) {
   const location = String(locationName || '').trim();
   const start = String(periodStart || '').trim();
@@ -409,6 +426,7 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
     joinedRows,
     vitalsRecord['Toast Location ID'] ? String(vitalsRecord['Toast Location ID']) : null
   );
+  const rowGrain = detectReturnedRowGrain(rows);
 
   const columns = [
     'Toast Employee ID',
@@ -440,17 +458,19 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
       provider: 'toast',
       api_mode: 'standard_employees_plus_analytics_jobs_reconstructed_for_payroll_export',
       label: 'Toast Standard employees joined to Toast Analytics labor jobs and aggregated to payroll-export-like rows',
-      source_row_grain_before_transform: 'one row per Toast ERA labor row grouped by EMPLOYEE + JOB for selected period',
+      source_row_grain_before_transform: 'one row per Toast ERA labor row grouped by EMPLOYEE for selected period',
       employee_identity_source: 'Toast Standard labor/hr employees endpoint',
-      labor_totals_source: 'Toast Analytics ERA labor report (groupBy: EMPLOYEE + JOB) for selected pay period',
+      labor_totals_source: 'Toast Analytics ERA labor report (groupBy: EMPLOYEE) for selected pay period',
       join_key_between_sources:
         'analytics.employeeGuid/employeeId + analytics.employeeExternalId -> standard employee id/externalEmployeeId (case-insensitive string match)',
       grouping_key_after_transform: 'lower(toast_employee_id), lower(job_title OR job_code), lower(location_code OR location_name)',
-      row_grain: 'one row per Employee + Job + Location for selected pay period',
+      row_grain_target: 'one row per Employee + Job + Location for selected pay period',
+      row_grain_returned: rowGrain,
       exact_payroll_export_endpoint_available: false,
       note:
         'Direct Toast Payroll Export endpoint is not configured in this codebase; data is reconstructed from Standard employees + Analytics labor rows.',
       approximation_notes: [
+        'Toast ERA create rejects multi-groupBy requests; this flow uses groupBy EMPLOYEE and reconstructs job/location only from fields present in returned rows.',
         'Hourly Rate is a weighted average of available analytics rates.',
         'Regular Pay and Overtime Pay are summed from analytics rows when present, otherwise derived from hours x rate.',
         'Total Pay is summed from source when available, otherwise derived as Regular Pay + Overtime Pay.',
