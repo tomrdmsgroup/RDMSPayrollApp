@@ -143,8 +143,52 @@ function testJoinLaborRowsUsesTimeEntryFallbackForJobAndLocation() {
   assert.equal(joined[0].export_employee_id, '155');
 }
 
+function testBuildPayrollExportRowsGroupsByPayrollEmployeeIdBeforeGuid() {
+  const detailRows = [
+    {
+      employee_id: 'GUID-ONE',
+      toast_employee_id: 'GUID-ONE',
+      export_employee_id: '148',
+      employee_name: 'Luis Acosta',
+      job_name: 'Busser',
+      job_code: '6325',
+      location_display_name: '900 North Point Suite J101',
+      location_code: 'j101',
+      regular_hours: 10,
+      overtime_hours: 0,
+      hourly_rate: 19.18,
+      regular_pay: 191.8,
+      overtime_pay: 0,
+      total_pay: 191.8,
+    },
+    {
+      employee_id: 'GUID-TWO',
+      toast_employee_id: 'GUID-TWO',
+      export_employee_id: '148',
+      employee_name: 'Luis Acosta',
+      job_name: 'Busser',
+      job_code: '6325',
+      location_display_name: '900 North Point Suite J101',
+      location_code: 'j101',
+      regular_hours: 12,
+      overtime_hours: 0,
+      hourly_rate: 19.18,
+      regular_pay: 230.16,
+      overtime_pay: 0,
+      total_pay: 230.16,
+    },
+  ];
+
+  const rows = __test.buildPayrollExportRows(detailRows, 'j101');
+  assert.equal(rows.length, 1, 'rows should aggregate by payroll employee id before GUID');
+  assert.equal(rows[0]['Employee ID'], '148');
+  assert.equal(rows[0]['Regular Hours'], 22);
+  assert.equal(rows[0]['Total Pay'], 421.96);
+}
+
 module.exports = {
   testNormalizeEmployeeIdentityUsesFallbackMappings,
   testJoinAndBuildPayrollExportRowsAggregatesToEmployeeJobLocationGrain,
   testJoinLaborRowsUsesTimeEntryFallbackForJobAndLocation,
+  testBuildPayrollExportRowsGroupsByPayrollEmployeeIdBeforeGuid,
 };
