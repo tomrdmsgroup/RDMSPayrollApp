@@ -27,6 +27,7 @@ const {
 } = require('../domain/airtableRecapService');
 const { runBarrioToastProof, searchToastEmployeesForLocation } = require('../domain/toastBarrioProofService');
 const { fetchOriginalToastPayPeriodData } = require('../domain/toastOriginalPayPeriodService');
+const { parseCsv, normalizeUploadedRow, normalizeApiRow, buildStableKey, compareRows, saveUploadedBaseline, getLatestBaseline } = require('../domain/toastPayrollBaselineService');
 
 const { rulesCatalog } = require('../domain/rulesCatalog');
 const { getRuleConfigsForLocation, upsertRuleConfig } = require('../domain/rulesConfigDb');
@@ -371,7 +372,118 @@ function router(req, res) {
           periodEnd,
           includeDebug,
         });
-        return json(res, 200, { data });
+
+        const baseline = await getLatestBaseline({ locationName, periodStart, periodEnd });
+        let comparison = null;
+        if (baseline) {
+          const apiNormalizedRows = (Array.isArray(data?.rows) ? data.rows : []).map((row) =>
+            normalizeApiRow(row, {
+              location_name: locationName,
+              period_start: periodStart,
+              period_end: periodEnd,
+            })
+          );
+          const baselineNormalizedRows = baseline.rows.map((r) => r.normalized);
+          comparison = {
+            upload: {
+              id: baseline.upload.id,
+              uploaded_by: baseline.upload.uploaded_by,
+              uploaded_at: baseline.upload.uploaded_at,
+              file_name: baseline.upload.file_name,
+            },
+            ...compareRows(apiNormalizedRows, baselineNormalizedRows),
+            uploaded_csv_rows: baselineNormalizedRows,
+          };
+        }
+
+        return json(res, 200, { data, comparison });
+      } catch (e) {
+        return handleError(res, e);
+      }
+    })();
+    return;
+  }
+
+
+
+  if (url.pathname === '/staff/toast-original-pay-period/baseline' && req.method === 'POST') {
+    (async () => {
+      const user = await requireStaff(req, res);
+      if (!user) return;
+      try {
+        const body = await parseBody(req);
+        const locationName = String(body.location_name || '').trim();
+        const periodStart = String(body.period_start || '').trim();
+        const periodEnd = String(body.period_end || '').trim();
+        const rawCsv = String(body.raw_csv || '');
+        const fileName = String(body.file_name || '').trim();
+
+        if (!locationName || !periodStart || !periodEnd || !rawCsv.trim()) {
+          return json(res, 400, { error: 'missing_required_fields' });
+        }
+
+        const parsed = parseCsv(rawCsv);
+        if (!parsed.headers.length) return json(res, 400, { error: 'invalid_csv_headers' });
+
+        const normalizedRows = parsed.rows.map((rawRow) => {
+          const normalized = normalizeUploadedRow(rawRow, {
+            location_name: locationName,
+            period_start: periodStart,
+            period_end: periodEnd,
+          });
+          return {
+            raw: rawRow,
+            normalized,
+            stable_key: buildStableKey(normalized),
+          };
+        });
+
+        const upload = await saveUploadedBaseline({
+          locationName,
+          periodStart,
+          periodEnd,
+          uploadedBy: user.email,
+          fileName,
+          rawCsv,
+          csvRows: normalizedRows,
+        });
+
+        return json(res, 200, {
+          upload,
+          headers: parsed.headers,
+          row_count: normalizedRows.length,
+          normalized_rows: normalizedRows.map((row) => row.normalized),
+        });
+      } catch (e) {
+        return handleError(res, e);
+      }
+    })();
+    return;
+  }
+
+  if (url.pathname === '/staff/toast-original-pay-period/baseline' && req.method === 'GET') {
+    (async () => {
+      const user = await requireStaff(req, res);
+      if (!user) return;
+      try {
+        const locationName = String(url.searchParams.get('locationName') || '').trim();
+        const periodStart = String(url.searchParams.get('periodStart') || '').trim();
+        const periodEnd = String(url.searchParams.get('periodEnd') || '').trim();
+        if (!locationName || !periodStart || !periodEnd) {
+          return json(res, 400, { error: 'missing_required_fields' });
+        }
+
+        const baseline = await getLatestBaseline({ locationName, periodStart, periodEnd });
+        if (!baseline) return json(res, 200, { baseline: null });
+
+        return json(res, 200, {
+          baseline: {
+            upload: baseline.upload,
+            row_count: baseline.rows.length,
+            normalized_rows: baseline.rows.map((row) => row.normalized),
+            raw_rows: baseline.rows.map((row) => row.raw),
+          },
+        });
       } catch (e) {
         return handleError(res, e);
       }

@@ -117,6 +117,36 @@ async function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_excluded_staff_lookup
       ON excluded_staff (location_name, toast_employee_id, active);
+
+
+    -- Staff-uploaded Toast Payroll Export CSV audit baselines
+    CREATE TABLE IF NOT EXISTS toast_payroll_baseline_uploads (
+      id SERIAL PRIMARY KEY,
+      location_name TEXT NOT NULL,
+      period_start TEXT NOT NULL,
+      period_end TEXT NOT NULL,
+      uploaded_by TEXT NOT NULL,
+      uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      file_name TEXT,
+      raw_csv TEXT NOT NULL,
+      raw_row_count INTEGER NOT NULL DEFAULT 0,
+      normalized_row_count INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_toast_payroll_baseline_upload_lookup
+      ON toast_payroll_baseline_uploads (location_name, period_start, period_end, uploaded_at DESC, id DESC);
+
+    CREATE TABLE IF NOT EXISTS toast_payroll_baseline_rows (
+      id SERIAL PRIMARY KEY,
+      upload_id INTEGER NOT NULL REFERENCES toast_payroll_baseline_uploads(id) ON DELETE CASCADE,
+      row_index INTEGER NOT NULL,
+      stable_key TEXT NOT NULL,
+      normalized_row JSONB NOT NULL,
+      raw_row JSONB NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_toast_payroll_baseline_rows_upload
+      ON toast_payroll_baseline_rows (upload_id, row_index);
     `,
     [],
   );
