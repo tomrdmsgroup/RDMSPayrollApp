@@ -42,11 +42,13 @@ const {
 const {
   testNormalizeEmployeeIdentityUsesFallbackMappings,
   testJoinAndBuildPayrollExportRowsAggregatesToEmployeeJobLocationGrain,
+  testJoinLaborRowsUsesTimeEntryFallbackForJobAndLocation,
 } = require('./toastOriginalPayPeriodService.test');
 
 const {
   testParseCsvHandlesQuotedFields,
   testCompareRowsDetectsMissingAndMismatches,
+  testBuildStableKeyPrefersEmployeeIdOverToastGuid,
 } = require('./toastPayrollBaselineService.test');
 
 function testTokenLifecycle() {
@@ -125,8 +127,10 @@ async function runAll() {
     testRunValidationHonorsExclusionsAndActiveRules,
     testNormalizeEmployeeIdentityUsesFallbackMappings,
     testJoinAndBuildPayrollExportRowsAggregatesToEmployeeJobLocationGrain,
+    testJoinLaborRowsUsesTimeEntryFallbackForJobAndLocation,
     testParseCsvHandlesQuotedFields,
     testCompareRowsDetectsMissingAndMismatches,
+    testBuildStableKeyPrefersEmployeeIdOverToastGuid,
   ];
   for (const fn of tests) {
     await fn();
