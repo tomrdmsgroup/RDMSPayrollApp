@@ -70,7 +70,25 @@ function testCompareRowsDetectsMissingAndMismatches() {
   assert.equal(result.column_mismatches[0].diffs[0].field, 'total_pay');
 }
 
+function testBuildStableKeyPrefersEmployeeIdOverToastGuid() {
+  const row = {
+    location_name: 'Barrio',
+    pay_period_start: '2026-04-01',
+    pay_period_end: '2026-04-14',
+    toast_employee_id: '8f0f7d62-3f11-4db2-9ec0-78ed16f30abc',
+    employee_id: '148',
+    employee_name: 'Acosta, Lu',
+    job_title: 'Busser',
+    location: '900 North',
+    location_code: 'j101',
+  };
+
+  const key = buildStableKey(row);
+  assert.ok(key.startsWith('148|||'), `expected stable key to start with numeric employee_id, got: ${key}`);
+}
+
 module.exports = {
   testParseCsvHandlesQuotedFields,
   testCompareRowsDetectsMissingAndMismatches,
+  testBuildStableKeyPrefersEmployeeIdOverToastGuid,
 };

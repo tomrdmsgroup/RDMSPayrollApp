@@ -102,7 +102,49 @@ function testJoinAndBuildPayrollExportRowsAggregatesToEmployeeJobLocationGrain()
   assert.equal(serverRow['Location Code'], 'L1');
 }
 
+function testJoinLaborRowsUsesTimeEntryFallbackForJobAndLocation() {
+  const employeeByKey = new Map();
+  const timeEntryByKey = new Map([
+    [
+      'e-55',
+      {
+        employee_id: 'E-55',
+        external_employee_id: '155',
+        employee_name: 'Jordan Lane',
+        top_job_name: 'Line Cook',
+        top_job_code: '6125',
+        top_location_name: '900 North',
+        top_location_code: 'j101',
+      },
+    ],
+  ]);
+
+  const analyticsRows = [
+    {
+      employee_id: 'E-55',
+      employee_name: null,
+      job_code: null,
+      job_name: null,
+      location_name: 'Barrio',
+      location_display_name: 'Barrio',
+      location_code: null,
+      regular_hours: 8,
+      overtime_hours: 0,
+      regular_pay: 160,
+      overtime_pay: 0,
+      total_pay: 160,
+    },
+  ];
+
+  const joined = __test.joinLaborRowsToEmployees(analyticsRows, employeeByKey, timeEntryByKey);
+  assert.equal(joined[0].job_name, 'Line Cook');
+  assert.equal(joined[0].location_display_name, 'Barrio', 'analytics location remains preferred when present');
+  assert.equal(joined[0].location_code, 'j101');
+  assert.equal(joined[0].export_employee_id, '155');
+}
+
 module.exports = {
   testNormalizeEmployeeIdentityUsesFallbackMappings,
   testJoinAndBuildPayrollExportRowsAggregatesToEmployeeJobLocationGrain,
+  testJoinLaborRowsUsesTimeEntryFallbackForJobAndLocation,
 };

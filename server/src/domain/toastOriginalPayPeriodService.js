@@ -4,7 +4,11 @@
 // Toast Payroll Export CSV output as closely as possible from available APIs.
 
 const { fetchVitalsSnapshot } = require('../providers/vitalsProvider');
-const { fetchToastAnalyticsJobsFromVitals, fetchToastEmployeesFromVitals } = require('../providers/toastProvider');
+const {
+  fetchToastAnalyticsJobsFromVitals,
+  fetchToastEmployeesFromVitals,
+  fetchToastTimeEntriesFromVitals,
+} = require('../providers/toastProvider');
 const inFlightPayPeriodLoads = new Map();
 
 function trimErrorText(value, maxLen = 1800) {
@@ -275,6 +279,125 @@ function lookupKeysForRow(row) {
     .map((x) => String(x).toLowerCase());
 }
 
+function normalizeTimeEntryRow(row, fallbackLocationName = null, fallbackLocationCode = null) {
+  const employeeId = safeTrim(
+    pick(row, [
+      'employeeGuid',
+      'employee_guid',
+      'employeeId',
+      'employee_id',
+      'employeeUUID',
+      'employee.uuid',
+      'employee.id',
+      'guid',
+      'id',
+    ])
+  );
+  const externalEmployeeId = safeTrim(
+    pick(row, [
+      'employeeExternalId',
+      'employee_external_id',
+      'externalEmployeeId',
+      'external_employee_id',
+      'employee.employeeCode',
+      'employee.employeeNumber',
+      'employeeNumber',
+      'employeeCode',
+    ])
+  );
+  const employeeName =
+    safeTrim(
+      pick(row, [
+        'employeeName',
+        'employee_name',
+        'employee.fullName',
+        'employee.name',
+        'name',
+        'fullName',
+      ])
+    ) || fullNameFromParts(pick(row, ['employee.firstName', 'firstName']), pick(row, ['employee.lastName', 'lastName']));
+
+  return {
+    employee_id: employeeId,
+    external_employee_id: externalEmployeeId,
+    employee_name: employeeName,
+    job_code: safeTrim(pick(row, ['jobCode', 'job_code', 'job.id', 'job.guid', 'jobId', 'jobGuid'])),
+    job_name: safeTrim(pick(row, ['jobName', 'job_name', 'jobTitle', 'job_title', 'job.name', 'job.title'])),
+    location_display_name:
+      safeTrim(
+        pick(row, [
+          'locationName',
+          'location_name',
+          'location.displayName',
+          'location.name',
+          'restaurantName',
+          'restaurant',
+        ])
+      ) || fallbackLocationName,
+    location_code:
+      safeTrim(
+        pick(row, [
+          'locationCode',
+          'location_code',
+          'locationId',
+          'location.id',
+          'restaurantGuid',
+          'restaurantExternalId',
+        ])
+      ) || fallbackLocationCode,
+  };
+}
+
+function buildTimeEntryIdentityIndex(timeEntryRows, fallbackLocationName, fallbackLocationCode) {
+  const byKey = new Map();
+  for (const row of timeEntryRows) {
+    const normalized = normalizeTimeEntryRow(row, fallbackLocationName, fallbackLocationCode);
+    const keys = [normalized.employee_id, normalized.external_employee_id]
+      .filter(Boolean)
+      .map((x) => String(x).toLowerCase());
+    if (!keys.length) continue;
+    const weight = 1;
+    for (const key of keys) {
+      if (!byKey.has(key)) {
+        byKey.set(key, {
+          employee_id: normalized.employee_id || null,
+          external_employee_id: normalized.external_employee_id || null,
+          employee_name: normalized.employee_name || null,
+          top_job_name: null,
+          top_job_code: null,
+          top_location_name: null,
+          top_location_code: null,
+          jobCounts: new Map(),
+          locationCounts: new Map(),
+        });
+      }
+      const target = byKey.get(key);
+      if (!target.employee_id && normalized.employee_id) target.employee_id = normalized.employee_id;
+      if (!target.external_employee_id && normalized.external_employee_id) target.external_employee_id = normalized.external_employee_id;
+      if (!target.employee_name && normalized.employee_name) target.employee_name = normalized.employee_name;
+      if (normalized.job_name) {
+        const c = target.jobCounts.get(normalized.job_name) || 0;
+        target.jobCounts.set(normalized.job_name, c + weight);
+      }
+      if (normalized.location_display_name) {
+        const c = target.locationCounts.get(normalized.location_display_name) || 0;
+        target.locationCounts.set(normalized.location_display_name, c + weight);
+      }
+      if (!target.top_job_code && normalized.job_code) target.top_job_code = normalized.job_code;
+      if (!target.top_location_code && normalized.location_code) target.top_location_code = normalized.location_code;
+    }
+  }
+
+  for (const info of byKey.values()) {
+    info.top_job_name = Array.from(info.jobCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+    info.top_location_name = Array.from(info.locationCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+    delete info.jobCounts;
+    delete info.locationCounts;
+  }
+
+  return byKey;
+}
+
 function buildJoinDiagnostics({ employeeRows, employeeByKey, rawAnalyticsRows, normalizedLaborRows }) {
   const normalizedEmployeeRows = sampleRows(employeeRows, 25).map((row) => normalizeEmployeeIdentity(row));
   const normalizedAnalyticsRows = sampleRows(rawAnalyticsRows, 25).map((row) =>
@@ -330,18 +453,23 @@ function buildJoinDiagnostics({ employeeRows, employeeByKey, rawAnalyticsRows, n
   };
 }
 
-function joinLaborRowsToEmployees(laborRows, employeeByKey) {
+function joinLaborRowsToEmployees(laborRows, employeeByKey, timeEntryByKey = new Map()) {
   return laborRows.map((row) => {
     const lookupKeys = [row.employee_id, row.external_employee_id]
       .filter(Boolean)
       .map((x) => String(x).toLowerCase());
     const matched = lookupKeys.map((k) => employeeByKey.get(k)).find(Boolean) || null;
+    const timeEntryMatch = lookupKeys.map((k) => timeEntryByKey.get(k)).find(Boolean) || null;
     return {
       ...row,
-      employee_id: matched?.employee_id || row.employee_id || null,
-      employee_name: matched?.employee_name || row.employee_name || null,
-      toast_employee_id: matched?.employee_id || row.employee_id || null,
-      export_employee_id: matched?.external_employee_id || row.external_employee_id || null,
+      employee_id: matched?.employee_id || timeEntryMatch?.employee_id || row.employee_id || null,
+      employee_name: matched?.employee_name || timeEntryMatch?.employee_name || row.employee_name || null,
+      toast_employee_id: matched?.employee_id || timeEntryMatch?.employee_id || row.employee_id || null,
+      export_employee_id: matched?.external_employee_id || timeEntryMatch?.external_employee_id || row.external_employee_id || null,
+      job_name: row.job_name || timeEntryMatch?.top_job_name || null,
+      job_code: row.job_code || timeEntryMatch?.top_job_code || null,
+      location_display_name: row.location_display_name || timeEntryMatch?.top_location_name || row.location_name || null,
+      location_code: row.location_code || timeEntryMatch?.top_location_code || null,
     };
   });
 }
@@ -500,9 +628,15 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
     const vitalsRecord = (snapshot && snapshot.data && snapshot.data[0]) || null;
     if (!vitalsRecord) throw new Error('toast_vitals_not_found');
 
-    const [employees, analytics] = await Promise.all([
+    const [employees, analytics, timeEntries] = await Promise.all([
       fetchToastEmployeesFromVitals({ vitalsRecord, locationName: location }),
       fetchToastAnalyticsJobsFromVitals({
+        vitalsRecord,
+        periodStart: start,
+        periodEnd: end,
+        locationName: location,
+      }),
+      fetchToastTimeEntriesFromVitals({
         vitalsRecord,
         periodStart: start,
         periodEnd: end,
@@ -520,6 +654,12 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
 
     const employeeRows = extractRows(employees.data);
     const employeeByKey = buildEmployeeIndex(employeeRows);
+    const timeEntryRows = timeEntries && timeEntries.ok ? extractRows(timeEntries.data) : [];
+    const timeEntryByKey = buildTimeEntryIdentityIndex(
+      timeEntryRows,
+      location,
+      vitalsRecord['Toast Location ID'] ? String(vitalsRecord['Toast Location ID']) : null
+    );
     const rawAnalyticsRows = extractRows(analytics.data);
     const normalizedLaborRows = rawAnalyticsRows.map((row) =>
       normalizeAnalyticsLaborRow(row, {
@@ -529,7 +669,7 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
         fallbackLocationCode: vitalsRecord['Toast Location ID'] ? String(vitalsRecord['Toast Location ID']) : null,
       })
     );
-    const joinedRows = joinLaborRowsToEmployees(normalizedLaborRows, employeeByKey);
+    const joinedRows = joinLaborRowsToEmployees(normalizedLaborRows, employeeByKey, timeEntryByKey);
     const rows = buildPayrollExportRows(
       joinedRows,
       vitalsRecord['Toast Location ID'] ? String(vitalsRecord['Toast Location ID']) : null

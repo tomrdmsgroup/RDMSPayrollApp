@@ -97,7 +97,14 @@ function pickByAliases(row, aliases) {
 
 function normalizeUploadedRow(row, context) {
   const toastEmployeeId = pickByAliases(row, ['toast_employee_id', 'toast_employee_guid', 'employee_guid', 'employee_uuid']);
-  const employeeId = pickByAliases(row, ['employee_id', 'payroll_employee_id', 'external_employee_id']);
+  const employeeId = pickByAliases(row, [
+    'employee_id',
+    'payroll_employee_id',
+    'external_employee_id',
+    'employee_number',
+    'employee_no',
+    'payroll_id',
+  ]);
   const employeeName = pickByAliases(row, ['employee', 'employee_name', 'team_member']);
   const jobTitle = pickByAliases(row, ['job_title', 'job', 'job_name']);
   const locationName = pickByAliases(row, ['location', 'location_name']) || context.location_name;
@@ -145,7 +152,10 @@ function keyPart(v, fallback) {
 }
 
 function buildStableKey(normalizedRow) {
-  const person = keyPart(normalizedRow.toast_employee_id, keyPart(normalizedRow.employee_id, keyPart(normalizedRow.employee_name, '__unknown_person__')));
+  const person = keyPart(
+    normalizedRow.employee_id,
+    keyPart(normalizedRow.toast_employee_id, keyPart(normalizedRow.employee_name, '__unknown_person__'))
+  );
   const job = keyPart(normalizedRow.job_title, '__unknown_job__');
   const location = keyPart(normalizedRow.location_code, keyPart(normalizedRow.location, '__unknown_location__'));
   return [person, job, location, normalizedRow.pay_period_start, normalizedRow.pay_period_end].join('|||');
