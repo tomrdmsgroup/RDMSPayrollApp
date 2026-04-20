@@ -273,6 +273,43 @@ function sampleRows(rows, limit = 5) {
   return (Array.isArray(rows) ? rows : []).slice(0, limit);
 }
 
+function collectFieldPaths(value, prefix = '', out = new Set(), depth = 0) {
+  if (!value || typeof value !== 'object' || depth > 3) return out;
+  if (Array.isArray(value)) return out;
+  for (const [k, v] of Object.entries(value)) {
+    const path = prefix ? `${prefix}.${k}` : k;
+    out.add(path);
+    if (v && typeof v === 'object' && !Array.isArray(v)) collectFieldPaths(v, path, out, depth + 1);
+  }
+  return out;
+}
+
+function sourceShapeDebug({ label, rows, requiredFieldHints = {}, naturalGrainHint }) {
+  const sample = sampleRows(rows, 40);
+  const fieldSet = new Set();
+  for (const row of sample) collectFieldPaths(row, '', fieldSet);
+  const fields = Array.from(fieldSet.values()).sort();
+  const available = {};
+  const missing = {};
+  for (const [k, hints] of Object.entries(requiredFieldHints)) {
+    const hit = hints.filter((candidate) => fields.includes(candidate));
+    available[k] = hit;
+    missing[k] = hints.filter((candidate) => !hit.includes(candidate));
+  }
+  return {
+    label,
+    sample_row_count: sample.length,
+    discovered_fields_sample: fields.slice(0, 150),
+    available_field_candidates: available,
+    missing_field_candidates: missing,
+    natural_row_grain: naturalGrainHint,
+  };
+}
+
+function hasAnyField(sourceDebug, key) {
+  return Array.isArray(sourceDebug?.available_field_candidates?.[key]) && sourceDebug.available_field_candidates[key].length > 0;
+}
+
 function lookupKeysForRow(row) {
   return [row?.employee_id, row?.external_employee_id]
     .filter(Boolean)
@@ -321,8 +358,23 @@ function normalizeTimeEntryRow(row, fallbackLocationName = null, fallbackLocatio
     employee_id: employeeId,
     external_employee_id: externalEmployeeId,
     employee_name: employeeName,
+    business_date: normalizeBusinessDate(
+      pick(row, ['businessDate', 'business_date', 'date', 'workDate', 'shiftDate', 'inDate', 'clockInDate'])
+    ),
+    pay_type: safeTrim(pick(row, ['payType', 'wageType', 'earningType'])),
     job_code: safeTrim(pick(row, ['jobCode', 'job_code', 'job.id', 'job.guid', 'jobId', 'jobGuid'])),
     job_name: safeTrim(pick(row, ['jobName', 'job_name', 'jobTitle', 'job_title', 'job.name', 'job.title'])),
+    regular_hours: toNum(pick(row, ['regularHours', 'regular_hours', 'hoursRegular'])),
+    overtime_hours: toNum(pick(row, ['overtimeHours', 'overtime_hours', 'otHours', 'ot_hours'])),
+    hourly_rate: toNum(pick(row, ['hourlyRate', 'hourly_rate', 'rate', 'payRate', 'wageRate'])),
+    regular_pay: toNum(pick(row, ['regularPay', 'regular_pay', 'regularWages', 'regular_cost', 'regularCost'])),
+    overtime_pay: toNum(pick(row, ['overtimePay', 'overtime_pay', 'otPay', 'overtime_cost', 'overtimeCost'])),
+    total_pay: toNum(pick(row, ['totalPay', 'total_pay', 'grossPay', 'gross_pay', 'wages', 'wageAmount'])),
+    net_sales: toNum(pick(row, ['netSales', 'salesNet'])),
+    declared_tips: toNum(pick(row, ['declaredTips', 'tipsDeclared'])),
+    non_cash_tips: toNum(pick(row, ['nonCashTips', 'chargedTips', 'tipsNonCash'])),
+    tips_withheld: toNum(pick(row, ['tipsWithheld', 'withheldTips'])),
+    total_gratuity: toNum(pick(row, ['totalGratuity', 'gratuity', 'autoGratuity'])),
     location_display_name:
       safeTrim(
         pick(row, [
@@ -396,6 +448,48 @@ function buildTimeEntryIdentityIndex(timeEntryRows, fallbackLocationName, fallba
   }
 
   return byKey;
+}
+
+function buildExportShapedRowsFromTimeEntries({
+  timeEntryRows,
+  employeeByKey,
+  fallbackLocationName,
+  fallbackLocationCode,
+  periodStart,
+  periodEnd,
+}) {
+  return timeEntryRows.map((row) => {
+    const normalized = normalizeTimeEntryRow(row, fallbackLocationName, fallbackLocationCode);
+    const keys = lookupKeysForRow(normalized);
+    const employeeMatch = keys.map((k) => employeeByKey.get(k)).find(Boolean) || null;
+    return {
+      location_name: fallbackLocationName,
+      location_code: normalized.location_code || fallbackLocationCode || null,
+      location_display_name: normalized.location_display_name || fallbackLocationName || null,
+      business_date: normalized.business_date,
+      pay_type: normalized.pay_type,
+      pay_period_start: periodStart,
+      pay_period_end: periodEnd,
+      employee_id: employeeMatch?.employee_id || normalized.employee_id || null,
+      external_employee_id: employeeMatch?.external_employee_id || normalized.external_employee_id || null,
+      employee_name: employeeMatch?.employee_name || normalized.employee_name || null,
+      toast_employee_id: employeeMatch?.employee_id || normalized.employee_id || null,
+      export_employee_id: employeeMatch?.external_employee_id || normalized.external_employee_id || null,
+      job_code: normalized.job_code,
+      job_name: normalized.job_name,
+      regular_hours: normalized.regular_hours || 0,
+      overtime_hours: normalized.overtime_hours || 0,
+      hourly_rate: normalized.hourly_rate,
+      regular_pay: normalized.regular_pay || 0,
+      overtime_pay: normalized.overtime_pay || 0,
+      total_pay: normalized.total_pay,
+      net_sales: normalized.net_sales,
+      declared_tips: normalized.declared_tips || 0,
+      non_cash_tips: normalized.non_cash_tips || 0,
+      tips_withheld: normalized.tips_withheld,
+      total_gratuity: normalized.total_gratuity,
+    };
+  });
 }
 
 function buildJoinDiagnostics({ employeeRows, employeeByKey, rawAnalyticsRows, normalizedLaborRows }) {
@@ -669,9 +763,60 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
         fallbackLocationCode: vitalsRecord['Toast Location ID'] ? String(vitalsRecord['Toast Location ID']) : null,
       })
     );
-    const joinedRows = joinLaborRowsToEmployees(normalizedLaborRows, employeeByKey, timeEntryByKey);
+    const employeesShape = sourceShapeDebug({
+      label: 'toast_standard_employees',
+      rows: employeeRows,
+      requiredFieldHints: {
+        employee_name: ['fullName', 'name', 'firstName', 'lastName'],
+        payroll_employee_id: ['payrollEmployeeId', 'employeeNumber', 'externalEmployeeId'],
+      },
+      naturalGrainHint: 'one row per employee',
+    });
+    const timeEntriesShape = sourceShapeDebug({
+      label: 'toast_standard_time_entries',
+      rows: timeEntryRows,
+      requiredFieldHints: {
+        employee_name: ['employeeName', 'employee.fullName'],
+        payroll_employee_id: ['employeeExternalId', 'employee.employeeNumber', 'employee.employeeCode'],
+        job_title_or_code: ['jobName', 'jobTitle', 'jobCode', 'job.name'],
+        location_text_or_code: ['locationName', 'location.displayName', 'locationCode', 'locationId'],
+        regular_or_ot_hours: ['regularHours', 'overtimeHours', 'hours'],
+        pay_amounts: ['regularPay', 'overtimePay', 'totalPay', 'wages'],
+      },
+      naturalGrainHint: 'one row per time entry / punch segment (employee + job + location when populated)',
+    });
+    const analyticsShape = sourceShapeDebug({
+      label: 'toast_analytics_labor_grouped_employee',
+      rows: rawAnalyticsRows,
+      requiredFieldHints: {
+        employee_name: ['employeeName', 'employeeFullName', 'employee.firstName', 'employee.lastName'],
+        payroll_employee_id: ['employeeExternalId', 'externalEmployeeId'],
+        job_title_or_code: ['jobName', 'jobTitle', 'jobCode', 'departmentName'],
+        location_text_or_code: ['locationName', 'locationCode', 'restaurantName'],
+        regular_or_ot_hours: ['regularHours', 'overtimeHours'],
+        pay_amounts: ['regularPay', 'overtimePay', 'totalPay', 'regularCost', 'totalLaborCost'],
+      },
+      naturalGrainHint: 'employee-grouped summary rows (ERA groupBy EMPLOYEE)',
+    });
+
+    const canTimeEntriesShapeRows =
+      hasAnyField(timeEntriesShape, 'job_title_or_code') && hasAnyField(timeEntriesShape, 'location_text_or_code');
+    const strategy = canTimeEntriesShapeRows ? 'time_entries_primary_with_employee_enrichment' : 'analytics_primary_fallback';
+
+    const sourceDetailRows =
+      strategy === 'time_entries_primary_with_employee_enrichment'
+        ? buildExportShapedRowsFromTimeEntries({
+            timeEntryRows,
+            employeeByKey,
+            fallbackLocationName: location,
+            fallbackLocationCode: vitalsRecord['Toast Location ID'] ? String(vitalsRecord['Toast Location ID']) : null,
+            periodStart: start,
+            periodEnd: end,
+          })
+        : joinLaborRowsToEmployees(normalizedLaborRows, employeeByKey, timeEntryByKey);
+
     const rows = buildPayrollExportRows(
-      joinedRows,
+      sourceDetailRows,
       vitalsRecord['Toast Location ID'] ? String(vitalsRecord['Toast Location ID']) : null
     );
     const rowGrain = detectReturnedRowGrain(rows);
@@ -698,16 +843,26 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
       'Location Code',
     ];
 
-    const isBarrio = /barrio/i.test(location);
-    const debug =
-      includeDebug && isBarrio
-        ? buildJoinDiagnostics({
+    const debug = includeDebug
+      ? {
+          join_diagnostics: buildJoinDiagnostics({
             employeeRows,
             employeeByKey,
             rawAnalyticsRows,
             normalizedLaborRows,
-          })
-        : null;
+          }),
+          source_shape_diagnostics: {
+            employees: employeesShape,
+            time_entries: timeEntriesShape,
+            analytics_employee_grouped: analyticsShape,
+          },
+          source_strategy_selected: strategy,
+          source_strategy_reason:
+            strategy === 'time_entries_primary_with_employee_enrichment'
+              ? 'Standard time entries expose job/location fields, so row grain is built from time entries and employee names/IDs are enriched from Standard employees.'
+              : 'Time entries do not expose sufficient job/location fields in sampled payload; fallback uses analytics employee-grouped reconstruction.',
+        }
+      : null;
 
     return {
       location_name: location,
@@ -715,11 +870,20 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
       period_end: end,
       source: {
         provider: 'toast',
-        api_mode: 'standard_employees_plus_analytics_jobs_reconstructed_for_payroll_export',
-        label: 'Toast Standard employees joined to Toast Analytics labor jobs and aggregated to payroll-export-like rows',
-        source_row_grain_before_transform: 'one row per Toast ERA labor row grouped by EMPLOYEE for selected period',
+        api_mode: strategy,
+        label:
+          strategy === 'time_entries_primary_with_employee_enrichment'
+            ? 'Toast Standard time entries as primary row-shape source + Standard employee enrichment'
+            : 'Toast Standard employees joined to Toast Analytics labor jobs and aggregated to payroll-export-like rows',
+        source_row_grain_before_transform:
+          strategy === 'time_entries_primary_with_employee_enrichment'
+            ? 'one row per Toast Standard time entry for selected period'
+            : 'one row per Toast ERA labor row grouped by EMPLOYEE for selected period',
         employee_identity_source: 'Toast Standard labor/hr employees endpoint',
-        labor_totals_source: 'Toast Analytics ERA labor report (groupBy: EMPLOYEE) for selected pay period',
+        labor_totals_source:
+          strategy === 'time_entries_primary_with_employee_enrichment'
+            ? 'Toast Standard labor time entries payload (plus fields available in that payload)'
+            : 'Toast Analytics ERA labor report (groupBy: EMPLOYEE) for selected pay period',
         employee_column_mapping: 'Employee column prefers Toast Standard employee full name; falls back to analytics name, then Toast employee id only when no name is available',
         employee_id_column_mapping:
           'Employee ID column prefers payrollEmployeeId/payrollId/payrollEmployeeNumber/employeeNumber/employeeCode/externalEmployeeId from Toast Standard employees; remains blank when unavailable',
@@ -730,14 +894,23 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
         row_grain_returned: rowGrain,
         exact_payroll_export_endpoint_available: false,
         note:
-          'Direct Toast Payroll Export endpoint is not configured in this codebase; data is reconstructed from Standard employees + Analytics labor rows.',
-        approximation_notes: [
-          'Toast ERA create rejects multi-groupBy requests; this flow uses groupBy EMPLOYEE and reconstructs job/location only from fields present in returned rows.',
-          'Hourly Rate is a weighted average of available analytics rates.',
-          'Regular Pay and Overtime Pay are summed from analytics rows when present, otherwise derived from hours x rate.',
-          'Total Pay is summed from source when available, otherwise derived as Regular Pay + Overtime Pay.',
-          'Columns absent from analytics payload remain null or derived approximations.',
-        ],
+          strategy === 'time_entries_primary_with_employee_enrichment'
+            ? 'Direct Toast Payroll Export endpoint is not configured in this codebase; rows are primarily shaped from Standard time entries and enriched with Standard employees.'
+            : 'Direct Toast Payroll Export endpoint is not configured in this codebase; data is reconstructed from Standard employees + Analytics labor rows.',
+        approximation_notes:
+          strategy === 'time_entries_primary_with_employee_enrichment'
+            ? [
+                'Time entries are used for row grain (employee + job + location) when those fields exist in the payload.',
+                'Columns not present on time entries remain null/0 or derived approximations after aggregation.',
+                'Analytics is still fetched for diagnostics but is not the primary row-shape source in this strategy.',
+              ]
+            : [
+                'Toast ERA create rejects multi-groupBy requests; analytics alone cannot guarantee employee+job+location row grain.',
+                'Hourly Rate is a weighted average of available analytics rates.',
+                'Regular Pay and Overtime Pay are summed from analytics rows when present, otherwise derived from hours x rate.',
+                'Total Pay is summed from source when available, otherwise derived as Regular Pay + Overtime Pay.',
+                'Columns absent from analytics payload remain null or derived approximations.',
+              ],
       },
       row_count: rows.length,
       columns,
