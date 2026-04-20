@@ -93,6 +93,10 @@ function normalizeEmployeeIdentity(row) {
       'employeeNumber',
       'employeeCode',
       'employee_code',
+      'employeePayrollId',
+      'employee_payroll_id',
+      'employee.externalEmployeeId',
+      'employee.external_employee_id',
       'externalEmployeeId',
       'external_employee_id',
       'externalId',
@@ -419,6 +423,9 @@ function normalizeTimeEntryRow(row, fallbackLocationName = null, fallbackLocatio
       'employee_external_id',
       'externalEmployeeId',
       'external_employee_id',
+      'payrollEmployeeId',
+      'payroll_employee_id',
+      'payrollId',
       'employee.employeeCode',
       'employee.employeeNumber',
       'employeeNumber',
@@ -446,10 +453,21 @@ function normalizeTimeEntryRow(row, fallbackLocationName = null, fallbackLocatio
     ),
     pay_type: safeTrim(pick(row, ['payType', 'wageType', 'earningType'])),
     job_code: safeTrim(pick(row, ['jobCode', 'job_code', 'job.id', 'job.guid', 'jobId', 'jobGuid'])),
-    job_name: safeTrim(pick(row, ['jobName', 'job_name', 'jobTitle', 'job_title', 'job.name', 'job.title'])),
+    job_name: safeTrim(
+      pick(row, [
+        'jobName',
+        'job_name',
+        'jobTitle',
+        'job_title',
+        'job.name',
+        'job.title',
+        'laborDepartmentName',
+        'departmentName',
+      ])
+    ),
     regular_hours: toNum(pick(row, ['regularHours', 'regular_hours', 'hoursRegular'])),
     overtime_hours: toNum(pick(row, ['overtimeHours', 'overtime_hours', 'otHours', 'ot_hours'])),
-    hourly_rate: toNum(pick(row, ['hourlyRate', 'hourly_rate', 'rate', 'payRate', 'wageRate'])),
+    hourly_rate: toNum(pick(row, ['hourlyRate', 'hourly_rate', 'rate', 'payRate', 'wageRate', 'baseRate', 'wage.rate'])),
     regular_pay: toNum(pick(row, ['regularPay', 'regular_pay', 'regularWages', 'regular_cost', 'regularCost'])),
     overtime_pay: toNum(pick(row, ['overtimePay', 'overtime_pay', 'otPay', 'overtime_cost', 'overtimeCost'])),
     total_pay: toNum(pick(row, ['totalPay', 'total_pay', 'grossPay', 'gross_pay', 'wages', 'wageAmount'])),
@@ -710,7 +728,10 @@ function buildPayrollExportRows(detailRows, fallbackLocationCode = null, { inclu
     const jobCode = String(row.job_code || '').trim();
     const locationName = row.location_display_name || row.location_name || '';
     const locationCode = row.location_code || fallbackLocationCode || '';
-    const employeeKey = normalizeGroupPart(toastEmployeeId, normalizeGroupPart(employeeId, '__unknown_employee__'));
+    const employeeKey = normalizeGroupPart(
+      exportEmployeeId,
+      normalizeGroupPart(toastEmployeeId, normalizeGroupPart(employeeId, '__unknown_employee__'))
+    );
     const jobKey = normalizeGroupPart(jobTitle, normalizeGroupPart(jobCode, '__unassigned_job__'));
     const locationKey = normalizeGroupPart(locationCode, normalizeGroupPart(locationName, '__unknown_location__'));
     const key = [employeeKey, jobKey, locationKey].join('|||');
@@ -846,6 +867,19 @@ function buildPayrollExportRows(detailRows, fallbackLocationCode = null, { inclu
   });
 
   if (!includeSourceAudit) return rows;
+  const rowBuildDebugSample = result.slice(0, 10).map((row, idx) => ({
+    row_index: idx,
+    guid_used: row['Toast Employee ID'] || null,
+    payroll_employee_id_used: row['Employee ID'] || null,
+    employee_name: row.Employee || null,
+    employee_name_source: row.__field_sources?.employee_name?.source || null,
+    job_title: row['Job Title'] || null,
+    job_title_source: row.__field_sources?.job_title?.source || null,
+    hourly_rate: row['Hourly Rate'],
+    hourly_rate_source: row.__field_sources?.hourly_rate?.source || null,
+    location: row.Location || null,
+    location_source: row.__field_sources?.location?.source || null,
+  }));
   const rowSourceAudit = result.map((row, idx) => ({
     row_index: idx,
     employee: row.Employee || null,
@@ -863,7 +897,7 @@ function buildPayrollExportRows(detailRows, fallbackLocationCode = null, { inclu
       location: row.__field_sources?.location || sourceTag(null),
     },
   }));
-  return { rows, rowSourceAudit };
+  return { rows, rowSourceAudit, rowBuildDebugSample };
 }
 
 function detectReturnedRowGrain(rows) {
@@ -1005,6 +1039,7 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
     );
     const rows = includeDebug ? rowBuild.rows : rowBuild;
     const rowSourceAudit = includeDebug ? rowBuild.rowSourceAudit : null;
+    const rowBuildDebugSample = includeDebug ? rowBuild.rowBuildDebugSample : null;
     const rowGrain = detectReturnedRowGrain(rows);
 
     const columns = [
@@ -1048,6 +1083,7 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
               ? 'Standard time entries expose job/location fields, so row grain is built from time entries and employee names/IDs are enriched from Standard employees.'
               : 'Time entries do not expose sufficient job/location fields in sampled payload; fallback uses analytics employee-grouped reconstruction.',
           row_field_source_audit: rowSourceAudit,
+          row_build_debug_sample: rowBuildDebugSample,
         }
       : null;
 
@@ -1076,7 +1112,8 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
           'Employee ID column prefers payrollEmployeeId/payrollId/payrollEmployeeNumber/employeeNumber/employeeCode/externalEmployeeId from Toast Standard employees; remains blank when unavailable',
         join_key_between_sources:
           'analytics.employeeGuid/employeeId + analytics.employeeExternalId -> standard employee id/externalEmployeeId (case-insensitive string match)',
-        grouping_key_after_transform: 'lower(toast_employee_id), lower(job_title OR job_code), lower(location_code OR location_name)',
+        grouping_key_after_transform:
+          'lower(payroll employee id when present, else toast_employee_id), lower(job_title OR job_code), lower(location_code OR location_name)',
         row_grain_target: 'one row per Employee + Job + Location for selected pay period',
         row_grain_returned: rowGrain,
         csv_shape_recreation_assessment: csvShapeAssessment,
