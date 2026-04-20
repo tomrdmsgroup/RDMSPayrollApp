@@ -326,6 +326,69 @@
       .toastOriginalControlsPanel {
         overflow-x: hidden;
       }
+      .statusCard {
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.03);
+      }
+      .statusCard.matched {
+        border-color: rgba(46, 204, 113, 0.45);
+        background: rgba(46, 204, 113, 0.1);
+      }
+      .statusCard.review {
+        border-color: rgba(241, 196, 15, 0.45);
+        background: rgba(241, 196, 15, 0.12);
+      }
+      .statusCard.problem {
+        border-color: rgba(231, 76, 60, 0.45);
+        background: rgba(231, 76, 60, 0.12);
+      }
+      .statusCardTitle {
+        font-size: 13px;
+        color: var(--muted);
+        margin-bottom: 4px;
+      }
+      .statusCardValue {
+        font-size: 20px;
+        font-weight: 700;
+      }
+      .summaryGrid {
+        display: grid;
+        gap: 8px;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      }
+      .summaryMetric {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.03);
+        padding: 8px 10px;
+      }
+      .summaryMetricLabel {
+        font-size: 11px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+      }
+      .summaryMetricValue {
+        margin-top: 4px;
+        font-size: 17px;
+        font-weight: 700;
+      }
+      .debugSection {
+        margin-top: 10px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.02);
+      }
+      .debugSection > summary {
+        cursor: pointer;
+        padding: 10px 12px;
+        font-weight: 600;
+      }
+      .debugSectionBody {
+        padding: 0 12px 12px;
+      }
 
       /* Better readability for long definitions */
       .defClamp {
@@ -1458,6 +1521,45 @@
         `;
       }
 
+      function getToastComparisonStatus(comparison) {
+        const s = comparison && comparison.summary ? comparison.summary : null;
+        if (!s) return { label: "CLOSE / REVIEW", klass: "review", reason: "Upload a CSV baseline to score a full comparison." };
+        const hardProblem = (s.missing_in_csv_count || 0) > 0 || (s.missing_in_api_count || 0) > 0;
+        if (hardProblem) {
+          return { label: "PROBLEM", klass: "problem", reason: "Rows are missing on one side of the comparison." };
+        }
+        if ((s.mismatch_count || 0) > 0 || (s.row_count_delta || 0) !== 0) {
+          return { label: "CLOSE / REVIEW", klass: "review", reason: "Counts align, but one or more field-level mismatches exist." };
+        }
+        return { label: "MATCHED", klass: "matched", reason: "API and uploaded CSV rows align with no detected mismatches." };
+      }
+
+      function renderComparisonStatusAndMetrics(comparison) {
+        const status = getToastComparisonStatus(comparison);
+        const s = comparison && comparison.summary ? comparison.summary : null;
+        const apiRows = s ? s.api_row_count || 0 : 0;
+        const csvRows = s ? s.csv_row_count || 0 : 0;
+        const missingInCsv = s ? s.missing_in_csv_count || 0 : 0;
+        const missingInApi = s ? s.missing_in_api_count || 0 : 0;
+        const mismatchCount = s ? s.mismatch_count || 0 : 0;
+        const matchedRows = Math.max(0, apiRows - missingInCsv - mismatchCount);
+        return `
+          <div class="statusCard ${status.klass}">
+            <div class="statusCardTitle">Comparison status</div>
+            <div class="statusCardValue">${escapeHtml(status.label)}</div>
+            <div class="muted" style="margin-top:4px;">${escapeHtml(status.reason)}</div>
+          </div>
+          <div class="summaryGrid" style="margin-top:10px;">
+            <div class="summaryMetric"><div class="summaryMetricLabel">API rows</div><div class="summaryMetricValue">${escapeHtml(String(apiRows))}</div></div>
+            <div class="summaryMetric"><div class="summaryMetricLabel">CSV rows</div><div class="summaryMetricValue">${escapeHtml(String(csvRows))}</div></div>
+            <div class="summaryMetric"><div class="summaryMetricLabel">Matched rows</div><div class="summaryMetricValue">${escapeHtml(String(matchedRows))}</div></div>
+            <div class="summaryMetric"><div class="summaryMetricLabel">Missing in API</div><div class="summaryMetricValue">${escapeHtml(String(missingInApi))}</div></div>
+            <div class="summaryMetric"><div class="summaryMetricLabel">Missing in CSV</div><div class="summaryMetricValue">${escapeHtml(String(missingInCsv))}</div></div>
+            <div class="summaryMetric"><div class="summaryMetricLabel">Mismatch count</div><div class="summaryMetricValue">${escapeHtml(String(mismatchCount))}</div></div>
+          </div>
+        `;
+      }
+
       function renderSimpleRowsTable(title, rows, columns, emptyLabel) {
         const displayRows = Array.isArray(rows) ? rows.slice(0, 100) : [];
         const head = columns.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
@@ -1474,6 +1576,49 @@
           <div class="sectionTitle">${escapeHtml(title)}</div>
           <div class="tableScroll"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>
           ${Array.isArray(rows) && rows.length > 100 ? `<div class='muted' style='margin-top:6px;'>Showing first 100 rows of ${escapeHtml(String(rows.length))}.</div>` : ""}
+        `;
+      }
+
+      function renderColumnMismatchesTable(mismatches) {
+        const rows = Array.isArray(mismatches) ? mismatches.slice(0, 100) : [];
+        const body = rows.length
+          ? rows
+              .map((row) => {
+                const diffs = Array.isArray(row?.diffs)
+                  ? row.diffs
+                      .map(
+                        (d) =>
+                          `<div><b>${escapeHtml(String(d.field || ""))}</b>: API="${escapeHtml(String(d.api_value ?? ""))}" vs CSV="${escapeHtml(
+                            String(d.csv_value ?? "")
+                          )}"</div>`
+                      )
+                      .join("")
+                  : "";
+                return `<tr>
+                  <td>${escapeHtml(String(row?.api_row?.toast_employee_id || row?.api_row?.employee_id || ""))}</td>
+                  <td>${escapeHtml(String(row?.api_row?.employee_name || ""))}</td>
+                  <td>${escapeHtml(String(row?.api_row?.job_title || ""))}</td>
+                  <td>${diffs || "<span class='muted'>No diff details.</span>"}</td>
+                </tr>`;
+              })
+              .join("")
+          : `<tr><td colspan="4" class="muted">No column mismatches.</td></tr>`;
+        return `
+          <div class="sectionTitle">Column mismatches</div>
+          <div class="tableScroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>toast_employee_id</th>
+                  <th>employee_name</th>
+                  <th>job_title</th>
+                  <th>differences</th>
+                </tr>
+              </thead>
+              <tbody>${body}</tbody>
+            </table>
+          </div>
+          ${Array.isArray(mismatches) && mismatches.length > 100 ? `<div class='muted' style='margin-top:6px;'>Showing first 100 mismatches of ${escapeHtml(String(mismatches.length))}.</div>` : ""}
         `;
       }
 
@@ -1671,14 +1816,49 @@
                       tableRender.identityField.outputLabel
                     )}</b> (sourced from <b>${escapeHtml(tableRender.identityField.sourceField)}</b>).</p>`
                   : "<p class='sourceNote' style='margin-top:0;margin-bottom:8px;'>No stable Toast employee identity field was found in the current row payload.</p>";
+                const summaryTopHtml = renderComparisonStatusAndMetrics(state.toastOriginalComparison);
                 const comparisonHtml = `
-                  <div class="sectionTitle">CSV vs API Comparison</div>
+                  <div class="sectionTitle">CSV vs API Comparison Details</div>
                   ${getComparisonSummaryHtml(state.toastOriginalComparison)}
-                  ${state.toastOriginalComparison ? renderSimpleRowsTable('Missing rows in uploaded CSV (present in API)', state.toastOriginalComparison.missing_in_csv || [], ['toast_employee_id','employee_id','employee_name','job_title','location','regular_hours','overtime_hours','total_pay'], 'No missing rows in CSV.') : ''}
-                  ${state.toastOriginalComparison ? renderSimpleRowsTable('Missing rows in API-derived output (present in uploaded CSV)', state.toastOriginalComparison.missing_in_api || [], ['toast_employee_id','employee_id','employee_name','job_title','location','regular_hours','overtime_hours','total_pay'], 'No missing rows in API output.') : ''}
-                  ${state.toastOriginalComparison ? renderSimpleRowsTable('Uploaded CSV normalized rows', state.toastOriginalComparison.uploaded_csv_rows || [], ['toast_employee_id','employee_id','employee_name','job_title','location','regular_hours','overtime_hours','total_pay'], 'No uploaded CSV rows.') : ''}
+                  ${
+                    state.toastOriginalComparison
+                      ? `<details class="debugSection"><summary>Missing rows in uploaded CSV</summary><div class="debugSectionBody">${renderSimpleRowsTable(
+                          "Missing rows in uploaded CSV (present in API)",
+                          state.toastOriginalComparison.missing_in_csv || [],
+                          ["toast_employee_id", "employee_id", "employee_name", "job_title", "location", "regular_hours", "overtime_hours", "total_pay"],
+                          "No missing rows in CSV."
+                        )}</div></details>`
+                      : ""
+                  }
+                  ${
+                    state.toastOriginalComparison
+                      ? `<details class="debugSection"><summary>Missing rows in API-derived output</summary><div class="debugSectionBody">${renderSimpleRowsTable(
+                          "Missing rows in API-derived output (present in uploaded CSV)",
+                          state.toastOriginalComparison.missing_in_api || [],
+                          ["toast_employee_id", "employee_id", "employee_name", "job_title", "location", "regular_hours", "overtime_hours", "total_pay"],
+                          "No missing rows in API output."
+                        )}</div></details>`
+                      : ""
+                  }
+                  ${
+                    state.toastOriginalComparison
+                      ? `<details class="debugSection"><summary>Column mismatches</summary><div class="debugSectionBody">${renderColumnMismatchesTable(
+                          state.toastOriginalComparison.column_mismatches || []
+                        )}</div></details>`
+                      : ""
+                  }
+                  ${
+                    state.toastOriginalComparison
+                      ? `<details class="debugSection"><summary>Uploaded CSV normalized rows</summary><div class="debugSectionBody">${renderSimpleRowsTable(
+                          "Uploaded CSV normalized rows",
+                          state.toastOriginalComparison.uploaded_csv_rows || [],
+                          ["toast_employee_id", "employee_id", "employee_name", "job_title", "location", "regular_hours", "overtime_hours", "total_pay"],
+                          "No uploaded CSV rows."
+                        )}</div></details>`
+                      : ""
+                  }
                 `;
-                return `${identityNote}${tableRender.html}${comparisonHtml}`;
+                return `${summaryTopHtml}${identityNote}${tableRender.html}${comparisonHtml}`;
               })()}
             </div>
           </div>
