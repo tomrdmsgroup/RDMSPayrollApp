@@ -273,6 +273,89 @@ function sampleRows(rows, limit = 5) {
   return (Array.isArray(rows) ? rows : []).slice(0, limit);
 }
 
+function sourceTag(sourceName, reason = null) {
+  return { source: sourceName || null, reason: reason || null };
+}
+
+function pickDominantSource(counter) {
+  if (!(counter instanceof Map) || counter.size === 0) return null;
+  return Array.from(counter.entries()).sort((a, b) => b[1] - a[1])[0][0];
+}
+
+function sourceIsPresent(sourceValue) {
+  return !!(sourceValue && typeof sourceValue === 'string' && sourceValue.trim());
+}
+
+function fieldSourceStatus({ inEmployees, inTimeEntries, inAnalytics, strategy }) {
+  if (strategy === 'time_entries_primary_with_employee_enrichment') {
+    if (inEmployees || inTimeEntries) return 'available_with_current_sources';
+    return 'not_observed_in_current_sources';
+  }
+  if (inEmployees || inAnalytics) return 'available_with_current_sources';
+  return 'not_observed_in_current_sources';
+}
+
+function buildCsvShapeAssessment({ strategy, employeesShape, timeEntriesShape, analyticsShape }) {
+  const inEmployees = (k) => hasAnyField(employeesShape, k);
+  const inTimeEntries = (k) => hasAnyField(timeEntriesShape, k);
+  const inAnalytics = (k) => hasAnyField(analyticsShape, k);
+  const fields = {
+    employee_name: fieldSourceStatus({
+      inEmployees: inEmployees('employee_name'),
+      inTimeEntries: inTimeEntries('employee_name'),
+      inAnalytics: inAnalytics('employee_name'),
+      strategy,
+    }),
+    job_title: fieldSourceStatus({
+      inEmployees: false,
+      inTimeEntries: inTimeEntries('job_title_or_code'),
+      inAnalytics: inAnalytics('job_title_or_code'),
+      strategy,
+    }),
+    hourly_rate: fieldSourceStatus({
+      inEmployees: false,
+      inTimeEntries: inTimeEntries('pay_amounts'),
+      inAnalytics: inAnalytics('pay_amounts'),
+      strategy,
+    }),
+    regular_and_overtime_pay: fieldSourceStatus({
+      inEmployees: false,
+      inTimeEntries: inTimeEntries('pay_amounts'),
+      inAnalytics: inAnalytics('pay_amounts'),
+      strategy,
+    }),
+    employee_id_payroll_export_column: fieldSourceStatus({
+      inEmployees: inEmployees('payroll_employee_id'),
+      inTimeEntries: inTimeEntries('payroll_employee_id'),
+      inAnalytics: inAnalytics('payroll_employee_id'),
+      strategy,
+    }),
+    job_code: fieldSourceStatus({
+      inEmployees: false,
+      inTimeEntries: inTimeEntries('job_title_or_code'),
+      inAnalytics: inAnalytics('job_title_or_code'),
+      strategy,
+    }),
+    full_location_text: fieldSourceStatus({
+      inEmployees: false,
+      inTimeEntries: inTimeEntries('location_text_or_code'),
+      inAnalytics: inAnalytics('location_text_or_code'),
+      strategy,
+    }),
+  };
+
+  const impossibleFields = Object.entries(fields)
+    .filter(([, status]) => status !== 'available_with_current_sources')
+    .map(([field]) => field);
+
+  return {
+    can_recreate_csv_shape_closely: impossibleFields.length === 0,
+    selected_source_strategy: strategy,
+    field_feasibility: fields,
+    impossible_or_unobserved_fields: impossibleFields,
+  };
+}
+
 function collectFieldPaths(value, prefix = '', out = new Set(), depth = 0) {
   if (!value || typeof value !== 'object' || depth > 3) return out;
   if (Array.isArray(value)) return out;
@@ -488,6 +571,27 @@ function buildExportShapedRowsFromTimeEntries({
       non_cash_tips: normalized.non_cash_tips || 0,
       tips_withheld: normalized.tips_withheld,
       total_gratuity: normalized.total_gratuity,
+      __field_sources: {
+        employee_name: employeeMatch?.employee_name
+          ? sourceTag('toast_standard_employees', 'matched_by_employee_id_or_external_id')
+          : normalized.employee_name
+            ? sourceTag('toast_standard_time_entries', 'employee_name_present_on_time_entry')
+            : sourceTag(null),
+        job_title: normalized.job_name
+          ? sourceTag('toast_standard_time_entries', 'job_name_present_on_time_entry')
+          : sourceTag(null),
+        hourly_rate: normalized.hourly_rate !== null ? sourceTag('toast_standard_time_entries', 'hourly_rate_on_time_entry') : sourceTag(null),
+        employee_id: employeeMatch?.external_employee_id
+          ? sourceTag('toast_standard_employees', 'payroll_id_from_employee_record')
+          : normalized.external_employee_id
+            ? sourceTag('toast_standard_time_entries', 'external_employee_id_on_time_entry')
+            : sourceTag(null),
+        location: normalized.location_display_name
+          ? sourceTag('toast_standard_time_entries', 'location_name_on_time_entry')
+          : fallbackLocationName
+            ? sourceTag('vitals_location_fallback', 'time_entry_missing_location_name')
+            : sourceTag(null),
+      },
     };
   });
 }
@@ -564,11 +668,38 @@ function joinLaborRowsToEmployees(laborRows, employeeByKey, timeEntryByKey = new
       job_code: row.job_code || timeEntryMatch?.top_job_code || null,
       location_display_name: row.location_display_name || timeEntryMatch?.top_location_name || row.location_name || null,
       location_code: row.location_code || timeEntryMatch?.top_location_code || null,
+      __field_sources: {
+        employee_name: matched?.employee_name
+          ? sourceTag('toast_standard_employees', 'matched_by_employee_id_or_external_id')
+          : timeEntryMatch?.employee_name
+            ? sourceTag('toast_standard_time_entries', 'fallback_employee_name_from_time_entries')
+            : row.employee_name
+              ? sourceTag('toast_analytics_employee_grouped', 'employee_name_from_analytics')
+              : sourceTag(null),
+        job_title: row.job_name
+          ? sourceTag('toast_analytics_employee_grouped', 'job_name_from_analytics')
+          : timeEntryMatch?.top_job_name
+            ? sourceTag('toast_standard_time_entries', 'fallback_most_common_job_from_time_entries')
+            : sourceTag(null),
+        hourly_rate: row.hourly_rate !== null ? sourceTag('toast_analytics_employee_grouped', 'hourly_rate_from_analytics') : sourceTag(null),
+        employee_id: matched?.external_employee_id
+          ? sourceTag('toast_standard_employees', 'payroll_id_from_employee_record')
+          : timeEntryMatch?.external_employee_id
+            ? sourceTag('toast_standard_time_entries', 'fallback_external_employee_id_from_time_entries')
+            : row.external_employee_id
+              ? sourceTag('toast_analytics_employee_grouped', 'external_employee_id_from_analytics')
+              : sourceTag(null),
+        location: row.location_display_name
+          ? sourceTag('toast_analytics_employee_grouped', 'location_name_from_analytics')
+          : timeEntryMatch?.top_location_name
+            ? sourceTag('toast_standard_time_entries', 'fallback_most_common_location_from_time_entries')
+            : sourceTag(null),
+      },
     };
   });
 }
 
-function buildPayrollExportRows(detailRows, fallbackLocationCode = null) {
+function buildPayrollExportRows(detailRows, fallbackLocationCode = null, { includeSourceAudit = false } = {}) {
   const byEmployeeJobLocation = new Map();
   for (const row of detailRows) {
     const employeeName = String(row.employee_name || '').trim();
@@ -606,6 +737,13 @@ function buildPayrollExportRows(detailRows, fallbackLocationCode = null) {
         'Job Code': jobCode || null,
         Location: locationName || null,
         'Location Code': locationCode || null,
+        __sourceCounters: {
+          employee_name: new Map(),
+          job_title: new Map(),
+          hourly_rate: new Map(),
+          employee_id: new Map(),
+          location: new Map(),
+        },
       });
     }
 
@@ -617,6 +755,14 @@ function buildPayrollExportRows(detailRows, fallbackLocationCode = null) {
     if (!agg['Job Code'] && jobCode) agg['Job Code'] = jobCode;
     if (!agg.Location && locationName) agg.Location = locationName;
     if (!agg['Location Code'] && locationCode) agg['Location Code'] = locationCode;
+    const rowSource = row.__field_sources || {};
+    for (const field of ['employee_name', 'job_title', 'hourly_rate', 'employee_id', 'location']) {
+      const src = rowSource[field]?.source || null;
+      if (sourceIsPresent(src)) {
+        const cur = agg.__sourceCounters[field].get(src) || 0;
+        agg.__sourceCounters[field].set(src, cur + 1);
+      }
+    }
 
     agg['Regular Hours'] += row.regular_hours || 0;
     agg['Overtime Hours'] += row.overtime_hours || 0;
@@ -669,6 +815,13 @@ function buildPayrollExportRows(detailRows, fallbackLocationCode = null) {
       'Job Code': agg['Job Code'],
       Location: agg.Location,
       'Location Code': agg['Location Code'],
+      __field_sources: {
+        employee_name: sourceTag(pickDominantSource(agg.__sourceCounters.employee_name)),
+        job_title: sourceTag(pickDominantSource(agg.__sourceCounters.job_title)),
+        hourly_rate: sourceTag(pickDominantSource(agg.__sourceCounters.hourly_rate)),
+        employee_id: sourceTag(pickDominantSource(agg.__sourceCounters.employee_id)),
+        location: sourceTag(pickDominantSource(agg.__sourceCounters.location)),
+      },
     };
   });
 
@@ -686,7 +839,31 @@ function buildPayrollExportRows(detailRows, fallbackLocationCode = null) {
     return String(a['Location Code'] || '').localeCompare(String(b['Location Code'] || ''));
   });
 
-  return result;
+  const rows = result.map((row) => {
+    const cleaned = { ...row };
+    delete cleaned.__field_sources;
+    return cleaned;
+  });
+
+  if (!includeSourceAudit) return rows;
+  const rowSourceAudit = result.map((row, idx) => ({
+    row_index: idx,
+    employee: row.Employee || null,
+    toast_employee_id: row['Toast Employee ID'] || null,
+    employee_id: row['Employee ID'] || null,
+    job_title: row['Job Title'] || null,
+    job_code: row['Job Code'] || null,
+    location: row.Location || null,
+    location_code: row['Location Code'] || null,
+    field_sources: {
+      employee_name: row.__field_sources?.employee_name || sourceTag(null),
+      job_title: row.__field_sources?.job_title || sourceTag(null),
+      hourly_rate: row.__field_sources?.hourly_rate || sourceTag(null),
+      employee_id: row.__field_sources?.employee_id || sourceTag(null),
+      location: row.__field_sources?.location || sourceTag(null),
+    },
+  }));
+  return { rows, rowSourceAudit };
 }
 
 function detectReturnedRowGrain(rows) {
@@ -815,10 +992,19 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
           })
         : joinLaborRowsToEmployees(normalizedLaborRows, employeeByKey, timeEntryByKey);
 
-    const rows = buildPayrollExportRows(
+    const csvShapeAssessment = buildCsvShapeAssessment({
+      strategy,
+      employeesShape,
+      timeEntriesShape,
+      analyticsShape,
+    });
+    const rowBuild = buildPayrollExportRows(
       sourceDetailRows,
-      vitalsRecord['Toast Location ID'] ? String(vitalsRecord['Toast Location ID']) : null
+      vitalsRecord['Toast Location ID'] ? String(vitalsRecord['Toast Location ID']) : null,
+      { includeSourceAudit: includeDebug }
     );
+    const rows = includeDebug ? rowBuild.rows : rowBuild;
+    const rowSourceAudit = includeDebug ? rowBuild.rowSourceAudit : null;
     const rowGrain = detectReturnedRowGrain(rows);
 
     const columns = [
@@ -861,6 +1047,7 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
             strategy === 'time_entries_primary_with_employee_enrichment'
               ? 'Standard time entries expose job/location fields, so row grain is built from time entries and employee names/IDs are enriched from Standard employees.'
               : 'Time entries do not expose sufficient job/location fields in sampled payload; fallback uses analytics employee-grouped reconstruction.',
+          row_field_source_audit: rowSourceAudit,
         }
       : null;
 
@@ -892,6 +1079,7 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
         grouping_key_after_transform: 'lower(toast_employee_id), lower(job_title OR job_code), lower(location_code OR location_name)',
         row_grain_target: 'one row per Employee + Job + Location for selected pay period',
         row_grain_returned: rowGrain,
+        csv_shape_recreation_assessment: csvShapeAssessment,
         exact_payroll_export_endpoint_available: false,
         note:
           strategy === 'time_entries_primary_with_employee_enrichment'
