@@ -186,9 +186,37 @@ function testBuildPayrollExportRowsGroupsByPayrollEmployeeIdBeforeGuid() {
   assert.equal(rows[0]['Total Pay'], 421.96);
 }
 
+function testNormalizeAnalyticsLaborRowPrefersNestedJobFieldsOverObjectValue() {
+  const normalized = __test.normalizeAnalyticsLaborRow(
+    {
+      employeeGuid: 'E-200',
+      employeeExternalId: '200',
+      employeeName: 'Casey Ward',
+      job: {
+        id: 'J-10',
+        name: 'Expediter',
+      },
+      locationName: '900 North',
+      regularHours: 5,
+      regularPay: 90,
+    },
+    {
+      location: '900 North',
+      periodStart: '2026-03-01',
+      periodEnd: '2026-03-07',
+      fallbackLocationCode: 'J101',
+    }
+  );
+
+  assert.equal(normalized.job_code, 'J-10');
+  assert.equal(normalized.job_name, 'Expediter');
+  assert.notEqual(normalized.job_name, '[object Object]');
+}
+
 module.exports = {
   testNormalizeEmployeeIdentityUsesFallbackMappings,
   testJoinAndBuildPayrollExportRowsAggregatesToEmployeeJobLocationGrain,
   testJoinLaborRowsUsesTimeEntryFallbackForJobAndLocation,
   testBuildPayrollExportRowsGroupsByPayrollEmployeeIdBeforeGuid,
+  testNormalizeAnalyticsLaborRowPrefersNestedJobFieldsOverObjectValue,
 };
