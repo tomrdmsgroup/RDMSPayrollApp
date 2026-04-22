@@ -213,6 +213,28 @@ function testNormalizeAnalyticsLaborRowPrefersNestedJobFieldsOverObjectValue() {
   assert.notEqual(normalized.job_name, '[object Object]');
 }
 
+function testNormalizeTimeEntryRowSupportsNestedPayrollAndLaborJobAliases() {
+  const normalized = __test.normalizeTimeEntryRow(
+    {
+      employeeGuid: 'E-312',
+      employee: {
+        externalEmployeeId: '312',
+      },
+      laborJobName: 'Expo',
+      laborJobId: 'J-EXPO',
+      locationName: 'Barrio',
+      regularHours: 7.5,
+    },
+    'Barrio',
+    'L-1'
+  );
+
+  assert.equal(normalized.employee_id, 'E-312');
+  assert.equal(normalized.external_employee_id, '312');
+  assert.equal(normalized.job_name, 'Expo');
+  assert.equal(normalized.job_code, 'J-EXPO');
+}
+
 function testTimeEntryRowsCanPreserveMultipleJobsForOneEmployee() {
   const employeeByKey = new Map([
     ['e-9', { employee_id: 'E-9', employee_name: 'Riley Fox', external_employee_id: '409' }],
@@ -328,6 +350,7 @@ module.exports = {
   testJoinLaborRowsUsesTimeEntryFallbackForJobAndLocation,
   testBuildPayrollExportRowsGroupsByPayrollEmployeeIdBeforeGuid,
   testNormalizeAnalyticsLaborRowPrefersNestedJobFieldsOverObjectValue,
+  testNormalizeTimeEntryRowSupportsNestedPayrollAndLaborJobAliases,
   testTimeEntryRowsCanPreserveMultipleJobsForOneEmployee,
   testAppliesEmployeeGroupedAnalyticsTotalsAcrossTimeEntryJobSplits,
 };

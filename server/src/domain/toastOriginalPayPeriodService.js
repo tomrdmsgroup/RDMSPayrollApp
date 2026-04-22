@@ -159,8 +159,14 @@ function normalizeAnalyticsLaborRow(row, { location, periodStart, periodEnd, fal
       'external_employee_id',
       'employee.externalEmployeeId',
       'employee.external_employee_id',
+      'employee.payrollEmployeeId',
+      'employee.payrollId',
       'employee.employeeCode',
       'employee.employeeNumber',
+      'employee.posEmployeeId',
+      'employee.posEmployeeNumber',
+      'posEmployeeId',
+      'posEmployeeNumber',
     ])
   );
 
@@ -423,13 +429,21 @@ function normalizeTimeEntryRow(row, fallbackLocationName = null, fallbackLocatio
       'employee_external_id',
       'externalEmployeeId',
       'external_employee_id',
+      'employee.externalEmployeeId',
+      'employee.external_employee_id',
       'payrollEmployeeId',
       'payroll_employee_id',
       'payrollId',
+      'employee.payrollEmployeeId',
+      'employee.payrollId',
       'employee.employeeCode',
       'employee.employeeNumber',
       'employeeNumber',
       'employeeCode',
+      'employee.posEmployeeId',
+      'employee.posEmployeeNumber',
+      'posEmployeeId',
+      'posEmployeeNumber',
     ])
   );
   const employeeName =
@@ -452,7 +466,22 @@ function normalizeTimeEntryRow(row, fallbackLocationName = null, fallbackLocatio
       pick(row, ['businessDate', 'business_date', 'date', 'workDate', 'shiftDate', 'inDate', 'clockInDate'])
     ),
     pay_type: safeTrim(pick(row, ['payType', 'wageType', 'earningType'])),
-    job_code: safeTrim(pick(row, ['jobCode', 'job_code', 'job.id', 'job.guid', 'jobId', 'jobGuid'])),
+    job_code: safeTrim(
+      pick(row, [
+        'jobCode',
+        'job_code',
+        'job.id',
+        'job.guid',
+        'job.code',
+        'jobId',
+        'jobGuid',
+        'jobUuid',
+        'laborJobId',
+        'laborJobGuid',
+        'departmentId',
+        'departmentGuid',
+      ])
+    ),
     job_name: safeTrim(
       pick(row, [
         'jobName',
@@ -461,8 +490,12 @@ function normalizeTimeEntryRow(row, fallbackLocationName = null, fallbackLocatio
         'job_title',
         'job.name',
         'job.title',
+        'job.displayName',
+        'laborJobName',
+        'laborJobTitle',
         'laborDepartmentName',
         'departmentName',
+        'department',
       ])
     ),
     regular_hours: toNum(pick(row, ['regularHours', 'regular_hours', 'hoursRegular'])),
@@ -1245,6 +1278,7 @@ module.exports = {
   __test: {
     normalizeEmployeeIdentity,
     normalizeAnalyticsLaborRow,
+    normalizeTimeEntryRow,
     buildEmployeeAnalyticsTotalsIndex,
     applyAnalyticsTotalsToTimeEntryRows,
     buildExportShapedRowsFromTimeEntries,

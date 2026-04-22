@@ -87,8 +87,29 @@ function testBuildStableKeyPrefersEmployeeIdOverToastGuid() {
   assert.ok(key.startsWith('148|||'), `expected stable key to start with numeric employee_id, got: ${key}`);
 }
 
+function testBuildStableKeyFallsBackToEmployeeNameBeforeToastGuid() {
+  const row = {
+    location_name: 'Barrio',
+    pay_period_start: '2026-04-01',
+    pay_period_end: '2026-04-14',
+    toast_employee_id: '8f0f7d62-3f11-4db2-9ec0-78ed16f30abc',
+    employee_id: null,
+    employee_name: 'Acosta, Lu',
+    job_title: 'Busser',
+    location: '900 North',
+    location_code: 'j101',
+  };
+
+  const key = buildStableKey(row);
+  assert.ok(
+    key.startsWith('acosta, lu|||'),
+    `expected stable key to fall back to employee_name before toast guid, got: ${key}`
+  );
+}
+
 module.exports = {
   testParseCsvHandlesQuotedFields,
   testCompareRowsDetectsMissingAndMismatches,
   testBuildStableKeyPrefersEmployeeIdOverToastGuid,
+  testBuildStableKeyFallsBackToEmployeeNameBeforeToastGuid,
 };
