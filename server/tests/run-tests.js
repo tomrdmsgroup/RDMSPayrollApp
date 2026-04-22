@@ -45,6 +45,7 @@ const {
   testJoinAndBuildPayrollExportRowsAggregatesToEmployeeJobLocationGrain,
   testJoinLaborRowsUsesTimeEntryFallbackForJobAndLocation,
   testNormalizeAnalyticsLaborRowPrefersNestedJobFieldsOverObjectValue,
+  testNormalizeTimeEntryRowSupportsNestedPayrollAndLaborJobAliases,
   testTimeEntryRowsCanPreserveMultipleJobsForOneEmployee,
   testAppliesEmployeeGroupedAnalyticsTotalsAcrossTimeEntryJobSplits,
 } = require('./toastOriginalPayPeriodService.test');
@@ -53,6 +54,7 @@ const {
   testParseCsvHandlesQuotedFields,
   testCompareRowsDetectsMissingAndMismatches,
   testBuildStableKeyPrefersEmployeeIdOverToastGuid,
+  testBuildStableKeyFallsBackToEmployeeNameBeforeToastGuid,
 } = require('./toastPayrollBaselineService.test');
 
 function testTokenLifecycle() {
@@ -134,11 +136,13 @@ async function runAll() {
     testJoinAndBuildPayrollExportRowsAggregatesToEmployeeJobLocationGrain,
     testJoinLaborRowsUsesTimeEntryFallbackForJobAndLocation,
     testNormalizeAnalyticsLaborRowPrefersNestedJobFieldsOverObjectValue,
+    testNormalizeTimeEntryRowSupportsNestedPayrollAndLaborJobAliases,
     testTimeEntryRowsCanPreserveMultipleJobsForOneEmployee,
     testAppliesEmployeeGroupedAnalyticsTotalsAcrossTimeEntryJobSplits,
     testParseCsvHandlesQuotedFields,
     testCompareRowsDetectsMissingAndMismatches,
     testBuildStableKeyPrefersEmployeeIdOverToastGuid,
+    testBuildStableKeyFallsBackToEmployeeNameBeforeToastGuid,
   ];
   for (const fn of tests) {
     await fn();

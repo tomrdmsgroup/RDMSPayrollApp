@@ -154,7 +154,7 @@ function keyPart(v, fallback) {
 function buildStableKey(normalizedRow) {
   const person = keyPart(
     normalizedRow.employee_id,
-    keyPart(normalizedRow.toast_employee_id, keyPart(normalizedRow.employee_name, '__unknown_person__'))
+    keyPart(normalizedRow.employee_name, keyPart(normalizedRow.toast_employee_id, '__unknown_person__'))
   );
   const job = keyPart(normalizedRow.job_title, '__unknown_job__');
   const location = keyPart(normalizedRow.location_code, keyPart(normalizedRow.location, '__unknown_location__'));
