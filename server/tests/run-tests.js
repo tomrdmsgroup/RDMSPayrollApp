@@ -15,6 +15,7 @@ const {
   testBuildsExpectedUrl,
   testFetchesToastDataWithAuthAndMapping,
   testFetchToastDataHandlesFailures,
+  testToastAnalyticsUsesSingleEmployeeGrouping,
 } = require('./providers/toastProvider.test');
 const {
   testFetchVitalsReadsFromAirtable,
@@ -44,6 +45,8 @@ const {
   testJoinAndBuildPayrollExportRowsAggregatesToEmployeeJobLocationGrain,
   testJoinLaborRowsUsesTimeEntryFallbackForJobAndLocation,
   testNormalizeAnalyticsLaborRowPrefersNestedJobFieldsOverObjectValue,
+  testTimeEntryRowsCanPreserveMultipleJobsForOneEmployee,
+  testAppliesEmployeeGroupedAnalyticsTotalsAcrossTimeEntryJobSplits,
 } = require('./toastOriginalPayPeriodService.test');
 
 const {
@@ -111,6 +114,7 @@ async function runAll() {
     testBuildsExpectedUrl,
     testFetchesToastDataWithAuthAndMapping,
     testFetchToastDataHandlesFailures,
+    testToastAnalyticsUsesSingleEmployeeGrouping,
     testFetchVitalsReadsFromAirtable,
     testVitalsMissingRequiredFieldFails,
     testFetchPayrollCalendarReadsFromAirtable,
@@ -130,6 +134,8 @@ async function runAll() {
     testJoinAndBuildPayrollExportRowsAggregatesToEmployeeJobLocationGrain,
     testJoinLaborRowsUsesTimeEntryFallbackForJobAndLocation,
     testNormalizeAnalyticsLaborRowPrefersNestedJobFieldsOverObjectValue,
+    testTimeEntryRowsCanPreserveMultipleJobsForOneEmployee,
+    testAppliesEmployeeGroupedAnalyticsTotalsAcrossTimeEntryJobSplits,
     testParseCsvHandlesQuotedFields,
     testCompareRowsDetectsMissingAndMismatches,
     testBuildStableKeyPrefersEmployeeIdOverToastGuid,

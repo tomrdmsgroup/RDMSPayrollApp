@@ -213,10 +213,121 @@ function testNormalizeAnalyticsLaborRowPrefersNestedJobFieldsOverObjectValue() {
   assert.notEqual(normalized.job_name, '[object Object]');
 }
 
+function testTimeEntryRowsCanPreserveMultipleJobsForOneEmployee() {
+  const employeeByKey = new Map([
+    ['e-9', { employee_id: 'E-9', employee_name: 'Riley Fox', external_employee_id: '409' }],
+  ]);
+  const timeEntries = [
+    {
+      employeeGuid: 'E-9',
+      jobName: 'Server',
+      jobCode: 'S-1',
+      locationName: 'Barrio',
+      locationCode: 'L-1',
+      regularHours: 6,
+    },
+    {
+      employeeGuid: 'E-9',
+      jobName: 'Bartender',
+      jobCode: 'B-1',
+      locationName: 'Barrio',
+      locationCode: 'L-1',
+      regularHours: 4,
+    },
+  ];
+
+  const detail = __test.buildExportShapedRowsFromTimeEntries({
+    timeEntryRows: timeEntries,
+    employeeByKey,
+    fallbackLocationName: 'Barrio',
+    fallbackLocationCode: 'L-1',
+    periodStart: '2026-03-01',
+    periodEnd: '2026-03-07',
+  });
+  const rows = __test.buildPayrollExportRows(detail, 'L-1', { includeSourceAudit: true });
+  assert.equal(rows.rows.length, 2, 'time entry row grain should keep per-job splits');
+  const server = rows.rows.find((r) => r['Job Title'] === 'Server');
+  const bartender = rows.rows.find((r) => r['Job Title'] === 'Bartender');
+  assert.ok(server);
+  assert.ok(bartender);
+  assert.equal(rows.rowSourceAudit[0].field_sources.job_title.source, 'toast_standard_time_entries');
+}
+
+function testAppliesEmployeeGroupedAnalyticsTotalsAcrossTimeEntryJobSplits() {
+  const detailRows = [
+    {
+      employee_id: 'E-7',
+      external_employee_id: '507',
+      employee_name: 'Devin Park',
+      toast_employee_id: 'E-7',
+      export_employee_id: '507',
+      job_name: 'Cook',
+      job_code: 'C-1',
+      location_display_name: 'Barrio',
+      location_code: 'L-1',
+      regular_hours: 8,
+      overtime_hours: 0,
+      regular_pay: 0,
+      overtime_pay: 0,
+      total_pay: 0,
+      declared_tips: 0,
+      non_cash_tips: 0,
+      __field_sources: {},
+    },
+    {
+      employee_id: 'E-7',
+      external_employee_id: '507',
+      employee_name: 'Devin Park',
+      toast_employee_id: 'E-7',
+      export_employee_id: '507',
+      job_name: 'Dish',
+      job_code: 'D-1',
+      location_display_name: 'Barrio',
+      location_code: 'L-1',
+      regular_hours: 2,
+      overtime_hours: 0,
+      regular_pay: 0,
+      overtime_pay: 0,
+      total_pay: 0,
+      declared_tips: 0,
+      non_cash_tips: 0,
+      __field_sources: {},
+    },
+  ];
+
+  const analyticsTotals = __test.buildEmployeeAnalyticsTotalsIndex([
+    {
+      employee_id: 'E-7',
+      external_employee_id: '507',
+      regular_hours: 10,
+      overtime_hours: 0,
+      regular_pay: 200,
+      overtime_pay: 0,
+      total_pay: 200,
+      declared_tips: 40,
+      non_cash_tips: 10,
+    },
+  ]);
+
+  __test.applyAnalyticsTotalsToTimeEntryRows(detailRows, analyticsTotals);
+
+  const rows = __test.buildPayrollExportRows(detailRows, 'L-1');
+  assert.equal(rows.length, 2);
+  const cookRow = rows.find((r) => r['Job Title'] === 'Cook');
+  const dishRow = rows.find((r) => r['Job Title'] === 'Dish');
+  assert.equal(cookRow['Regular Hours'], 8);
+  assert.equal(dishRow['Regular Hours'], 2);
+  assert.equal(cookRow['Regular Pay'], 160);
+  assert.equal(dishRow['Regular Pay'], 40);
+  assert.equal(cookRow['Total Pay'] + dishRow['Total Pay'], 200);
+}
+
 module.exports = {
   testNormalizeEmployeeIdentityUsesFallbackMappings,
   testJoinAndBuildPayrollExportRowsAggregatesToEmployeeJobLocationGrain,
   testJoinLaborRowsUsesTimeEntryFallbackForJobAndLocation,
   testBuildPayrollExportRowsGroupsByPayrollEmployeeIdBeforeGuid,
   testNormalizeAnalyticsLaborRowPrefersNestedJobFieldsOverObjectValue,
+  testTimeEntryRowsCanPreserveMultipleJobsForOneEmployee,
+  testAppliesEmployeeGroupedAnalyticsTotalsAcrossTimeEntryJobSplits,
 };
