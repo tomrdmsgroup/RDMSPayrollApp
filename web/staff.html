@@ -1,4 +1,5 @@
 <!doctype html>
+
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -119,7 +120,6 @@
       .tab.active {
         background: #111111;
         border-color: #111111;
-        color: var(--text);
         color: #ffffff;
       }
       .page {
@@ -395,8 +395,6 @@
       .debugSectionBody {
         padding: 0 12px 12px;
       }
-
-      /* Better readability for long definitions */
       .defClamp {
         display: -webkit-box;
         -webkit-box-orient: vertical;
@@ -405,11 +403,9 @@
         line-height: 1.35;
         max-height: 5.4em;
       }
-
       .defTip {
         position: relative;
       }
-
       .defTip:hover::after {
         content: attr(data-full);
         position: absolute;
@@ -426,7 +422,6 @@
         z-index: 50;
         white-space: normal;
       }
-
       .defTip:hover::before {
         content: "";
         position: absolute;
@@ -437,7 +432,6 @@
         border-bottom-color: #ffffff;
         z-index: 51;
       }
-
       select:focus,
       .input:focus,
       .btn:focus-visible,
@@ -445,7 +439,6 @@
         border-color: rgba(75, 85, 99, 0.45);
         box-shadow: 0 0 0 3px var(--focus-ring);
       }
-
     </style>
   </head>
   <body>
@@ -453,1685 +446,1784 @@
       <div class="topbar">
         <div class="brand">RDMS Payroll Validation</div>
 
-        <div class="center">
-          <div class="location">
-            <select id="locationSelect">
-              <option value="">Select a location...</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="userbox">
-          <span id="userLabel">Checking login...</span>
-          <button class="btn" id="logoutBtn" type="button">Logout</button>
-        </div>
+```
+    <div class="center">
+      <div class="location">
+        <select id="locationSelect">
+          <option value="">Select a location...</option>
+        </select>
       </div>
-
-      <div class="tabs" id="tabs">
-        <div class="tab active" data-tab="confirmations">Client Info Confirmations</div>
-        <div class="tab" data-tab="rules">Payroll Validation Rules</div>
-        <div class="tab" data-tab="outcome">Pay Period Validation Outcome</div>
-        <div class="tab" data-tab="toastOriginal">Toast Pay Period Data - Original</div>
-        <div class="tab" data-tab="excluded">Excluded Staff</div>
-        <div class="tab" data-tab="reports">RDMS Manual Reporting</div>
-      </div>
-
-      <div class="page" id="page">
-        <div class="pagetitle">
-          <div>
-            <h1 id="pageTitle">Client Info Confirmations</h1>
-            <p class="sub" id="pageSub">Pick a location to see every required field in one place.</p>
-          </div>
-        </div>
-
-        <div class="content" id="content">
-          <div class="loading">Select a location to load data.</div>
-        </div>
-      </div>
-
-      <div class="late" id="lateNotice"></div>
     </div>
 
-    <script>
-      function escapeHtml(s) {
-        return String(s || "")
-          .replaceAll("&", "&amp;")
-          .replaceAll("<", "&lt;")
-          .replaceAll(">", "&gt;")
-          .replaceAll('"', "&quot;")
-          .replaceAll("'", "&#039;");
-      }
+    <div class="userbox">
+      <span id="userLabel">Checking login...</span>
+      <button class="btn" id="logoutBtn" type="button">Logout</button>
+    </div>
+  </div>
 
-      function escapeAttr(s) {
-        return escapeHtml(s).replaceAll("`", "&#096;");
-      }
+  <div class="tabs" id="tabs">
+    <div class="tab active" data-tab="confirmations">Client Info Confirmations</div>
+    <div class="tab" data-tab="rules">Payroll Validation Rules</div>
+    <div class="tab" data-tab="outcome">Pay Period Validation Outcome</div>
+    <div class="tab" data-tab="toastOriginal">Toast Pay Period Data - Original</div>
+    <div class="tab" data-tab="excluded">Excluded Staff</div>
+    <div class="tab" data-tab="reports">RDMS Manual Reporting</div>
+  </div>
 
-      const state = {
-        tab: "confirmations",
-        locations: [],
-        recap: null,
-        rules: null,
-        rulesLocationName: null,
-        excluded: [],
-        excludedLocationName: null,
-        employeeSearchResults: [],
-        selectedSearchEmployeeId: null,
-        excludedSearchQuery: "",
-        excludedDraftReason: "",
-        excludedDraftNote: "",
-        outcomeSelector: null,
-        outcomeSelectionBucket: "",
-        outcomeSelectionPriorRecordId: "",
-        outcomeResult: null,
-        outcomeRunError: "",
-        outcomeRunning: false,
-        toastOriginalSelector: null,
-        toastOriginalSelectionBucket: "",
-        toastOriginalSelectionPriorRecordId: "",
-        toastOriginalData: null,
-        toastOriginalDebugData: null,
-        toastOriginalLoadError: "",
-        toastOriginalLoading: false,
-        toastOriginalDebugLoading: false,
-        toastOriginalCsvUploadBusy: false,
-        toastOriginalCsvUploadError: "",
-        toastOriginalCsvBaseline: null,
-        toastOriginalComparison: null,
-      };
+  <div class="page" id="page">
+    <div class="pagetitle">
+      <div>
+        <h1 id="pageTitle">Client Info Confirmations</h1>
+        <p class="sub" id="pageSub">Pick a location to see every required field in one place.</p>
+      </div>
+    </div>
 
-      function setActiveTab(tab) {
-        state.tab = tab;
-        document.querySelectorAll(".tab").forEach((el) => {
-          el.classList.toggle("active", el.dataset.tab === tab);
-        });
+    <div class="content" id="content">
+      <div class="loading">Select a location to load data.</div>
+    </div>
+  </div>
 
-        const titleMap = {
-          confirmations: "Client Info Confirmations",
-          rules: "Payroll Validation Rules",
-          outcome: "Pay Period Validation Outcome",
-          toastOriginal: "Toast Pay Period Data - Original",
-          excluded: "Excluded Staff",
-          reports: "RDMS Manual Reporting",
-        };
+  <div class="late" id="lateNotice"></div>
+</div>
 
-        document.getElementById("pageTitle").textContent = titleMap[tab] || "RDMS Payroll Validation";
-        document.getElementById("lateNotice").style.display = "none";
+<script>
+  function escapeHtml(s) {
+    return String(s || "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
 
-        if (tab === "confirmations") {
-          document.getElementById("pageSub").textContent = "Pick a location to see every required field in one place.";
-          renderConfirmations();
-          return;
-        }
+  function escapeAttr(s) {
+    return escapeHtml(s).replaceAll("`", "&#096;");
+  }
 
-        if (tab === "rules") {
-          document.getElementById("pageSub").textContent = "Control which payroll validation rules are live for this location.";
-          loadRulesForSelected();
-          return;
-        }
+  const state = {
+    tab: "confirmations",
+    locations: [],
+    recap: null,
+    rules: null,
+    rulesLocationName: null,
+    excluded: [],
+    excludedLocationName: null,
+    employeeSearchResults: [],
+    selectedSearchEmployeeId: null,
+    excludedSearchQuery: "",
+    excludedDraftReason: "",
+    excludedDraftNote: "",
+    outcomeSelector: null,
+    outcomeSelectionBucket: "",
+    outcomeSelectionPriorRecordId: "",
+    outcomeResult: null,
+    outcomeRunError: "",
+    outcomeRunning: false,
+    toastOriginalSelector: null,
+    toastOriginalSelectionBucket: "",
+    toastOriginalSelectionPriorRecordId: "",
+    toastOriginalData: null,
+    toastOriginalDebugData: null,
+    toastOriginalLoadError: "",
+    toastOriginalLoading: false,
+    toastOriginalDebugLoading: false,
+    toastOriginalCsvUploadBusy: false,
+    toastOriginalCsvUploadError: "",
+    toastOriginalCsvBaseline: null,
+    toastOriginalComparison: null,
+  };
 
-        if (tab === "excluded") {
-          document.getElementById("pageSub").textContent =
-            "Manage a short list of staff to skip or handle differently in payroll validation.";
-          loadExcludedForSelected();
-          return;
-        }
+  function setActiveTab(tab) {
+    state.tab = tab;
+    document.querySelectorAll(".tab").forEach((el) => {
+      el.classList.toggle("active", el.dataset.tab === tab);
+    });
 
-        if (tab === "outcome") {
-          document.getElementById("pageSub").textContent =
-            "Run payroll validation for a selected pay period and review the outcome.";
-          loadOutcomeSelectorForSelected();
-          return;
-        }
+    const titleMap = {
+      confirmations: "Client Info Confirmations",
+      rules: "Payroll Validation Rules",
+      outcome: "Pay Period Validation Outcome",
+      toastOriginal: "Toast Pay Period Data - Original",
+      excluded: "Excluded Staff",
+      reports: "RDMS Manual Reporting",
+    };
 
-        if (tab === "toastOriginal") {
-          document.getElementById("pageSub").textContent =
-            "Audit API-derived original rows and optional uploaded Toast Payroll Export CSV baseline.";
-          loadToastOriginalSelectorForSelected();
-          return;
-        }
+    document.getElementById("pageTitle").textContent = titleMap[tab] || "RDMS Payroll Validation";
+    document.getElementById("lateNotice").style.display = "none";
 
-        document.getElementById("pageSub").textContent = "Coming soon.";
-        document.getElementById("content").innerHTML = "<div class='muted'>Coming soon.</div>";
-      }
+    if (tab === "confirmations") {
+      document.getElementById("pageSub").textContent = "Pick a location to see every required field in one place.";
+      renderConfirmations();
+      return;
+    }
 
-      async function apiGet(p) {
-        const resp = await fetch(p, { credentials: "include" });
-        const body = await resp.json().catch(() => ({}));
-        return { resp, body };
-      }
+    if (tab === "rules") {
+      document.getElementById("pageSub").textContent = "Control which payroll validation rules are live for this location.";
+      loadRulesForSelected();
+      return;
+    }
 
-      async function apiPut(p, payload) {
-        const resp = await fetch(p, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify(payload || {}),
-        });
-        const body = await resp.json().catch(() => ({}));
-        return { resp, body };
-      }
+    if (tab === "excluded") {
+      document.getElementById("pageSub").textContent =
+        "Manage a short list of staff to skip or handle differently in payroll validation.";
+      loadExcludedForSelected();
+      return;
+    }
 
-      async function apiPost(p, payload) {
-        const resp = await fetch(p, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify(payload || {}),
-        });
-        const body = await resp.json().catch(() => ({}));
-        return { resp, body };
-      }
+    if (tab === "outcome") {
+      document.getElementById("pageSub").textContent =
+        "Run payroll validation for a selected pay period and review the outcome.";
+      loadOutcomeSelectorForSelected();
+      return;
+    }
 
-      async function apiDelete(p) {
-        const resp = await fetch(p, {
-          method: "DELETE",
-          credentials: "include",
-        });
-        const body = await resp.json().catch(() => ({}));
-        return { resp, body };
-      }
+    if (tab === "toastOriginal") {
+      document.getElementById("pageSub").textContent =
+        "Audit API-derived original rows and optional uploaded Toast Payroll Export CSV baseline.";
+      loadToastOriginalSelectorForSelected();
+      return;
+    }
 
-      async function ensureLoggedIn() {
-        const { resp, body } = await apiGet("/auth/me");
-        if (!resp.ok || !body.user) {
-          window.location.href = "/auth/google";
-          return;
-        }
-        document.getElementById("userLabel").textContent = `${body.user.email} (${body.user.role})`;
-      }
+    document.getElementById("pageSub").textContent = "Coming soon.";
+    document.getElementById("content").innerHTML = "<div class='muted'>Coming soon.</div>";
+  }
 
-      async function loadLocations() {
-        const sel = document.getElementById("locationSelect");
-        const { resp, body } = await apiGet("/staff/locations");
-        if (!resp.ok) {
-          sel.innerHTML = `<option value="">Error loading locations</option>`;
-          return;
-        }
-        const locations = Array.isArray(body.locations) ? body.locations : [];
-        state.locations = locations;
+  async function apiGet(p) {
+    const resp = await fetch(p, { credentials: "include" });
+    const body = await resp.json().catch(() => ({}));
+    return { resp, body };
+  }
 
-        const opts = ["<option value=\"\">Select a location...</option>"]
-          .concat(locations.map((n) => `<option value="${escapeAttr(n)}">${escapeHtml(n)}</option>`));
-        sel.innerHTML = opts.join("");
-      }
+  async function apiPut(p, payload) {
+    const resp = await fetch(p, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(payload || {}),
+    });
+    const body = await resp.json().catch(() => ({}));
+    return { resp, body };
+  }
 
-      function pill(text, klass) {
-        return `<span class="pill ${klass}">${escapeHtml(text)}</span>`;
-      }
+  async function apiPost(p, payload) {
+    const resp = await fetch(p, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(payload || {}),
+    });
+    const body = await resp.json().catch(() => ({}));
+    return { resp, body };
+  }
 
-      function truthyYesNo(val) {
-        if (typeof val === "boolean") return val ? "YES" : "NO";
-        if (val === null || val === undefined) return "";
-        const s = String(val).trim().toLowerCase();
-        if (s === "true" || s === "yes" || s === "y" || s === "1") return "YES";
-        if (s === "false" || s === "no" || s === "n" || s === "0") return "NO";
-        return String(val);
-      }
+  async function apiDelete(p) {
+    const resp = await fetch(p, {
+      method: "DELETE",
+      credentials: "include",
+    });
+    const body = await resp.json().catch(() => ({}));
+    return { resp, body };
+  }
 
-      function valStatus(v) {
-        if (v === null || v === undefined) return { status: "MISSING", klass: "bad", detail: "" };
+  async function ensureLoggedIn() {
+    const { resp, body } = await apiGet("/auth/me");
+    if (!resp.ok || !body.user) {
+      window.location.href = "/auth/google";
+      return;
+    }
+    document.getElementById("userLabel").textContent = `${body.user.email} (${body.user.role})`;
+  }
 
-        if (Array.isArray(v)) {
-          const empty = v.length === 0 || v.every((x) => x === null || x === undefined || String(x).trim() === "");
-          if (empty) return { status: "MISSING", klass: "bad", detail: "" };
-          return { status: "OK", klass: "ok", detail: v.join(", ") };
-        }
+  async function loadLocations() {
+    const sel = document.getElementById("locationSelect");
+    const { resp, body } = await apiGet("/staff/locations");
+    if (!resp.ok) {
+      sel.innerHTML = `<option value="">Error loading locations</option>`;
+      return;
+    }
+    const locations = Array.isArray(body.locations) ? body.locations : [];
+    state.locations = locations;
 
-        const s = String(v).trim();
-        if (!s) return { status: "MISSING", klass: "bad", detail: "" };
-        return { status: "OK", klass: "ok", detail: s };
-      }
+    const opts = ["<option value=\"\">Select a location...</option>"]
+      .concat(locations.map((n) => `<option value="${escapeAttr(n)}">${escapeHtml(n)}</option>`));
+    sel.innerHTML = opts.join("");
+  }
 
-      function fmtDateRange(startYmd, endYmd) {
-        if (!startYmd || !endYmd) return "";
-        return `${startYmd} to ${endYmd}`;
-      }
+  function pill(text, klass) {
+    return `<span class="pill ${klass}">${escapeHtml(text)}</span>`;
+  }
 
-      function displayValue(value) {
-        if (value === null || value === undefined) return "";
-        if (Array.isArray(value)) return value.join(", ");
-        return String(value);
-      }
+  function truthyYesNo(val) {
+    if (typeof val === "boolean") return val ? "YES" : "NO";
+    if (val === null || val === undefined) return "";
+    const s = String(val).trim().toLowerCase();
+    if (s === "true" || s === "yes" || s === "y" || s === "1") return "YES";
+    if (s === "false" || s === "no" || s === "n" || s === "0") return "NO";
+    return String(val);
+  }
 
-      function renderFriendlyRows(rows) {
-        return rows
-          .map((row) => {
-            const { status, klass, detail } = valStatus(row.value);
-            const shownValue = detail || "Missing";
-            return `
-              <tr>
-                <td style="width:260px;">${escapeHtml(row.label)}</td>
-                <td style="width:120px;">${pill(status, klass)}</td>
-                <td>${escapeHtml(shownValue)}</td>
-                <td style="width:280px;"><span class="sourceNote">Source: ${escapeHtml(row.source)}</span></td>
-              </tr>
-            `;
-          })
-          .join("");
-      }
+  function valStatus(v) {
+    if (v === null || v === undefined) return { status: "MISSING", klass: "bad", detail: "" };
 
-      function renderConfirmations() {
-        const content = document.getElementById("content");
-        const lateNotice = document.getElementById("lateNotice");
-        lateNotice.style.display = "none";
-        lateNotice.textContent = "";
+    if (Array.isArray(v)) {
+      const empty = v.length === 0 || v.every((x) => x === null || x === undefined || String(x).trim() === "");
+      if (empty) return { status: "MISSING", klass: "bad", detail: "" };
+      return { status: "OK", klass: "ok", detail: v.join(", ") };
+    }
 
-        if (!state.recap) {
-          content.innerHTML = "<div class='loading'>Select a location to load data.</div>";
-          return;
-        }
+    const s = String(v).trim();
+    if (!s) return { status: "MISSING", klass: "bad", detail: "" };
+    return { status: "OK", klass: "ok", detail: s };
+  }
 
-        const r = state.recap;
-        const p = r.current_pay_period || {};
+  function fmtDateRange(startYmd, endYmd) {
+    if (!startYmd || !endYmd) return "";
+    return `${startYmd} to ${endYmd}`;
+  }
 
-        const isLate = !!p.is_late;
-        if (isLate) {
-          lateNotice.style.display = "block";
-          lateNotice.textContent = p.late_message || "Late warning";
-        }
+  function displayValue(value) {
+    if (value === null || value === undefined) return "";
+    if (Array.isArray(value)) return value.join(", ");
+    return String(value);
+  }
 
-        const payPeriodRows = [
-          { label: "Pay Period Start", value: p.start_date, source: "Payroll Calendar" },
-          { label: "Pay Period End", value: p.end_date, source: "Payroll Calendar" },
-          { label: "Validation date", value: p.validation_date, source: "Payroll Calendar" },
-          { label: "Submit date", value: p.submit_date, source: "Payroll Calendar" },
-          { label: "Check date", value: p.check_date, source: "Payroll Calendar" },
-          { label: "Validation Cutoff", value: p.cutoff_local, source: "Derived from calendar date + validation end time + time zone" },
-          { label: "Validation cutoff (UTC)", value: p.cutoff_utc, source: "Derived from calendar date + validation end time + time zone" },
-          { label: "Late Status", value: truthyYesNo(p.is_late), source: "Derived from calendar date + validation end time + time zone" },
-          { label: "Pay Period Range", value: fmtDateRange(p.start_date, p.end_date), source: "Payroll Calendar" },
-        ];
-
-        const configRows = [
-          { label: "Location Name", value: r.location_name, source: "Client Vitals" },
-          { label: "Payroll Calendar", value: r.calendar_name, source: "Client Vitals" },
-          { label: "App Active", value: truthyYesNo(r.app_active), source: "Client Vitals" },
-          { label: "Time zone", value: r.time_zone, source: "Client Vitals" },
-          { label: "Validation End Time", value: r.validation_end_time_next_day, source: "Client Vitals" },
-          { label: "Payroll company", value: r.payroll_company, source: "Client Vitals" },
-          { label: "POS type", value: r.pos_type, source: "Client Vitals" },
-          { label: "Payroll project email", value: r.payroll_project_email, source: "Client Vitals" },
-          { label: "Tip report type", value: r.tip_report_type, source: "Client Vitals" },
-          { label: "Payroll company code", value: r.payroll_company_code, source: "Client Vitals" },
-          { label: "Pay frequency", value: r.pay_frequency, source: "Client Vitals" },
-          { label: "Preview Contacts", value: r.preview_recipients_summary, source: "Preview Contact Emails" },
-          { label: "Preview contact email count", value: displayValue(r.preview_recipients_count), source: "Preview Contact Emails" },
-          { label: "Asana Project GUID", value: r.asana_project_guid, source: "Airtable - Client Vitals" },
-          { label: "Asana Inbox Section GUID", value: r.asana_inbox_section_guid, source: "Airtable - Client Vitals" },
-        ];
-
-        const itemRows = [];
-        const items = Array.isArray(r.items) ? r.items : [];
-        items.forEach((it) => {
-          const label = (it && it.name ? String(it.name).trim() : "");
-          const value = it ? (it.detail || it.status || null) : null;
-          if (!label) return;
-          itemRows.push({
-            label,
-            value,
-            source: "Asana Setup",
-          });
-        });
-
-        content.innerHTML = `
-          <div class="sectionTitle">Pay Period</div>
-          <p class="sectionHelp">Use this section first. It shows the exact payroll period and validation timing for this location.</p>
-          <table>
-            <thead>
-              <tr>
-                <th>Item</th>
-                <th>Status</th>
-                <th>Value</th>
-                <th>Where to fix</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${renderFriendlyRows(payPeriodRows)}
-            </tbody>
-          </table>
-
-          <div class="sectionTitle">Setup / Configuration Confirmations</div>
-          <p class="sectionHelp">Review this section second. Missing items here should be fixed in the source listed in the right column.</p>
-          <table>
-            <thead>
-              <tr>
-                <th>Item</th>
-                <th>Status</th>
-                <th>Value</th>
-                <th>Where to fix</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${renderFriendlyRows(configRows)}
-              ${renderFriendlyRows(itemRows)}
-            </tbody>
-          </table>
-          <div class="muted" style="margin-top:10px;">
-            Goal: help payroll staff quickly understand what is set up, what is missing, and where to fix it.
-          </div>
-        `;
-      }
-
-      function yesNoSelect(value, id) {
-        const v = (value || "NO").toUpperCase() === "YES" ? "YES" : "NO";
+  function renderFriendlyRows(rows) {
+    return rows
+      .map((row) => {
+        const { status, klass, detail } = valStatus(row.value);
+        const shownValue = detail || "Missing";
         return `
-          <select data-field="${id}">
-            <option value="YES" ${v === "YES" ? "selected" : ""}>YES</option>
-            <option value="NO" ${v === "NO" ? "selected" : ""}>NO</option>
-          </select>
+          <tr>
+            <td style="width:260px;">${escapeHtml(row.label)}</td>
+            <td style="width:120px;">${pill(status, klass)}</td>
+            <td>${escapeHtml(shownValue)}</td>
+            <td style="width:280px;"><span class="sourceNote">Source: ${escapeHtml(row.source)}</span></td>
+          </tr>
         `;
-      }
+      })
+      .join("");
+  }
 
-      function normalizeYesNo(flag) {
-        return flag ? "YES" : "NO";
-      }
+  function renderConfirmations() {
+    const content = document.getElementById("content");
+    const lateNotice = document.getElementById("lateNotice");
+    lateNotice.style.display = "none";
+    lateNotice.textContent = "";
 
-      async function loadRulesForSelected() {
-        const content = document.getElementById("content");
-        const sel = document.getElementById("locationSelect");
-        const name = sel.value;
+    if (!state.recap) {
+      content.innerHTML = "<div class='loading'>Select a location to load data.</div>";
+      return;
+    }
 
-        state.rules = null;
-        state.rulesLocationName = name || null;
+    const r = state.recap;
+    const p = r.current_pay_period || {};
 
-        if (!name) {
-          content.innerHTML = "<div class='loading'>Select a location to load rules.</div>";
-          return;
-        }
+    const isLate = !!p.is_late;
+    if (isLate) {
+      lateNotice.style.display = "block";
+      lateNotice.textContent = p.late_message || "Late warning";
+    }
 
-        content.innerHTML = "<div class='loading'>Loading rules...</div>";
+    const payPeriodRows = [
+      { label: "Pay Period Start", value: p.start_date, source: "Payroll Calendar" },
+      { label: "Pay Period End", value: p.end_date, source: "Payroll Calendar" },
+      { label: "Validation date", value: p.validation_date, source: "Payroll Calendar" },
+      { label: "Submit date", value: p.submit_date, source: "Payroll Calendar" },
+      { label: "Check date", value: p.check_date, source: "Payroll Calendar" },
+      { label: "Validation Cutoff", value: p.cutoff_local, source: "Derived from calendar date + validation end time + time zone" },
+      { label: "Validation cutoff (UTC)", value: p.cutoff_utc, source: "Derived from calendar date + validation end time + time zone" },
+      { label: "Late Status", value: truthyYesNo(p.is_late), source: "Derived from calendar date + validation end time + time zone" },
+      { label: "Pay Period Range", value: fmtDateRange(p.start_date, p.end_date), source: "Payroll Calendar" },
+    ];
 
-        const q = encodeURIComponent(name);
-        const { resp, body } = await apiGet(`/staff/rules?locationName=${q}`);
-        if (!resp.ok) {
-          content.innerHTML = `<div class="muted">Rules error: ${body.error || "unknown_error"}</div>`;
-          return;
-        }
+    const configRows = [
+      { label: "Location Name", value: r.location_name, source: "Client Vitals" },
+      { label: "Payroll Calendar", value: r.calendar_name, source: "Client Vitals" },
+      { label: "App Active", value: truthyYesNo(r.app_active), source: "Client Vitals" },
+      { label: "Time zone", value: r.time_zone, source: "Client Vitals" },
+      { label: "Validation End Time", value: r.validation_end_time_next_day, source: "Client Vitals" },
+      { label: "Payroll company", value: r.payroll_company, source: "Client Vitals" },
+      { label: "POS type", value: r.pos_type, source: "Client Vitals" },
+      { label: "Payroll project email", value: r.payroll_project_email, source: "Client Vitals" },
+      { label: "Tip report type", value: r.tip_report_type, source: "Client Vitals" },
+      { label: "Payroll company code", value: r.payroll_company_code, source: "Client Vitals" },
+      { label: "Pay frequency", value: r.pay_frequency, source: "Client Vitals" },
+      { label: "Preview Contacts", value: r.preview_recipients_summary, source: "Preview Contact Emails" },
+      { label: "Preview contact email count", value: displayValue(r.preview_recipients_count), source: "Preview Contact Emails" },
+      { label: "Asana Project GUID", value: r.asana_project_guid, source: "Airtable - Client Vitals" },
+      { label: "Asana Inbox Section GUID", value: r.asana_inbox_section_guid, source: "Airtable - Client Vitals" },
+    ];
 
-        state.rules = Array.isArray(body.rules) ? body.rules : [];
-        renderRules();
-      }
+    const itemRows = [];
+    const items = Array.isArray(r.items) ? r.items : [];
+    items.forEach((it) => {
+      const label = (it && it.name ? String(it.name).trim() : "");
+      const value = it ? it.detail || it.status || null : null;
+      if (!label) return;
+      itemRows.push({
+        label,
+        value,
+        source: "Asana Setup",
+      });
+    });
 
-      function renderRules() {
-        const content = document.getElementById("content");
+    content.innerHTML = `
+      <div class="sectionTitle">Pay Period</div>
+      <p class="sectionHelp">Use this section first. It shows the exact payroll period and validation timing for this location.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th>Status</th>
+            <th>Value</th>
+            <th>Where to fix</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${renderFriendlyRows(payPeriodRows)}
+        </tbody>
+      </table>
 
-        if (!state.rulesLocationName) {
-          content.innerHTML = "<div class='loading'>Select a location to load rules.</div>";
-          return;
-        }
+      <div class="sectionTitle">Setup / Configuration Confirmations</div>
+      <p class="sectionHelp">Review this section second. Missing items here should be fixed in the source listed in the right column.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th>Status</th>
+            <th>Value</th>
+            <th>Where to fix</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${renderFriendlyRows(configRows)}
+          ${renderFriendlyRows(itemRows)}
+        </tbody>
+      </table>
+      <div class="muted" style="margin-top:10px;">
+        Goal: help payroll staff quickly understand what is set up, what is missing, and where to fix it.
+      </div>
+    `;
+  }
 
-        if (!state.rules) {
-          content.innerHTML = "<div class='loading'>Loading rules...</div>";
-          return;
-        }
+  function yesNoSelect(value, id) {
+    const v = (value || "NO").toUpperCase() === "YES" ? "YES" : "NO";
+    return `
+      <select data-field="${id}">
+        <option value="YES" ${v === "YES" ? "selected" : ""}>YES</option>
+        <option value="NO" ${v === "NO" ? "selected" : ""}>NO</option>
+      </select>
+    `;
+  }
 
-        const header = `
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px;">
-            <div class="muted">Location: <b style="color:var(--text)">${escapeHtml(state.rulesLocationName)}</b></div>
-            <div style="display:flex;gap:10px;align-items:center;">
-              <button class="btn primary" id="saveAllBtn" type="button">Save all</button>
-              <button class="btn" id="reloadRulesBtn" type="button">Reload</button>
-            </div>
-          </div>
-          <div class="helperPanel">
-            <p class="helperPanelTitle">Column quick guide</p>
-            <ul class="helperList">
-              <li><b>Active:</b> rule runs during payroll validation</li>
-              <li><b>Create Asana Task:</b> creates an Asana task when the rule is triggered</li>
-              <li><b>Create One Task Per Finding:</b> creates a separate task for each finding instead of grouping them</li>
-            </ul>
-          </div>
-        `;
+  function normalizeYesNo(flag) {
+    return flag ? "YES" : "NO";
+  }
 
-        const tableHead = `
-          <table>
-            <thead>
-              <tr>
-                <th style="width:140px;">Rule ID</th>
-                <th style="width:220px;">Rule Name</th>
-                <th style="width:170px;">Threshold / Setting</th>
-                <th>What it checks</th>
-                <th style="width:140px;">Active</th>
-                <th style="width:210px;">Create Asana Task</th>
-                <th style="width:230px;">Create One Task Per Finding</th>
-                <th style="width:120px;">Save</th>
-              </tr>
-            </thead>
-            <tbody>
-        `;
+  async function loadRulesForSelected() {
+    const content = document.getElementById("content");
+    const sel = document.getElementById("locationSelect");
+    const name = sel.value;
 
-        const rows = state.rules
-          .map((r) => {
-            const rid = escapeHtml(r.rule_id || "");
-            const rname = escapeHtml(r.rule_name || "");
-            const defRaw = String(r.definition || "");
-            const def = escapeHtml(defRaw);
-            const paramsRequired = !!r.params_required;
-            const paramsHint = escapeHtml(r.params_hint || "");
-            const paramsVal = r.params === null || r.params === undefined ? "" : String(r.params);
-            const paramsCell = paramsRequired
-              ? `<input class="input" data-field="params" placeholder="${paramsHint || "Enter value"}" value="${escapeAttr(paramsVal)}" />`
-              : `<span class="muted">No setting needed</span>`;
+    state.rules = null;
+    state.rulesLocationName = name || null;
 
-            const active = normalizeYesNo(!!r.active);
-            const internal = normalizeYesNo(!!r.internal_notification);
-            const oneTask = normalizeYesNo((r.asana_task_mode || "SUMMARY") === "PER_FINDING");
+    if (!name) {
+      content.innerHTML = "<div class='loading'>Select a location to load rules.</div>";
+      return;
+    }
 
-            return `
-              <tr data-rule-id="${rid}">
-                <td><span class="mono">${rid}</span></td>
-                <td>${rname}</td>
-                <td>${paramsCell}</td>
-                <td>
-                  <div class="defTip" data-full="${escapeAttr(defRaw)}">
-                    <div class="defClamp">${def}</div>
-                  </div>
-                </td>
-                <td>${yesNoSelect(active, "active")}</td>
-                <td>${yesNoSelect(internal, "internal_notification")}</td>
-                <td>${yesNoSelect(oneTask, "one_task_per_finding")}</td>
-                <td><button class="btn" data-action="save-row" type="button">Save</button></td>
-              </tr>
-            `;
-          })
-          .join("");
+    content.innerHTML = "<div class='loading'>Loading rules...</div>";
 
-        const tableFoot = `
-            </tbody>
-          </table>
-          <div class="muted" style="margin-top:10px;">
-            Defaults: Active YES, Internal Notification NO, One Task Per Finding NO.
-          </div>
-        `;
+    const q = encodeURIComponent(name);
+    const { resp, body } = await apiGet(`/staff/rules?locationName=${q}`);
+    if (!resp.ok) {
+      content.innerHTML = `<div class="muted">Rules error: ${body.error || "unknown_error"}</div>`;
+      return;
+    }
 
-        content.innerHTML = header + tableHead + rows + tableFoot;
+    state.rules = Array.isArray(body.rules) ? body.rules : [];
+    renderRules();
+  }
 
-        document.getElementById("saveAllBtn").addEventListener("click", saveAllRules);
-        document.getElementById("reloadRulesBtn").addEventListener("click", () => loadRulesForSelected());
+  function renderRules() {
+    const content = document.getElementById("content");
 
-        content.querySelectorAll("button[data-action='save-row']").forEach((btn) => {
-          btn.addEventListener("click", async (e) => {
-            const tr = e.target.closest("tr");
-            if (!tr) return;
-            await saveRuleRow(tr);
-          });
-        });
-      }
+    if (!state.rulesLocationName) {
+      content.innerHTML = "<div class='loading'>Select a location to load rules.</div>";
+      return;
+    }
 
-      function collectRowPayload(tr) {
-        const ruleId = tr.getAttribute("data-rule-id");
-        const getSelectVal = (field) => {
-          const sel = tr.querySelector(`select[data-field='${field}']`);
-          return sel ? sel.value : "NO";
-        };
+    if (!state.rules) {
+      content.innerHTML = "<div class='loading'>Loading rules...</div>";
+      return;
+    }
 
-        const paramsInput = tr.querySelector("input[data-field='params']");
-        const params = paramsInput ? paramsInput.value.trim() : null;
+    const header = `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px;">
+        <div class="muted">Location: <b style="color:var(--text)">${escapeHtml(state.rulesLocationName)}</b></div>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <button class="btn primary" id="saveAllBtn" type="button">Save all</button>
+          <button class="btn" id="reloadRulesBtn" type="button">Reload</button>
+        </div>
+      </div>
+      <div class="helperPanel">
+        <p class="helperPanelTitle">Column quick guide</p>
+        <ul class="helperList">
+          <li><b>Active:</b> rule runs during payroll validation</li>
+          <li><b>Create Asana Task:</b> creates an Asana task when the rule is triggered</li>
+          <li><b>Create One Task Per Finding:</b> creates a separate task for each finding instead of grouping them</li>
+        </ul>
+      </div>
+    `;
 
-        return {
-          rule_id: ruleId,
-          active: getSelectVal("active"),
-          internal_notification: getSelectVal("internal_notification"),
-          one_task_per_finding: getSelectVal("one_task_per_finding"),
-          params: params === "" ? null : params,
-        };
-      }
+    const tableHead = `
+      <table>
+        <thead>
+          <tr>
+            <th style="width:140px;">Rule ID</th>
+            <th style="width:220px;">Rule Name</th>
+            <th style="width:170px;">Threshold / Setting</th>
+            <th>What it checks</th>
+            <th style="width:140px;">Active</th>
+            <th style="width:210px;">Create Asana Task</th>
+            <th style="width:230px;">Create One Task Per Finding</th>
+            <th style="width:120px;">Save</th>
+          </tr>
+        </thead>
+        <tbody>
+    `;
 
-      async function saveRuleRow(tr) {
-        const btn = tr.querySelector("button[data-action='save-row']");
-        const original = btn.textContent;
-        btn.textContent = "Saving...";
-        btn.disabled = true;
+    const rows = state.rules
+      .map((r) => {
+        const rid = escapeHtml(r.rule_id || "");
+        const rname = escapeHtml(r.rule_name || "");
+        const defRaw = String(r.definition || "");
+        const def = escapeHtml(defRaw);
+        const paramsRequired = !!r.params_required;
+        const paramsHint = escapeHtml(r.params_hint || "");
+        const paramsVal = r.params === null || r.params === undefined ? "" : String(r.params);
+        const paramsCell = paramsRequired
+          ? `<input class="input" data-field="params" placeholder="${paramsHint || "Enter value"}" value="${escapeAttr(paramsVal)}" />`
+          : `<span class="muted">No setting needed</span>`;
 
-        try {
-          const payload = collectRowPayload(tr);
-          const q = encodeURIComponent(state.rulesLocationName);
-          const { resp, body } = await apiPut(`/staff/rules?locationName=${q}`, { rules: [payload] });
-          if (!resp.ok) {
-            alert(`Save failed: ${body.error || "unknown_error"}`);
-            return;
-          }
-          btn.textContent = "Saved";
-          setTimeout(() => {
-            btn.textContent = original;
-            btn.disabled = false;
-          }, 600);
-        } catch (e) {
-          alert(`Save failed: ${e.message || e}`);
-        } finally {
-          if (btn.textContent !== "Saved") {
-            btn.textContent = original;
-            btn.disabled = false;
-          }
-        }
-      }
-
-      async function saveAllRules() {
-        if (!state.rulesLocationName) return;
-        const content = document.getElementById("content");
-        const rows = Array.from(content.querySelectorAll("tr[data-rule-id]"));
-        const rules = rows.map(collectRowPayload);
-
-        const btn = document.getElementById("saveAllBtn");
-        const original = btn.textContent;
-        btn.textContent = "Saving...";
-        btn.disabled = true;
-
-        try {
-          const q = encodeURIComponent(state.rulesLocationName);
-          const { resp, body } = await apiPut(`/staff/rules?locationName=${q}`, { rules });
-          if (!resp.ok) {
-            alert(`Save failed: ${body.error || "unknown_error"}`);
-            return;
-          }
-          btn.textContent = "Saved";
-          setTimeout(() => {
-            btn.textContent = original;
-            btn.disabled = false;
-          }, 800);
-        } catch (e) {
-          alert(`Save failed: ${e.message || e}`);
-        } finally {
-          if (btn.textContent !== "Saved") {
-            btn.textContent = original;
-            btn.disabled = false;
-          }
-        }
-      }
-
-      async function loadExcludedForSelected() {
-        const content = document.getElementById("content");
-        const name = document.getElementById("locationSelect").value;
-        state.excluded = [];
-        state.excludedLocationName = name || null;
-        state.employeeSearchResults = [];
-        state.selectedSearchEmployeeId = null;
-        state.excludedSearchQuery = "";
-        state.excludedDraftReason = "";
-        state.excludedDraftNote = "";
-
-        if (!name) {
-          content.innerHTML = "<div class='loading'>Select a location to manage excluded staff.</div>";
-          return;
-        }
-
-        content.innerHTML = "<div class='loading'>Loading excluded staff...</div>";
-        const q = encodeURIComponent(name);
-        const { resp, body } = await apiGet(`/staff/excluded?locationName=${q}`);
-        if (!resp.ok) {
-          content.innerHTML = `<div class="muted">Excluded staff error: ${body.error || "unknown_error"}</div>`;
-          return;
-        }
-        state.excluded = Array.isArray(body.excluded) ? body.excluded : [];
-        renderExcludedTab();
-      }
-
-      function renderExcludedRows() {
-        if (!state.excluded.length) {
-          return `<div class="muted">No one is excluded yet for this location.</div>`;
-        }
+        const active = normalizeYesNo(!!r.active);
+        const internal = normalizeYesNo(!!r.internal_notification);
+        const oneTask = normalizeYesNo((r.asana_task_mode || "SUMMARY") === "PER_FINDING");
 
         return `
-          <table>
-            <thead>
-              <tr>
-                <th>Employee</th>
-                <th>Exclusion Reason / Note</th>
-                <th>Status</th>
-                <th style="width:150px;">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${state.excluded
-                .map((row) => {
-                  const name = row.employee_name || "Unknown";
-                  const emp = `${name} (${row.toast_employee_id || "n/a"})`;
-                  const reason = [row.reason, row.notes].filter(Boolean).join(" — ");
-                  const status = row.active ? "Active (skipped downstream)" : "Inactive";
-                  return `
-                    <tr data-excluded-id="${escapeAttr(row.id)}">
-                      <td>${escapeHtml(emp)}</td>
-                      <td>${escapeHtml(reason || "No note")}</td>
-                      <td>${escapeHtml(status)}</td>
-                      <td>
-                        <button class="btn" data-action="edit-excluded" type="button">Edit</button>
-                        <button class="btn" data-action="remove-excluded" type="button">Remove</button>
-                      </td>
-                    </tr>
-                  `;
-                })
-                .join("")}
-            </tbody>
-          </table>
-        `;
-      }
-
-      function renderSearchResults() {
-        if (!state.employeeSearchResults.length) {
-          return `<div class="muted" style="margin-top:8px;">Search by name or ID to find one employee.</div>`;
-        }
-
-        return `
-          <div class="searchResults">
-            ${state.employeeSearchResults
-              .map((emp) => {
-                const checked = state.selectedSearchEmployeeId === emp.employeeId ? "checked" : "";
-                return `
-                  <label class="searchItem">
-                    <input type="radio" name="excludedSearchChoice" value="${escapeAttr(emp.employeeId)}" ${checked} />
-                    <span>${escapeHtml(emp.employeeName)} <span class="muted">(${escapeHtml(emp.employeeId)})</span></span>
-                  </label>
-                `;
-              })
-              .join("")}
-          </div>
-        `;
-      }
-
-      function renderExcludedTab() {
-        const content = document.getElementById("content");
-        if (!state.excludedLocationName) {
-          content.innerHTML = "<div class='loading'>Select a location to manage excluded staff.</div>";
-          return;
-        }
-
-        content.innerHTML = `
-          <div class="stack">
-            <div class="panel">
-              <div class="sectionTitle" style="margin-top:0;">Currently Excluded Staff</div>
-              <p class="sectionHelp">These employees are skipped or handled differently in later payroll validation steps.</p>
-              ${renderExcludedRows()}
-            </div>
-
-            <div class="panel">
-              <div class="sectionTitle" style="margin-top:0;">Add Excluded Staff</div>
-              <p class="sectionHelp">Search for one employee, add a reason, then save.</p>
-              <div class="row">
-                <input class="input" id="excludedSearchInput" placeholder="Search Toast employee by name or ID" style="flex:1;min-width:260px;" />
-                <button class="btn" id="excludedSearchBtn" type="button">Search</button>
+          <tr data-rule-id="${rid}">
+            <td><span class="mono">${rid}</span></td>
+            <td>${rname}</td>
+            <td>${paramsCell}</td>
+            <td>
+              <div class="defTip" data-full="${escapeAttr(defRaw)}">
+                <div class="defClamp">${def}</div>
               </div>
-              ${renderSearchResults()}
-              <div class="row" style="margin-top:10px;">
-                <input class="input" id="excludedReasonInput" placeholder="Reason (required)" style="flex:1;min-width:220px;" value="${escapeAttr(state.excludedDraftReason)}" />
-                <input class="input" id="excludedNoteInput" placeholder="Note (optional)" style="flex:1;min-width:220px;" value="${escapeAttr(state.excludedDraftNote)}" />
-                <button class="btn primary" id="addExcludedBtn" type="button">Add</button>
-              </div>
-            </div>
-          </div>
+            </td>
+            <td>${yesNoSelect(active, "active")}</td>
+            <td>${yesNoSelect(internal, "internal_notification")}</td>
+            <td>${yesNoSelect(oneTask, "one_task_per_finding")}</td>
+            <td><button class="btn" data-action="save-row" type="button">Save</button></td>
+          </tr>
         `;
+      })
+      .join("");
 
-        const searchBtn = document.getElementById("excludedSearchBtn");
-        const addBtn = document.getElementById("addExcludedBtn");
-        const searchInput = document.getElementById("excludedSearchInput");
-        if (searchInput) searchInput.value = state.excludedSearchQuery;
-        searchBtn.addEventListener("click", searchEmployeesForExcluded);
-        addBtn.addEventListener("click", addSelectedExcludedStaff);
+    const tableFoot = `
+        </tbody>
+      </table>
+      <div class="muted" style="margin-top:10px;">
+        Defaults: Active YES, Internal Notification NO, One Task Per Finding NO.
+      </div>
+    `;
 
-        content.querySelectorAll("input[name='excludedSearchChoice']").forEach((el) => {
-          el.addEventListener("change", () => {
-            state.selectedSearchEmployeeId = el.value;
-          });
-        });
-        content.querySelectorAll("button[data-action='edit-excluded']").forEach((btn) => {
-          btn.addEventListener("click", onEditExcludedRow);
-        });
-        content.querySelectorAll("button[data-action='remove-excluded']").forEach((btn) => {
-          btn.addEventListener("click", onRemoveExcludedRow);
-        });
-      }
+    content.innerHTML = header + tableHead + rows + tableFoot;
 
-      async function searchEmployeesForExcluded() {
-        if (!state.excludedLocationName) return;
-        const input = document.getElementById("excludedSearchInput");
-        const q = (input && input.value ? input.value : "").trim();
-        state.excludedSearchQuery = q;
-        if (!q) {
-          alert("Enter a search term first.");
-          return;
-        }
+    document.getElementById("saveAllBtn").addEventListener("click", saveAllRules);
+    document.getElementById("reloadRulesBtn").addEventListener("click", () => loadRulesForSelected());
 
-        const query = new URLSearchParams({
-          locationName: state.excludedLocationName,
-          q,
-          limit: "12",
-        });
-        const { resp, body } = await apiGet(`/staff/toast-employees?${query.toString()}`);
-        if (!resp.ok) {
-          alert(`Employee search failed: ${body.error || "unknown_error"}`);
-          return;
-        }
-        state.employeeSearchResults = Array.isArray(body.employees) ? body.employees : [];
-        state.selectedSearchEmployeeId = state.employeeSearchResults[0]?.employeeId || null;
-        renderExcludedTab();
-      }
-
-      async function addSelectedExcludedStaff() {
-        if (!state.excludedLocationName) return;
-        const employeeId = state.selectedSearchEmployeeId;
-        const selected = state.employeeSearchResults.find((x) => x.employeeId === employeeId);
-        if (!selected) {
-          alert("Pick one employee from search results.");
-          return;
-        }
-
-        const reason = (document.getElementById("excludedReasonInput")?.value || "").trim();
-        const notes = (document.getElementById("excludedNoteInput")?.value || "").trim();
-        state.excludedDraftReason = reason;
-        state.excludedDraftNote = notes;
-        if (!reason) {
-          alert("Reason is required.");
-          return;
-        }
-
-        const { resp, body } = await apiPost("/staff/excluded", {
-          location_name: state.excludedLocationName,
-          toast_employee_id: selected.employeeId,
-          employee_name: selected.employeeName,
-          reason,
-          notes: notes || null,
-          active: true,
-        });
-        if (!resp.ok) {
-          alert(`Add failed: ${body.error || "unknown_error"}`);
-          return;
-        }
-        state.excludedDraftReason = "";
-        state.excludedDraftNote = "";
-        await loadExcludedForSelected();
-      }
-
-      async function onEditExcludedRow(e) {
-        const tr = e.target.closest("tr[data-excluded-id]");
+    content.querySelectorAll("button[data-action='save-row']").forEach((btn) => {
+      btn.addEventListener("click", async (e) => {
+        const tr = e.target.closest("tr");
         if (!tr) return;
-        const id = tr.getAttribute("data-excluded-id");
-        const row = state.excluded.find((x) => String(x.id) === String(id));
-        if (!row) return;
+        await saveRuleRow(tr);
+      });
+    });
+  }
 
-        const reason = window.prompt("Update exclusion reason:", row.reason || "");
-        if (reason === null) return;
-        const notes = window.prompt("Update note (optional):", row.notes || "");
-        if (notes === null) return;
-        const active = window.confirm("Keep this exclusion active?\nPress Cancel to mark inactive.");
+  function collectRowPayload(tr) {
+    const ruleId = tr.getAttribute("data-rule-id");
+    const getSelectVal = (field) => {
+      const sel = tr.querySelector(`select[data-field='${field}']`);
+      return sel ? sel.value : "NO";
+    };
 
-        const { resp, body } = await apiPut(`/staff/excluded/${encodeURIComponent(id)}`, {
-          reason: reason.trim(),
-          notes: notes.trim() || null,
-          active,
-        });
-        if (!resp.ok) {
-          alert(`Update failed: ${body.error || "unknown_error"}`);
-          return;
-        }
-        await loadExcludedForSelected();
+    const paramsInput = tr.querySelector("input[data-field='params']");
+    const params = paramsInput ? paramsInput.value.trim() : null;
+
+    return {
+      rule_id: ruleId,
+      active: getSelectVal("active"),
+      internal_notification: getSelectVal("internal_notification"),
+      one_task_per_finding: getSelectVal("one_task_per_finding"),
+      params: params === "" ? null : params,
+    };
+  }
+
+  async function saveRuleRow(tr) {
+    const btn = tr.querySelector("button[data-action='save-row']");
+    const original = btn.textContent;
+    btn.textContent = "Saving...";
+    btn.disabled = true;
+
+    try {
+      const payload = collectRowPayload(tr);
+      const q = encodeURIComponent(state.rulesLocationName);
+      const { resp, body } = await apiPut(`/staff/rules?locationName=${q}`, { rules: [payload] });
+      if (!resp.ok) {
+        alert(`Save failed: ${body.error || "unknown_error"}`);
+        return;
       }
-
-      async function onRemoveExcludedRow(e) {
-        const tr = e.target.closest("tr[data-excluded-id]");
-        if (!tr) return;
-        const id = tr.getAttribute("data-excluded-id");
-        const ok = window.confirm("Remove this staff member from active exclusions?");
-        if (!ok) return;
-        const { resp, body } = await apiDelete(`/staff/excluded/${encodeURIComponent(id)}`);
-        if (!resp.ok) {
-          alert(`Remove failed: ${body.error || "unknown_error"}`);
-          return;
-        }
-        await loadExcludedForSelected();
+      btn.textContent = "Saved";
+      setTimeout(() => {
+        btn.textContent = original;
+        btn.disabled = false;
+      }, 600);
+    } catch (e) {
+      alert(`Save failed: ${e.message || e}`);
+    } finally {
+      if (btn.textContent !== "Saved") {
+        btn.textContent = original;
+        btn.disabled = false;
       }
+    }
+  }
 
-      async function loadRecapForSelected() {
-        const sel = document.getElementById("locationSelect");
-        const name = sel.value;
-        state.recap = null;
-        renderConfirmations();
-        if (!name) return;
+  async function saveAllRules() {
+    if (!state.rulesLocationName) return;
+    const content = document.getElementById("content");
+    const rows = Array.from(content.querySelectorAll("tr[data-rule-id]"));
+    const rules = rows.map(collectRowPayload);
 
-        const q = encodeURIComponent(name);
-        const { resp, body } = await apiGet(`/staff/recap?locationName=${q}`);
-        if (!resp.ok) {
-          document.getElementById("content").innerHTML = `<div class="muted">Recap error: ${body.error || "unknown_error"}</div>`;
-          return;
-        }
-        state.recap = body.recap || null;
-        renderConfirmations();
+    const btn = document.getElementById("saveAllBtn");
+    const original = btn.textContent;
+    btn.textContent = "Saving...";
+    btn.disabled = true;
+
+    try {
+      const q = encodeURIComponent(state.rulesLocationName);
+      const { resp, body } = await apiPut(`/staff/rules?locationName=${q}`, { rules });
+      if (!resp.ok) {
+        alert(`Save failed: ${body.error || "unknown_error"}`);
+        return;
       }
-
-      function outcomeSelectedPeriod() {
-        const selector = state.outcomeSelector || {};
-        if (state.outcomeSelectionBucket === "current") return selector.current_pay_period || null;
-        if (state.outcomeSelectionBucket === "next") return selector.next_pay_period || null;
-        if (state.outcomeSelectionBucket === "prior") {
-          const list = Array.isArray(selector.prior_pay_periods) ? selector.prior_pay_periods : [];
-          return list.find((p) => String(p.record_id) === String(state.outcomeSelectionPriorRecordId)) || null;
-        }
-        return null;
+      btn.textContent = "Saved";
+      setTimeout(() => {
+        btn.textContent = original;
+        btn.disabled = false;
+      }, 800);
+    } catch (e) {
+      alert(`Save failed: ${e.message || e}`);
+    } finally {
+      if (btn.textContent !== "Saved") {
+        btn.textContent = original;
+        btn.disabled = false;
       }
+    }
+  }
 
-      function toastOriginalSelectedPeriod() {
-        const selector = state.toastOriginalSelector || {};
-        if (state.toastOriginalSelectionBucket === "current") return selector.current_pay_period || null;
-        if (state.toastOriginalSelectionBucket === "next") return selector.next_pay_period || null;
-        if (state.toastOriginalSelectionBucket === "prior") {
-          const list = Array.isArray(selector.prior_pay_periods) ? selector.prior_pay_periods : [];
-          return list.find((p) => String(p.record_id) === String(state.toastOriginalSelectionPriorRecordId)) || null;
-        }
-        return null;
-      }
+  async function loadExcludedForSelected() {
+    const content = document.getElementById("content");
+    const name = document.getElementById("locationSelect").value;
+    state.excluded = [];
+    state.excludedLocationName = name || null;
+    state.employeeSearchResults = [];
+    state.selectedSearchEmployeeId = null;
+    state.excludedSearchQuery = "";
+    state.excludedDraftReason = "";
+    state.excludedDraftNote = "";
 
-      function renderOutcomeTab() {
-        const content = document.getElementById("content");
-        const locationName = document.getElementById("locationSelect").value;
-        if (!locationName) {
-          content.innerHTML = "<div class='loading'>Select a location to use Pay Period Validation Outcome.</div>";
-          return;
-        }
+    if (!name) {
+      content.innerHTML = "<div class='loading'>Select a location to manage excluded staff.</div>";
+      return;
+    }
 
-        if (!state.outcomeSelector) {
-          content.innerHTML = "<div class='loading'>Loading pay period selector...</div>";
-          return;
-        }
+    content.innerHTML = "<div class='loading'>Loading excluded staff...</div>";
+    const q = encodeURIComponent(name);
+    const { resp, body } = await apiGet(`/staff/excluded?locationName=${q}`);
+    if (!resp.ok) {
+      content.innerHTML = `<div class="muted">Excluded staff error: ${body.error || "unknown_error"}</div>`;
+      return;
+    }
+    state.excluded = Array.isArray(body.excluded) ? body.excluded : [];
+    renderExcludedTab();
+  }
 
-        const selector = state.outcomeSelector;
-        const current = selector.current_pay_period;
-        const next = selector.next_pay_period;
-        const prior = Array.isArray(selector.prior_pay_periods) ? selector.prior_pay_periods : [];
-        const selectedPeriod = outcomeSelectedPeriod();
-        const run = state.outcomeResult ? state.outcomeResult.run : null;
-        const outcome = state.outcomeResult ? state.outcomeResult.outcome : null;
-        const findings = Array.isArray(outcome && outcome.findings) ? outcome.findings : [];
-        const excluded = Array.isArray(outcome && outcome.excluded_staff) ? outcome.excluded_staff : [];
+  function renderExcludedRows() {
+    if (!state.excluded.length) {
+      return `<div class="muted">No one is excluded yet for this location.</div>`;
+    }
 
-        const priorOptions = ["<option value=''>Select a prior pay period...</option>"]
-          .concat(
-            prior.map(
-              (p) =>
-                `<option value="${escapeAttr(p.record_id)}" ${
-                  String(state.outcomeSelectionPriorRecordId) === String(p.record_id) ? "selected" : ""
-                }>${escapeHtml(fmtDateRange(p.start_date, p.end_date))}</option>`
-            )
-          )
-          .join("");
-
-        const statusPill = run
-          ? pill(run.status || "completed", run.status === "completed" ? "ok" : run.status === "failed" ? "bad" : "warn")
-          : "<span class='muted'>Not run yet</span>";
-
-        const findingsRows = findings.length
-          ? findings
-              .map((f) => {
-                const employee = f.employee_name || f.employee_id || "Not specified";
-                const rule = f.rule_name || f.rule_id || f.code || "Rule";
-                const detail = f.detail || f.message || (f.details ? JSON.stringify(f.details) : "");
-                return `<tr><td>${escapeHtml(String(employee))}</td><td>${escapeHtml(String(rule))}</td><td>${escapeHtml(String(detail || ""))}</td></tr>`;
-              })
-              .join("")
-          : `<tr><td colspan="3" class="muted">No findings for this run.</td></tr>`;
-
-        const excludedBody = excluded.length
-          ? `<ul>${excluded
-              .map(
-                (e) =>
-                  `<li>${escapeHtml(e.employee_name || "Unknown")} (${escapeHtml(
-                    e.toast_employee_id || "n/a"
-                  )}) — ${escapeHtml(e.reason || "Excluded")}</li>`
-              )
-              .join("")}</ul>`
-          : `<div class="muted">No excluded staff were applied for this run.</div>`;
-
-        content.innerHTML = `
-          <div class="stack">
-            <div class="panel">
-              <div class="sectionTitle" style="margin-top:0;">Pay Period to Validate</div>
-              <div class="gridTwo">
-                <label class="miniCard">
-                  <div><input type="radio" name="outcomeBucket" value="current" ${
-                    state.outcomeSelectionBucket === "current" ? "checked" : ""
-                  } /> Current Pay Period</div>
-                  <div class="muted">${escapeHtml(fmtDateRange(current?.start_date, current?.end_date) || "Not available")}</div>
-                </label>
-                <label class="miniCard">
-                  <div><input type="radio" name="outcomeBucket" value="next" ${
-                    state.outcomeSelectionBucket === "next" ? "checked" : ""
-                  } /> Next Pay Period</div>
-                  <div class="muted">${escapeHtml(fmtDateRange(next?.start_date, next?.end_date) || "Not available")}</div>
-                </label>
-              </div>
-              <div class="row" style="margin-top:10px;">
-                <label style="min-width:260px;flex:1;">
-                  <div class="muted" style="margin-bottom:6px;">Prior Pay Period</div>
-                  <select id="outcomePriorSelect">${priorOptions}</select>
-                </label>
-                <button class="btn primary" id="runValidationBtn" type="button" ${state.outcomeRunning ? "disabled" : ""}>${
-                  state.outcomeRunning ? "Running..." : "Run Validation"
-                }</button>
-              </div>
-              ${
-                !selector.current_pay_period && !selector.next_pay_period && !prior.length
-                  ? "<div class='muted' style='margin-top:10px;'>No selector data available for this location.</div>"
-                  : ""
-              }
-              ${
-                state.outcomeSelectionBucket === "prior" && !state.outcomeSelectionPriorRecordId
-                  ? "<div class='muted' style='margin-top:10px;'>Pick a prior pay period from the dropdown before running.</div>"
-                  : ""
-              }
-              ${state.outcomeRunError ? `<div class="muted" style="margin-top:10px;">Run failed: ${escapeHtml(state.outcomeRunError)}</div>` : ""}
-            </div>
-
-            <div class="panel">
-              <div class="sectionTitle" style="margin-top:0;">Validation Outcome</div>
-              <div class="row" style="gap:16px;">
-                <div><span class="muted">Selected location:</span> ${escapeHtml(locationName)}</div>
-                <div><span class="muted">Selected pay period:</span> ${escapeHtml(
-                  fmtDateRange(selectedPeriod?.start_date, selectedPeriod?.end_date) || "Not selected"
-                )}</div>
-                <div><span class="muted">Validation status:</span> ${statusPill}</div>
-              </div>
-
-              <div class="sectionTitle">Excluded Staff</div>
-              <p class="sectionHelp">Excluded staff are not hidden; this section shows who was skipped or handled differently.</p>
-              ${excludedBody}
-
-              <div class="sectionTitle">Findings</div>
-              <table>
-                <thead><tr><th>Employee</th><th>Rule</th><th>Detail</th></tr></thead>
-                <tbody>${findingsRows}</tbody>
-              </table>
-            </div>
-          </div>
-        `;
-
-        content.querySelectorAll("input[name='outcomeBucket']").forEach((el) => {
-          el.addEventListener("change", () => {
-            state.outcomeSelectionBucket = el.value;
-            renderOutcomeTab();
-          });
-        });
-
-        const priorSelect = document.getElementById("outcomePriorSelect");
-        if (priorSelect) {
-          priorSelect.addEventListener("change", () => {
-            state.outcomeSelectionPriorRecordId = priorSelect.value;
-            if (state.outcomeSelectionPriorRecordId) state.outcomeSelectionBucket = "prior";
-            renderOutcomeTab();
-          });
-        }
-
-        const runBtn = document.getElementById("runValidationBtn");
-        if (runBtn) runBtn.addEventListener("click", runOutcomeValidation);
-      }
-
-      async function loadOutcomeSelectorForSelected() {
-        state.outcomeSelector = null;
-        state.outcomeResult = null;
-        state.outcomeRunError = "";
-        state.outcomeRunning = false;
-        state.outcomeSelectionBucket = "";
-        state.outcomeSelectionPriorRecordId = "";
-        renderOutcomeTab();
-        const name = document.getElementById("locationSelect").value;
-        if (!name) return;
-        const q = encodeURIComponent(name);
-        const { resp, body } = await apiGet(`/staff/pay-period-selector?locationName=${q}`);
-        if (!resp.ok) {
-          state.outcomeRunError = body.error || "selector_load_failed";
-          state.outcomeSelector = { current_pay_period: null, next_pay_period: null, prior_pay_periods: [] };
-          renderOutcomeTab();
-          return;
-        }
-        const selector = body.selector || {};
-        state.outcomeSelector = selector;
-        state.outcomeSelectionBucket = selector.default_selection?.bucket || "current";
-        renderOutcomeTab();
-      }
-
-      async function runOutcomeValidation() {
-        const selected = outcomeSelectedPeriod();
-        if (!selected) {
-          state.outcomeRunning = false;
-          state.outcomeRunError = "no_selected_pay_period";
-          renderOutcomeTab();
-          return;
-        }
-        state.outcomeRunning = true;
-        state.outcomeRunError = "";
-        renderOutcomeTab();
-
-        const locationName = document.getElementById("locationSelect").value;
-        try {
-          const { resp, body } = await apiPost("/staff/validation-outcome/run", {
-            location_name: locationName,
-            period_start: selected.start_date,
-            period_end: selected.end_date,
-            validation_date: selected.validation_date || null,
-          });
-          if (!resp.ok) {
-            state.outcomeRunError = body.error || "run_failed";
-            state.outcomeResult = null;
-            return;
-          }
-          state.outcomeResult = { run: body.run || null, outcome: body.outcome || null };
-        } catch (err) {
-          state.outcomeRunError = (err && err.message) || "run_failed";
-          state.outcomeResult = null;
-        } finally {
-          state.outcomeRunning = false;
-          renderOutcomeTab();
-        }
-      }
-
-      function getComparisonSummaryHtml(comparison) {
-        if (!comparison || !comparison.summary) return "<div class='muted'>No CSV baseline uploaded for this period. Comparison mode appears after upload.</div>";
-        const s = comparison.summary;
-        return `
-          <div class="row" style="gap:12px;flex-wrap:wrap;">
-            <span class="pill">API rows: ${escapeHtml(String(s.api_row_count || 0))}</span>
-            <span class="pill">CSV rows: ${escapeHtml(String(s.csv_row_count || 0))}</span>
-            <span class="pill ${s.row_count_delta === 0 ? 'ok' : 'warn'}">Row count delta (API-CSV): ${escapeHtml(String(s.row_count_delta || 0))}</span>
-            <span class="pill ${s.missing_in_csv_count ? 'warn' : 'ok'}">Missing in CSV: ${escapeHtml(String(s.missing_in_csv_count || 0))}</span>
-            <span class="pill ${s.missing_in_api_count ? 'warn' : 'ok'}">Missing in API: ${escapeHtml(String(s.missing_in_api_count || 0))}</span>
-            <span class="pill ${s.mismatch_count ? 'warn' : 'ok'}">Column mismatches: ${escapeHtml(String(s.mismatch_count || 0))}</span>
-          </div>
-        `;
-      }
-
-      function getToastComparisonStatus(comparison) {
-        const s = comparison && comparison.summary ? comparison.summary : null;
-        if (!s) return { label: "CLOSE / REVIEW", klass: "review", reason: "Upload a CSV baseline to score a full comparison." };
-        const hardProblem = (s.missing_in_csv_count || 0) > 0 || (s.missing_in_api_count || 0) > 0;
-        if (hardProblem) {
-          return { label: "PROBLEM", klass: "problem", reason: "Rows are missing on one side of the comparison." };
-        }
-        if ((s.mismatch_count || 0) > 0 || (s.row_count_delta || 0) !== 0) {
-          return { label: "CLOSE / REVIEW", klass: "review", reason: "Counts align, but one or more field-level mismatches exist." };
-        }
-        return { label: "MATCHED", klass: "matched", reason: "API and uploaded CSV rows align with no detected mismatches." };
-      }
-
-      function renderComparisonStatusAndMetrics(comparison) {
-        const status = getToastComparisonStatus(comparison);
-        const s = comparison && comparison.summary ? comparison.summary : null;
-        const apiRows = s ? s.api_row_count || 0 : 0;
-        const csvRows = s ? s.csv_row_count || 0 : 0;
-        const missingInCsv = s ? s.missing_in_csv_count || 0 : 0;
-        const missingInApi = s ? s.missing_in_api_count || 0 : 0;
-        const mismatchCount = s ? s.mismatch_count || 0 : 0;
-        const matchedRows = Math.max(0, apiRows - missingInCsv - mismatchCount);
-        return `
-          <div class="statusCard ${status.klass}">
-            <div class="statusCardTitle">Comparison status</div>
-            <div class="statusCardValue">${escapeHtml(status.label)}</div>
-            <div class="muted" style="margin-top:4px;">${escapeHtml(status.reason)}</div>
-          </div>
-          <div class="summaryGrid" style="margin-top:10px;">
-            <div class="summaryMetric"><div class="summaryMetricLabel">API rows</div><div class="summaryMetricValue">${escapeHtml(String(apiRows))}</div></div>
-            <div class="summaryMetric"><div class="summaryMetricLabel">CSV rows</div><div class="summaryMetricValue">${escapeHtml(String(csvRows))}</div></div>
-            <div class="summaryMetric"><div class="summaryMetricLabel">Matched rows</div><div class="summaryMetricValue">${escapeHtml(String(matchedRows))}</div></div>
-            <div class="summaryMetric"><div class="summaryMetricLabel">Missing in API</div><div class="summaryMetricValue">${escapeHtml(String(missingInApi))}</div></div>
-            <div class="summaryMetric"><div class="summaryMetricLabel">Missing in CSV</div><div class="summaryMetricValue">${escapeHtml(String(missingInCsv))}</div></div>
-            <div class="summaryMetric"><div class="summaryMetricLabel">Mismatch count</div><div class="summaryMetricValue">${escapeHtml(String(mismatchCount))}</div></div>
-          </div>
-        `;
-      }
-
-      function renderSimpleRowsTable(title, rows, columns, emptyLabel) {
-        const displayRows = Array.isArray(rows) ? rows.slice(0, 100) : [];
-        const head = columns.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
-        const body = displayRows.length
-          ? displayRows
-              .map((row) => {
-                const cells = columns.map((col) => `<td>${escapeHtml(String(row && row[col] !== undefined && row[col] !== null ? row[col] : ""))}</td>`).join("");
-                return `<tr>${cells}</tr>`;
-              })
-              .join("")
-          : `<tr><td colspan="${Math.max(columns.length,1)}" class="muted">${escapeHtml(emptyLabel)}</td></tr>`;
-
-        return `
-          <div class="sectionTitle">${escapeHtml(title)}</div>
-          <div class="tableScroll"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>
-          ${Array.isArray(rows) && rows.length > 100 ? `<div class='muted' style='margin-top:6px;'>Showing first 100 rows of ${escapeHtml(String(rows.length))}.</div>` : ""}
-        `;
-      }
-
-      function renderColumnMismatchesTable(mismatches) {
-        const rows = Array.isArray(mismatches) ? mismatches.slice(0, 100) : [];
-        const body = rows.length
-          ? rows
-              .map((row) => {
-                const diffs = Array.isArray(row?.diffs)
-                  ? row.diffs
-                      .map(
-                        (d) =>
-                          `<div><b>${escapeHtml(String(d.field || ""))}</b>: API="${escapeHtml(String(d.api_value ?? ""))}" vs CSV="${escapeHtml(
-                            String(d.csv_value ?? "")
-                          )}"</div>`
-                      )
-                      .join("")
-                  : "";
-                return `<tr>
-                  <td>${escapeHtml(String(row?.api_row?.toast_employee_id || row?.api_row?.employee_id || ""))}</td>
-                  <td>${escapeHtml(String(row?.api_row?.employee_name || ""))}</td>
-                  <td>${escapeHtml(String(row?.api_row?.job_title || ""))}</td>
-                  <td>${diffs || "<span class='muted'>No diff details.</span>"}</td>
-                </tr>`;
-              })
-              .join("")
-          : `<tr><td colspan="4" class="muted">No column mismatches.</td></tr>`;
-        return `
-          <div class="sectionTitle">Column mismatches</div>
-          <div class="tableScroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>toast_employee_id</th>
-                  <th>employee_name</th>
-                  <th>job_title</th>
-                  <th>differences</th>
+    return `
+      <table>
+        <thead>
+          <tr>
+            <th>Employee</th>
+            <th>Exclusion Reason / Note</th>
+            <th>Status</th>
+            <th style="width:150px;">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${state.excluded
+            .map((row) => {
+              const name = row.employee_name || "Unknown";
+              const emp = `${name} (${row.toast_employee_id || "n/a"})`;
+              const reason = [row.reason, row.notes].filter(Boolean).join(" / ");
+              const status = row.active ? "Active (skipped downstream)" : "Inactive";
+              return `
+                <tr data-excluded-id="${escapeAttr(row.id)}">
+                  <td>${escapeHtml(emp)}</td>
+                  <td>${escapeHtml(reason || "No note")}</td>
+                  <td>${escapeHtml(status)}</td>
+                  <td>
+                    <button class="btn" data-action="edit-excluded" type="button">Edit</button>
+                    <button class="btn" data-action="remove-excluded" type="button">Remove</button>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>${body}</tbody>
-            </table>
+              `;
+            })
+            .join("")}
+        </tbody>
+      </table>
+    `;
+  }
+
+  function renderSearchResults() {
+    if (!state.employeeSearchResults.length) {
+      return `<div class="muted" style="margin-top:8px;">Search by name or ID to find one employee.</div>`;
+    }
+
+    return `
+      <div class="searchResults">
+        ${state.employeeSearchResults
+          .map((emp) => {
+            const checked = state.selectedSearchEmployeeId === emp.employeeId ? "checked" : "";
+            return `
+              <label class="searchItem">
+                <input type="radio" name="excludedSearchChoice" value="${escapeAttr(emp.employeeId)}" ${checked} />
+                <span>${escapeHtml(emp.employeeName)} <span class="muted">(${escapeHtml(emp.employeeId)})</span></span>
+              </label>
+            `;
+          })
+          .join("")}
+      </div>
+    `;
+  }
+
+  function renderExcludedTab() {
+    const content = document.getElementById("content");
+    if (!state.excludedLocationName) {
+      content.innerHTML = "<div class='loading'>Select a location to manage excluded staff.</div>";
+      return;
+    }
+
+    content.innerHTML = `
+      <div class="stack">
+        <div class="panel">
+          <div class="sectionTitle" style="margin-top:0;">Currently Excluded Staff</div>
+          <p class="sectionHelp">These employees are skipped or handled differently in later payroll validation steps.</p>
+          ${renderExcludedRows()}
+        </div>
+
+        <div class="panel">
+          <div class="sectionTitle" style="margin-top:0;">Add Excluded Staff</div>
+          <p class="sectionHelp">Search for one employee, add a reason, then save.</p>
+          <div class="row">
+            <input class="input" id="excludedSearchInput" placeholder="Search Toast employee by name or ID" style="flex:1;min-width:260px;" />
+            <button class="btn" id="excludedSearchBtn" type="button">Search</button>
           </div>
-          ${Array.isArray(mismatches) && mismatches.length > 100 ? `<div class='muted' style='margin-top:6px;'>Showing first 100 mismatches of ${escapeHtml(String(mismatches.length))}.</div>` : ""}
-        `;
-      }
+          ${renderSearchResults()}
+          <div class="row" style="margin-top:10px;">
+            <input class="input" id="excludedReasonInput" placeholder="Reason (required)" style="flex:1;min-width:220px;" value="${escapeAttr(state.excludedDraftReason)}" />
+            <input class="input" id="excludedNoteInput" placeholder="Note (optional)" style="flex:1;min-width:220px;" value="${escapeAttr(state.excludedDraftNote)}" />
+            <button class="btn primary" id="addExcludedBtn" type="button">Add</button>
+          </div>
+        </div>
+      </div>
+    `;
 
-      function getToastStableIdentityField(columns, rows) {
-        const candidates = [
-          { outputLabel: "Toast Employee ID", sourceField: "Toast Employee ID" },
-          { outputLabel: "Toast Employee ID", sourceField: "Employee ID" },
-          { outputLabel: "Toast Employee GUID", sourceField: "Employee GUID" },
-          { outputLabel: "Toast Employee GUID", sourceField: "Employee Guid" },
-        ];
-        for (const candidate of candidates) {
-          const inColumns = columns.includes(candidate.sourceField);
-          const inRows = rows.some(
-            (row) =>
-              row &&
-              Object.prototype.hasOwnProperty.call(row, candidate.sourceField) &&
-              row[candidate.sourceField] !== null &&
-              row[candidate.sourceField] !== undefined &&
-              String(row[candidate.sourceField]).trim() !== ""
-          );
-          if (inColumns || inRows) return candidate;
-        }
-        return null;
-      }
+    const searchBtn = document.getElementById("excludedSearchBtn");
+    const addBtn = document.getElementById("addExcludedBtn");
+    const searchInput = document.getElementById("excludedSearchInput");
+    if (searchInput) searchInput.value = state.excludedSearchQuery;
+    searchBtn.addEventListener("click", searchEmployeesForExcluded);
+    addBtn.addEventListener("click", addSelectedExcludedStaff);
 
-      function renderToastOriginalTable(columns, rows) {
-        const identityField = getToastStableIdentityField(columns, rows);
-        const displayColumns = columns.slice();
-        if (identityField && !displayColumns.includes(identityField.outputLabel)) {
-          displayColumns.splice(0, 0, identityField.outputLabel);
-        }
+    content.querySelectorAll("input[name='excludedSearchChoice']").forEach((el) => {
+      el.addEventListener("change", () => {
+        state.selectedSearchEmployeeId = el.value;
+      });
+    });
+    content.querySelectorAll("button[data-action='edit-excluded']").forEach((btn) => {
+      btn.addEventListener("click", onEditExcludedRow);
+    });
+    content.querySelectorAll("button[data-action='remove-excluded']").forEach((btn) => {
+      btn.addEventListener("click", onRemoveExcludedRow);
+    });
+  }
 
-        const head = displayColumns.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
-        const body = rows.length
-          ? rows
-              .map((row) => {
-                const cells = displayColumns
-                  .map((col) => {
-                    let value = row && Object.prototype.hasOwnProperty.call(row, col) ? row[col] : "";
-                    if (identityField && col === identityField.outputLabel && !Object.prototype.hasOwnProperty.call(row || {}, col)) {
-                      value =
-                        row && Object.prototype.hasOwnProperty.call(row, identityField.sourceField)
-                          ? row[identityField.sourceField]
-                          : "";
-                    }
-                    const rendered =
-                      value === null || value === undefined
-                        ? ""
-                        : typeof value === "object"
-                        ? JSON.stringify(value)
-                        : String(value);
-                    return `<td>${escapeHtml(rendered)}</td>`;
-                  })
-                  .join("");
-                return `<tr>${cells}</tr>`;
-              })
-              .join("")
-          : `<tr><td colspan="${Math.max(displayColumns.length, 1)}" class="muted">No rows returned for this pay period.</td></tr>`;
+  async function searchEmployeesForExcluded() {
+    if (!state.excludedLocationName) return;
+    const input = document.getElementById("excludedSearchInput");
+    const q = (input && input.value ? input.value : "").trim();
+    state.excludedSearchQuery = q;
+    if (!q) {
+      alert("Enter a search term first.");
+      return;
+    }
 
-        const regularHoursTotal = rows.reduce((sum, row) => {
-          const val = Number(row?.["Regular Hours"]);
-          return sum + (Number.isFinite(val) ? val : 0);
-        }, 0);
-        const overtimeHoursTotal = rows.reduce((sum, row) => {
-          const val = Number(row?.["Overtime Hours"]);
-          return sum + (Number.isFinite(val) ? val : 0);
-        }, 0);
+    const query = new URLSearchParams({
+      locationName: state.excludedLocationName,
+      q,
+      limit: "12",
+    });
+    const { resp, body } = await apiGet(`/staff/toast-employees?${query.toString()}`);
+    if (!resp.ok) {
+      alert(`Employee search failed: ${body.error || "unknown_error"}`);
+      return;
+    }
+    state.employeeSearchResults = Array.isArray(body.employees) ? body.employees : [];
+    state.selectedSearchEmployeeId = state.employeeSearchResults[0]?.employeeId || null;
+    renderExcludedTab();
+  }
 
-        return {
-          html: `
-            <div class="tableScroll"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>
-            <div class="miniCard" style="margin-top:10px;">
-              <div><span class="muted">Regular Hours Total:</span> <b>${escapeHtml(regularHoursTotal.toFixed(2))}</b></div>
-              <div style="margin-top:4px;"><span class="muted">Overtime Hours Total:</span> <b>${escapeHtml(
-                overtimeHoursTotal.toFixed(2)
-              )}</b></div>
-            </div>
-          `,
-          identityField,
-        };
-      }
+  async function addSelectedExcludedStaff() {
+    if (!state.excludedLocationName) return;
+    const employeeId = state.selectedSearchEmployeeId;
+    const selected = state.employeeSearchResults.find((x) => x.employeeId === employeeId);
+    if (!selected) {
+      alert("Pick one employee from search results.");
+      return;
+    }
 
-      function renderToastOriginalTab() {
-        const content = document.getElementById("content");
-        const locationName = document.getElementById("locationSelect").value;
-        if (!locationName) {
-          content.innerHTML = "<div class='loading'>Select a location to use Toast Pay Period Data - Original.</div>";
-          return;
-        }
-        if (!state.toastOriginalSelector) {
-          content.innerHTML = "<div class='loading'>Loading pay period selector...</div>";
-          return;
-        }
+    const reason = (document.getElementById("excludedReasonInput")?.value || "").trim();
+    const notes = (document.getElementById("excludedNoteInput")?.value || "").trim();
+    state.excludedDraftReason = reason;
+    state.excludedDraftNote = notes;
+    if (!reason) {
+      alert("Reason is required.");
+      return;
+    }
 
-        const selector = state.toastOriginalSelector;
-        const current = selector.current_pay_period;
-        const next = selector.next_pay_period;
-        const prior = Array.isArray(selector.prior_pay_periods) ? selector.prior_pay_periods : [];
-        const selectedPeriod = toastOriginalSelectedPeriod();
-        const priorOptions = ["<option value=''>Select a prior pay period...</option>"]
-          .concat(
-            prior.map(
-              (p) =>
-                `<option value="${escapeAttr(p.record_id)}" ${
-                  String(state.toastOriginalSelectionPriorRecordId) === String(p.record_id) ? "selected" : ""
-                }>${escapeHtml(fmtDateRange(p.start_date, p.end_date))}</option>`
-            )
+    const { resp, body } = await apiPost("/staff/excluded", {
+      location_name: state.excludedLocationName,
+      toast_employee_id: selected.employeeId,
+      employee_name: selected.employeeName,
+      reason,
+      notes: notes || null,
+      active: true,
+    });
+    if (!resp.ok) {
+      alert(`Add failed: ${body.error || "unknown_error"}`);
+      return;
+    }
+    state.excludedDraftReason = "";
+    state.excludedDraftNote = "";
+    await loadExcludedForSelected();
+  }
+
+  async function onEditExcludedRow(e) {
+    const tr = e.target.closest("tr[data-excluded-id]");
+    if (!tr) return;
+    const id = tr.getAttribute("data-excluded-id");
+    const row = state.excluded.find((x) => String(x.id) === String(id));
+    if (!row) return;
+
+    const reason = window.prompt("Update exclusion reason:", row.reason || "");
+    if (reason === null) return;
+    const notes = window.prompt("Update note (optional):", row.notes || "");
+    if (notes === null) return;
+    const active = window.confirm("Keep this exclusion active?\nPress Cancel to mark inactive.");
+
+    const { resp, body } = await apiPut(`/staff/excluded/${encodeURIComponent(id)}`, {
+      reason: reason.trim(),
+      notes: notes.trim() || null,
+      active,
+    });
+    if (!resp.ok) {
+      alert(`Update failed: ${body.error || "unknown_error"}`);
+      return;
+    }
+    await loadExcludedForSelected();
+  }
+
+  async function onRemoveExcludedRow(e) {
+    const tr = e.target.closest("tr[data-excluded-id]");
+    if (!tr) return;
+    const id = tr.getAttribute("data-excluded-id");
+    const ok = window.confirm("Remove this staff member from active exclusions?");
+    if (!ok) return;
+    const { resp, body } = await apiDelete(`/staff/excluded/${encodeURIComponent(id)}`);
+    if (!resp.ok) {
+      alert(`Remove failed: ${body.error || "unknown_error"}`);
+      return;
+    }
+    await loadExcludedForSelected();
+  }
+
+  async function loadRecapForSelected() {
+    const sel = document.getElementById("locationSelect");
+    const name = sel.value;
+    state.recap = null;
+    renderConfirmations();
+    if (!name) return;
+
+    const q = encodeURIComponent(name);
+    const { resp, body } = await apiGet(`/staff/recap?locationName=${q}`);
+    if (!resp.ok) {
+      document.getElementById("content").innerHTML = `<div class="muted">Recap error: ${body.error || "unknown_error"}</div>`;
+      return;
+    }
+    state.recap = body.recap || null;
+    renderConfirmations();
+  }
+
+  function outcomeSelectedPeriod() {
+    const selector = state.outcomeSelector || {};
+    if (state.outcomeSelectionBucket === "current") return selector.current_pay_period || null;
+    if (state.outcomeSelectionBucket === "next") return selector.next_pay_period || null;
+    if (state.outcomeSelectionBucket === "prior") {
+      const list = Array.isArray(selector.prior_pay_periods) ? selector.prior_pay_periods : [];
+      return list.find((p) => String(p.record_id) === String(state.outcomeSelectionPriorRecordId)) || null;
+    }
+    return null;
+  }
+
+  function toastOriginalSelectedPeriod() {
+    const selector = state.toastOriginalSelector || {};
+    if (state.toastOriginalSelectionBucket === "current") return selector.current_pay_period || null;
+    if (state.toastOriginalSelectionBucket === "next") return selector.next_pay_period || null;
+    if (state.toastOriginalSelectionBucket === "prior") {
+      const list = Array.isArray(selector.prior_pay_periods) ? selector.prior_pay_periods : [];
+      return list.find((p) => String(p.record_id) === String(state.toastOriginalSelectionPriorRecordId)) || null;
+    }
+    return null;
+  }
+
+  function renderOutcomeTab() {
+    const content = document.getElementById("content");
+    const locationName = document.getElementById("locationSelect").value;
+    if (!locationName) {
+      content.innerHTML = "<div class='loading'>Select a location to use Pay Period Validation Outcome.</div>";
+      return;
+    }
+
+    if (!state.outcomeSelector) {
+      content.innerHTML = "<div class='loading'>Loading pay period selector...</div>";
+      return;
+    }
+
+    const selector = state.outcomeSelector;
+    const current = selector.current_pay_period;
+    const next = selector.next_pay_period;
+    const prior = Array.isArray(selector.prior_pay_periods) ? selector.prior_pay_periods : [];
+    const selectedPeriod = outcomeSelectedPeriod();
+    const run = state.outcomeResult ? state.outcomeResult.run : null;
+    const outcome = state.outcomeResult ? state.outcomeResult.outcome : null;
+    const findings = Array.isArray(outcome && outcome.findings) ? outcome.findings : [];
+    const excluded = Array.isArray(outcome && outcome.excluded_staff) ? outcome.excluded_staff : [];
+
+    const priorOptions = ["<option value=''>Select a prior pay period...</option>"]
+      .concat(
+        prior.map(
+          (p) =>
+            `<option value="${escapeAttr(p.record_id)}" ${
+              String(state.outcomeSelectionPriorRecordId) === String(p.record_id) ? "selected" : ""
+            }>${escapeHtml(fmtDateRange(p.start_date, p.end_date))}</option>`
+        )
+      )
+      .join("");
+
+    const statusPill = run
+      ? pill(run.status || "completed", run.status === "completed" ? "ok" : run.status === "failed" ? "bad" : "warn")
+      : "<span class='muted'>Not run yet</span>";
+
+    const findingsRows = findings.length
+      ? findings
+          .map((f) => {
+            const employee = f.employee_name || f.employee_id || "Not specified";
+            const rule = f.rule_name || f.rule_id || f.code || "Rule";
+            const detail = f.detail || f.message || (f.details ? JSON.stringify(f.details) : "");
+            return `<tr><td>${escapeHtml(String(employee))}</td><td>${escapeHtml(String(rule))}</td><td>${escapeHtml(String(detail || ""))}</td></tr>`;
+          })
+          .join("")
+      : `<tr><td colspan="3" class="muted">No findings for this run.</td></tr>`;
+
+    const excludedBody = excluded.length
+      ? `<ul>${excluded
+          .map(
+            (e) =>
+              `<li>${escapeHtml(e.employee_name || "Unknown")} (${escapeHtml(
+                e.toast_employee_id || "n/a"
+              )}) / ${escapeHtml(e.reason || "Excluded")}</li>`
           )
-          .join("");
+          .join("")}</ul>`
+      : `<div class="muted">No excluded staff were applied for this run.</div>`;
 
-        const data = state.toastOriginalData;
-        const columns = Array.isArray(data?.columns) ? data.columns : [];
-        const rows = Array.isArray(data?.rows) ? data.rows : [];
-
-        content.innerHTML = `
-          <div class="stack">
-            <div class="panel toastOriginalControlsPanel">
-              <div class="sectionTitle" style="margin-top:0;">View Control</div>
-              <div class="row" style="gap:8px;">
-                <button class="btn primary" type="button">See Original</button>
-                <button class="btn" type="button" disabled title="Coming later">See RDMS Format (Coming Soon)</button>
-              </div>
-              <div class="sectionTitle">Pay Period to Load</div>
-              <div class="gridTwo">
-                <label class="miniCard">
-                  <div><input type="radio" name="toastOriginalBucket" value="current" ${
-                    state.toastOriginalSelectionBucket === "current" ? "checked" : ""
-                  } /> Current Pay Period</div>
-                  <div class="muted">${escapeHtml(fmtDateRange(current?.start_date, current?.end_date) || "Not available")}</div>
-                </label>
-                <label class="miniCard">
-                  <div><input type="radio" name="toastOriginalBucket" value="next" ${
-                    state.toastOriginalSelectionBucket === "next" ? "checked" : ""
-                  } /> Next Pay Period</div>
-                  <div class="muted">${escapeHtml(fmtDateRange(next?.start_date, next?.end_date) || "Not available")}</div>
-                </label>
-              </div>
-              <div class="row" style="margin-top:10px;">
-                <label style="min-width:260px;flex:1;">
-                  <div class="muted" style="margin-bottom:6px;">Prior Pay Period</div>
-                  <select id="toastOriginalPriorSelect">${priorOptions}</select>
-                </label>
-                <button class="btn primary" id="loadToastOriginalBtn" type="button" ${state.toastOriginalLoading ? "disabled" : ""}>
-                  ${state.toastOriginalLoading ? "Loading..." : "Load Original Toast Data"}
-                </button>
-                <button class="btn" id="loadToastOriginalDebugBtn" type="button" ${state.toastOriginalDebugLoading ? "disabled" : ""}>
-                  ${state.toastOriginalDebugLoading ? "Loading Debug..." : "Load Barrio Debug Payload"}
-                </button>
-              </div>
-              <div class="sectionTitle">Optional Audit Baseline: Upload Toast Payroll Export CSV</div>
-              <p class="sectionHelp">Staff can upload the actual exported file for this selected pay period. Stored for audit trail and compared against API-derived rows.</p>
-              <div class="row" style="margin-top:8px;align-items:flex-end;">
-                <label style="min-width:320px;flex:1;">
-                  <div class="muted" style="margin-bottom:6px;">Toast Payroll Export CSV file</div>
-                  <input id="toastOriginalCsvFile" type="file" class="input" accept=".csv,text/csv" />
-                </label>
-                <button class="btn" id="uploadToastOriginalCsvBtn" type="button" ${state.toastOriginalCsvUploadBusy ? "disabled" : ""}>
-                  ${state.toastOriginalCsvUploadBusy ? "Uploading..." : "Upload CSV Baseline"}
-                </button>
-              </div>
-              ${state.toastOriginalCsvUploadError ? `<div class="muted" style="margin-top:8px;">Upload failed: ${escapeHtml(state.toastOriginalCsvUploadError)}</div>` : ""}
-              ${state.toastOriginalCsvBaseline ? `<div class='miniCard' style='margin-top:8px;'><div><span class='muted'>Latest baseline:</span> ${escapeHtml(state.toastOriginalCsvBaseline.upload?.file_name || '(unnamed file)')}</div><div class='muted'>Uploaded by ${escapeHtml(state.toastOriginalCsvBaseline.upload?.uploaded_by || 'unknown')} at ${escapeHtml(new Date(state.toastOriginalCsvBaseline.upload?.uploaded_at || '').toLocaleString() || '')}</div></div>` : "<div class='muted' style='margin-top:8px;'>No uploaded CSV baseline for this location/pay period yet.</div>"}
-              ${
-                state.toastOriginalSelectionBucket === "prior" && !state.toastOriginalSelectionPriorRecordId
-                  ? "<div class='muted' style='margin-top:10px;'>Pick a prior pay period from the dropdown before loading.</div>"
-                  : ""
-              }
-              ${state.toastOriginalLoadError ? `<div class="muted" style="margin-top:10px;">Load failed: ${escapeHtml(state.toastOriginalLoadError)}</div>` : ""}
-              ${
-                state.toastOriginalDebugData
-                  ? `<div style="margin-top:10px;">
-                      <div class="muted" style="margin-bottom:6px;">Barrio debug payload (paste this back for mapping review):</div>
-                      <textarea id="toastOriginalDebugPayload" readonly style="width:100%;min-height:240px;font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:12px;">${escapeHtml(
-                        JSON.stringify(state.toastOriginalDebugData, null, 2)
-                      )}</textarea>
-                    </div>`
-                  : ""
-              }
-            </div>
-
-            <div class="panel toastOriginalDataPanel">
-              <div class="sectionTitle" style="margin-top:0;">Original Toast Pay Period Rows</div>
-              <div class="row" style="gap:16px;margin-bottom:8px;">
-                <div><span class="muted">Location:</span> ${escapeHtml(locationName)}</div>
-                <div><span class="muted">Selected pay period:</span> ${escapeHtml(
-                  fmtDateRange(selectedPeriod?.start_date, selectedPeriod?.end_date) || "Not selected"
-                )}</div>
-                <div><span class="muted">Rows:</span> ${escapeHtml(String(data?.row_count ?? 0))}</div>
-              </div>
-              <p class="sectionHelp" style="margin-top:0;">Raw/original Toast row payload rendered directly as a table for auditing.</p>
-              ${(() => {
-                const tableRender = renderToastOriginalTable(columns, rows);
-                const identityNote = tableRender.identityField
-                  ? `<p class="sourceNote" style="margin-top:0;margin-bottom:8px;">Stable identity column shown: <b>${escapeHtml(
-                      tableRender.identityField.outputLabel
-                    )}</b> (sourced from <b>${escapeHtml(tableRender.identityField.sourceField)}</b>).</p>`
-                  : "<p class='sourceNote' style='margin-top:0;margin-bottom:8px;'>No stable Toast employee identity field was found in the current row payload.</p>";
-                const summaryTopHtml = renderComparisonStatusAndMetrics(state.toastOriginalComparison);
-                const comparisonHtml = `
-                  <div class="sectionTitle">CSV vs API Comparison Details</div>
-                  ${getComparisonSummaryHtml(state.toastOriginalComparison)}
-                  ${
-                    state.toastOriginalComparison
-                      ? `<details class="debugSection"><summary>Missing rows in uploaded CSV</summary><div class="debugSectionBody">${renderSimpleRowsTable(
-                          "Missing rows in uploaded CSV (present in API)",
-                          state.toastOriginalComparison.missing_in_csv || [],
-                          ["toast_employee_id", "employee_id", "employee_name", "job_title", "location", "regular_hours", "overtime_hours", "total_pay"],
-                          "No missing rows in CSV."
-                        )}</div></details>`
-                      : ""
-                  }
-                  ${
-                    state.toastOriginalComparison
-                      ? `<details class="debugSection"><summary>Missing rows in API-derived output</summary><div class="debugSectionBody">${renderSimpleRowsTable(
-                          "Missing rows in API-derived output (present in uploaded CSV)",
-                          state.toastOriginalComparison.missing_in_api || [],
-                          ["toast_employee_id", "employee_id", "employee_name", "job_title", "location", "regular_hours", "overtime_hours", "total_pay"],
-                          "No missing rows in API output."
-                        )}</div></details>`
-                      : ""
-                  }
-                  ${
-                    state.toastOriginalComparison
-                      ? `<details class="debugSection"><summary>Column mismatches</summary><div class="debugSectionBody">${renderColumnMismatchesTable(
-                          state.toastOriginalComparison.column_mismatches || []
-                        )}</div></details>`
-                      : ""
-                  }
-                  ${
-                    state.toastOriginalComparison
-                      ? `<details class="debugSection"><summary>Uploaded CSV normalized rows</summary><div class="debugSectionBody">${renderSimpleRowsTable(
-                          "Uploaded CSV normalized rows",
-                          state.toastOriginalComparison.uploaded_csv_rows || [],
-                          ["toast_employee_id", "employee_id", "employee_name", "job_title", "location", "regular_hours", "overtime_hours", "total_pay"],
-                          "No uploaded CSV rows."
-                        )}</div></details>`
-                      : ""
-                  }
-                `;
-                return `${summaryTopHtml}${identityNote}${tableRender.html}${comparisonHtml}`;
-              })()}
-            </div>
+    content.innerHTML = `
+      <div class="stack">
+        <div class="panel">
+          <div class="sectionTitle" style="margin-top:0;">Pay Period to Validate</div>
+          <div class="gridTwo">
+            <label class="miniCard">
+              <div><input type="radio" name="outcomeBucket" value="current" ${
+                state.outcomeSelectionBucket === "current" ? "checked" : ""
+              } /> Current Pay Period</div>
+              <div class="muted">${escapeHtml(fmtDateRange(current?.start_date, current?.end_date) || "Not available")}</div>
+            </label>
+            <label class="miniCard">
+              <div><input type="radio" name="outcomeBucket" value="next" ${
+                state.outcomeSelectionBucket === "next" ? "checked" : ""
+              } /> Next Pay Period</div>
+              <div class="muted">${escapeHtml(fmtDateRange(next?.start_date, next?.end_date) || "Not available")}</div>
+            </label>
           </div>
-        `;
+          <div class="row" style="margin-top:10px;">
+            <label style="min-width:260px;flex:1;">
+              <div class="muted" style="margin-bottom:6px;">Prior Pay Period</div>
+              <select id="outcomePriorSelect">${priorOptions}</select>
+            </label>
+            <button class="btn primary" id="runValidationBtn" type="button" ${state.outcomeRunning ? "disabled" : ""}>${
+              state.outcomeRunning ? "Running..." : "Run Validation"
+            }</button>
+          </div>
+          ${
+            !selector.current_pay_period && !selector.next_pay_period && !prior.length
+              ? "<div class='muted' style='margin-top:10px;'>No selector data available for this location.</div>"
+              : ""
+          }
+          ${
+            state.outcomeSelectionBucket === "prior" && !state.outcomeSelectionPriorRecordId
+              ? "<div class='muted' style='margin-top:10px;'>Pick a prior pay period from the dropdown before running.</div>"
+              : ""
+          }
+          ${state.outcomeRunError ? `<div class="muted" style="margin-top:10px;">Run failed: ${escapeHtml(state.outcomeRunError)}</div>` : ""}
+        </div>
 
-        content.querySelectorAll("input[name='toastOriginalBucket']").forEach((el) => {
-          el.addEventListener("change", async () => {
-            state.toastOriginalSelectionBucket = el.value;
-            await loadToastOriginalBaselineForSelectedPeriod();
-            renderToastOriginalTab();
-          });
+        <div class="panel">
+          <div class="sectionTitle" style="margin-top:0;">Validation Outcome</div>
+          <div class="row" style="gap:16px;">
+            <div><span class="muted">Selected location:</span> ${escapeHtml(locationName)}</div>
+            <div><span class="muted">Selected pay period:</span> ${escapeHtml(
+              fmtDateRange(selectedPeriod?.start_date, selectedPeriod?.end_date) || "Not selected"
+            )}</div>
+            <div><span class="muted">Validation status:</span> ${statusPill}</div>
+          </div>
+
+          <div class="sectionTitle">Excluded Staff</div>
+          <p class="sectionHelp">Excluded staff are not hidden; this section shows who was skipped or handled differently.</p>
+          ${excludedBody}
+
+          <div class="sectionTitle">Findings</div>
+          <table>
+            <thead><tr><th>Employee</th><th>Rule</th><th>Detail</th></tr></thead>
+            <tbody>${findingsRows}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
+
+    content.querySelectorAll("input[name='outcomeBucket']").forEach((el) => {
+      el.addEventListener("change", () => {
+        state.outcomeSelectionBucket = el.value;
+        renderOutcomeTab();
+      });
+    });
+
+    const priorSelect = document.getElementById("outcomePriorSelect");
+    if (priorSelect) {
+      priorSelect.addEventListener("change", () => {
+        state.outcomeSelectionPriorRecordId = priorSelect.value;
+        if (state.outcomeSelectionPriorRecordId) state.outcomeSelectionBucket = "prior";
+        renderOutcomeTab();
+      });
+    }
+
+    const runBtn = document.getElementById("runValidationBtn");
+    if (runBtn) runBtn.addEventListener("click", runOutcomeValidation);
+  }
+
+  async function loadOutcomeSelectorForSelected() {
+    state.outcomeSelector = null;
+    state.outcomeResult = null;
+    state.outcomeRunError = "";
+    state.outcomeRunning = false;
+    state.outcomeSelectionBucket = "";
+    state.outcomeSelectionPriorRecordId = "";
+    renderOutcomeTab();
+    const name = document.getElementById("locationSelect").value;
+    if (!name) return;
+    const q = encodeURIComponent(name);
+    const { resp, body } = await apiGet(`/staff/pay-period-selector?locationName=${q}`);
+    if (!resp.ok) {
+      state.outcomeRunError = body.error || "selector_load_failed";
+      state.outcomeSelector = { current_pay_period: null, next_pay_period: null, prior_pay_periods: [] };
+      renderOutcomeTab();
+      return;
+    }
+    const selector = body.selector || {};
+    state.outcomeSelector = selector;
+    state.outcomeSelectionBucket = selector.default_selection?.bucket || "current";
+    renderOutcomeTab();
+  }
+
+  async function runOutcomeValidation() {
+    const selected = outcomeSelectedPeriod();
+    if (!selected) {
+      state.outcomeRunning = false;
+      state.outcomeRunError = "no_selected_pay_period";
+      renderOutcomeTab();
+      return;
+    }
+    state.outcomeRunning = true;
+    state.outcomeRunError = "";
+    renderOutcomeTab();
+
+    const locationName = document.getElementById("locationSelect").value;
+    try {
+      const { resp, body } = await apiPost("/staff/validation-outcome/run", {
+        location_name: locationName,
+        period_start: selected.start_date,
+        period_end: selected.end_date,
+        validation_date: selected.validation_date || null,
+      });
+      if (!resp.ok) {
+        state.outcomeRunError = body.error || "run_failed";
+        state.outcomeResult = null;
+        return;
+      }
+      state.outcomeResult = { run: body.run || null, outcome: body.outcome || null };
+    } catch (err) {
+      state.outcomeRunError = (err && err.message) || "run_failed";
+      state.outcomeResult = null;
+    } finally {
+      state.outcomeRunning = false;
+      renderOutcomeTab();
+    }
+  }
+
+  function getComparisonSummaryHtml(comparison) {
+    if (!comparison || !comparison.summary) return "<div class='muted'>No CSV baseline uploaded for this period. Comparison mode appears after upload.</div>";
+    const s = comparison.summary;
+    return `
+      <div class="row" style="gap:12px;flex-wrap:wrap;">
+        <span class="pill">API rows: ${escapeHtml(String(s.api_row_count || 0))}</span>
+        <span class="pill">CSV rows: ${escapeHtml(String(s.csv_row_count || 0))}</span>
+        <span class="pill ${s.row_count_delta === 0 ? 'ok' : 'warn'}">Row count delta (API-CSV): ${escapeHtml(String(s.row_count_delta || 0))}</span>
+        <span class="pill ${s.missing_in_csv_count ? 'warn' : 'ok'}">Missing in CSV: ${escapeHtml(String(s.missing_in_csv_count || 0))}</span>
+        <span class="pill ${s.missing_in_api_count ? 'warn' : 'ok'}">Missing in API: ${escapeHtml(String(s.missing_in_api_count || 0))}</span>
+        <span class="pill ${s.mismatch_count ? 'warn' : 'ok'}">Column mismatches: ${escapeHtml(String(s.mismatch_count || 0))}</span>
+      </div>
+    `;
+  }
+
+  function getToastComparisonStatus(comparison) {
+    const s = comparison && comparison.summary ? comparison.summary : null;
+    if (!s) return { label: "CLOSE / REVIEW", klass: "review", reason: "Upload a CSV baseline to score a full comparison." };
+    const hardProblem = (s.missing_in_csv_count || 0) > 0 || (s.missing_in_api_count || 0) > 0;
+    if (hardProblem) {
+      return { label: "PROBLEM", klass: "problem", reason: "Rows are missing on one side of the comparison." };
+    }
+    if ((s.mismatch_count || 0) > 0 || (s.row_count_delta || 0) !== 0) {
+      return { label: "CLOSE / REVIEW", klass: "review", reason: "Counts align, but one or more field-level mismatches exist." };
+    }
+    return { label: "MATCHED", klass: "matched", reason: "API and uploaded CSV rows align with no detected mismatches." };
+  }
+
+  function renderComparisonStatusAndMetrics(comparison) {
+    const status = getToastComparisonStatus(comparison);
+    const s = comparison && comparison.summary ? comparison.summary : null;
+    const apiRows = s ? s.api_row_count || 0 : 0;
+    const csvRows = s ? s.csv_row_count || 0 : 0;
+    const missingInCsv = s ? s.missing_in_csv_count || 0 : 0;
+    const missingInApi = s ? s.missing_in_api_count || 0 : 0;
+    const mismatchCount = s ? s.mismatch_count || 0 : 0;
+    const matchedRows = Math.max(0, apiRows - missingInCsv - mismatchCount);
+    return `
+      <div class="statusCard ${status.klass}">
+        <div class="statusCardTitle">Comparison status</div>
+        <div class="statusCardValue">${escapeHtml(status.label)}</div>
+        <div class="muted" style="margin-top:4px;">${escapeHtml(status.reason)}</div>
+      </div>
+      <div class="summaryGrid" style="margin-top:10px;">
+        <div class="summaryMetric"><div class="summaryMetricLabel">API rows</div><div class="summaryMetricValue">${escapeHtml(String(apiRows))}</div></div>
+        <div class="summaryMetric"><div class="summaryMetricLabel">CSV rows</div><div class="summaryMetricValue">${escapeHtml(String(csvRows))}</div></div>
+        <div class="summaryMetric"><div class="summaryMetricLabel">Matched rows</div><div class="summaryMetricValue">${escapeHtml(String(matchedRows))}</div></div>
+        <div class="summaryMetric"><div class="summaryMetricLabel">Missing in API</div><div class="summaryMetricValue">${escapeHtml(String(missingInApi))}</div></div>
+        <div class="summaryMetric"><div class="summaryMetricLabel">Missing in CSV</div><div class="summaryMetricValue">${escapeHtml(String(missingInCsv))}</div></div>
+        <div class="summaryMetric"><div class="summaryMetricLabel">Mismatch count</div><div class="summaryMetricValue">${escapeHtml(String(mismatchCount))}</div></div>
+      </div>
+    `;
+  }
+
+  function renderSimpleRowsTable(title, rows, columns, emptyLabel) {
+    const displayRows = Array.isArray(rows) ? rows.slice(0, 100) : [];
+    const head = columns.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
+    const body = displayRows.length
+      ? displayRows
+          .map((row) => {
+            const cells = columns.map((col) => `<td>${escapeHtml(String(row && row[col] !== undefined && row[col] !== null ? row[col] : ""))}</td>`).join("");
+            return `<tr>${cells}</tr>`;
+          })
+          .join("")
+      : `<tr><td colspan="${Math.max(columns.length,1)}" class="muted">${escapeHtml(emptyLabel)}</td></tr>`;
+
+    return `
+      <div class="sectionTitle">${escapeHtml(title)}</div>
+      <div class="tableScroll"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>
+      ${Array.isArray(rows) && rows.length > 100 ? `<div class='muted' style='margin-top:6px;'>Showing first 100 rows of ${escapeHtml(String(rows.length))}.</div>` : ""}
+    `;
+  }
+
+  function renderColumnMismatchesTable(mismatches) {
+    const rows = Array.isArray(mismatches) ? mismatches.slice(0, 100) : [];
+    const body = rows.length
+      ? rows
+          .map((row) => {
+            const diffs = Array.isArray(row?.diffs)
+              ? row.diffs
+                  .map(
+                    (d) =>
+                      `<div><b>${escapeHtml(String(d.field || ""))}</b>: API="${escapeHtml(String(d.api_value ?? ""))}" vs CSV="${escapeHtml(
+                        String(d.csv_value ?? "")
+                      )}"</div>`
+                  )
+                  .join("")
+              : "";
+            return `<tr>
+              <td>${escapeHtml(String(row?.api_row?.employee_id || ""))}</td>
+              <td>${escapeHtml(String(row?.api_row?.employee_name || ""))}</td>
+              <td>${escapeHtml(String(row?.api_row?.job_title || row?.api_row?.department || ""))}</td>
+              <td>${diffs || "<span class='muted'>No diff details.</span>"}</td>
+            </tr>`;
+          })
+          .join("")
+      : `<tr><td colspan="4" class="muted">No column mismatches.</td></tr>`;
+    return `
+      <div class="sectionTitle">Column mismatches</div>
+      <div class="tableScroll">
+        <table>
+          <thead>
+            <tr>
+              <th>employee_id</th>
+              <th>employee_name</th>
+              <th>department</th>
+              <th>differences</th>
+            </tr>
+          </thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+      ${Array.isArray(mismatches) && mismatches.length > 100 ? `<div class='muted' style='margin-top:6px;'>Showing first 100 mismatches of ${escapeHtml(String(mismatches.length))}.</div>` : ""}
+    `;
+  }
+
+  function getToastStableIdentityField(columns, rows) {
+    const candidates = [
+      { outputLabel: "Employee ID", sourceField: "Employee ID" },
+      { outputLabel: "Employee", sourceField: "Employee" },
+    ];
+    for (const candidate of candidates) {
+      const inColumns = columns.includes(candidate.sourceField);
+      const inRows = rows.some(
+        (row) =>
+          row &&
+          Object.prototype.hasOwnProperty.call(row, candidate.sourceField) &&
+          row[candidate.sourceField] !== null &&
+          row[candidate.sourceField] !== undefined &&
+          String(row[candidate.sourceField]).trim() !== ""
+      );
+      if (inColumns || inRows) return candidate;
+    }
+    return null;
+  }
+
+  function renderToastOriginalTable(columns, rows) {
+    const preferredOrder = [
+      "Employee",
+      "Employee ID",
+      "Department",
+      "Job Code",
+      "Regular Hours",
+      "Overtime Hours",
+      "Hourly Rate",
+      "Regular Pay",
+      "Overtime Pay",
+      "Total Pay",
+      "Net Sales",
+      "Declared Tips",
+      "Non-Cash Tips",
+      "Total Tips",
+      "Tips Withheld",
+      "Total Gratuity",
+      "Location",
+      "Location Code",
+    ];
+
+    const present = preferredOrder.filter((c) => columns.includes(c) || rows.some((r) => r && Object.prototype.hasOwnProperty.call(r, c)));
+    const extras = columns.filter((c) => !present.includes(c) && c !== "Toast Employee ID");
+    const displayColumns = present.concat(extras);
+
+    const head = displayColumns.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
+    const body = rows.length
+      ? rows
+          .map((row) => {
+            const cells = displayColumns
+              .map((col) => {
+                const value = row && Object.prototype.hasOwnProperty.call(row, col) ? row[col] : "";
+                const rendered =
+                  value === null || value === undefined
+                    ? ""
+                    : typeof value === "object"
+                    ? JSON.stringify(value)
+                    : String(value);
+                return `<td>${escapeHtml(rendered)}</td>`;
+              })
+              .join("");
+            return `<tr>${cells}</tr>`;
+          })
+          .join("")
+      : `<tr><td colspan="${Math.max(displayColumns.length, 1)}" class="muted">No rows returned for this pay period.</td></tr>`;
+
+    const regularHoursTotal = rows.reduce((sum, row) => {
+      const val = Number(row?.["Regular Hours"]);
+      return sum + (Number.isFinite(val) ? val : 0);
+    }, 0);
+    const overtimeHoursTotal = rows.reduce((sum, row) => {
+      const val = Number(row?.["Overtime Hours"]);
+      return sum + (Number.isFinite(val) ? val : 0);
+    }, 0);
+
+    return {
+      html: `
+        <div class="tableScroll"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>
+        <div class="miniCard" style="margin-top:10px;">
+          <div><span class="muted">Regular Hours Total:</span> <b>${escapeHtml(regularHoursTotal.toFixed(2))}</b></div>
+          <div style="margin-top:4px;"><span class="muted">Overtime Hours Total:</span> <b>${escapeHtml(
+            overtimeHoursTotal.toFixed(2)
+          )}</b></div>
+        </div>
+      `,
+      identityField: { outputLabel: "Employee ID", sourceField: "Employee ID" },
+    };
+  }
+
+  function buildDepartmentHoursAudit(rows) {
+    const list = Array.isArray(rows) ? rows : [];
+    const byKey = new Map();
+
+    list.forEach((row) => {
+      const employeeId = String(row["Employee ID"] || "").trim();
+      const employee = String(row["Employee"] || "").trim();
+      const department = String(row["Department"] || row["Job Title"] || "").trim();
+      const jobCode = String(row["Job Code"] || "").trim();
+
+      const employeeKey = employeeId || employee || "__unknown_employee__";
+      const deptKey = jobCode || department || "__unknown_department__";
+      const key = `${employeeKey}|||${deptKey}`;
+
+      if (!byKey.has(key)) {
+        byKey.set(key, {
+          Employee: employee || null,
+          "Employee ID": employeeId || null,
+          Department: department || null,
+          "Job Code": jobCode || null,
+          "Regular Hours": 0,
+          "Overtime Hours": 0,
         });
-
-        const priorSelect = document.getElementById("toastOriginalPriorSelect");
-        if (priorSelect) {
-          priorSelect.addEventListener("change", async () => {
-            state.toastOriginalSelectionPriorRecordId = priorSelect.value;
-            if (state.toastOriginalSelectionPriorRecordId) state.toastOriginalSelectionBucket = "prior";
-            await loadToastOriginalBaselineForSelectedPeriod();
-            renderToastOriginalTab();
-          });
-        }
-
-        const loadBtn = document.getElementById("loadToastOriginalBtn");
-        if (loadBtn) loadBtn.addEventListener("click", loadToastOriginalData);
-        const loadDebugBtn = document.getElementById("loadToastOriginalDebugBtn");
-        if (loadDebugBtn) loadDebugBtn.addEventListener("click", loadToastOriginalDebugData);
-        const uploadBtn = document.getElementById("uploadToastOriginalCsvBtn");
-        if (uploadBtn) uploadBtn.addEventListener("click", uploadToastOriginalCsvBaseline);
       }
 
-      async function loadToastOriginalSelectorForSelected() {
-        state.toastOriginalSelector = null;
+      const agg = byKey.get(key);
+      agg["Regular Hours"] += Number(row["Regular Hours"] || 0);
+      agg["Overtime Hours"] += Number(row["Overtime Hours"] || 0);
+    });
+
+    return Array.from(byKey.values()).map((row) => ({
+      ...row,
+      "Regular Hours": Number(row["Regular Hours"].toFixed(2)),
+      "Overtime Hours": Number(row["Overtime Hours"].toFixed(2)),
+      "Total Hours": Number((row["Regular Hours"] + row["Overtime Hours"]).toFixed(2)),
+    }));
+  }
+
+  function compareDepartmentHours(apiRows, csvRows) {
+    const apiAudit = buildDepartmentHoursAudit(apiRows);
+    const csvAudit = buildDepartmentHoursAudit(csvRows);
+
+    const apiMap = new Map();
+    const csvMap = new Map();
+
+    apiAudit.forEach((row) => {
+      const key = `${String(row["Employee ID"] || row.Employee || "").toLowerCase()}|||${String(row["Job Code"] || row.Department || "").toLowerCase()}`;
+      apiMap.set(key, row);
+    });
+
+    csvAudit.forEach((row) => {
+      const key = `${String(row["Employee ID"] || row.Employee || "").toLowerCase()}|||${String(row["Job Code"] || row.Department || "").toLowerCase()}`;
+      csvMap.set(key, row);
+    });
+
+    const allKeys = new Set([...apiMap.keys(), ...csvMap.keys()]);
+    const rows = [];
+
+    allKeys.forEach((key) => {
+      const api = apiMap.get(key) || null;
+      const csv = csvMap.get(key) || null;
+
+      rows.push({
+        Employee: api?.Employee || csv?.Employee || null,
+        "Employee ID": api?.["Employee ID"] || csv?.["Employee ID"] || null,
+        Department: api?.Department || csv?.Department || null,
+        "Job Code": api?.["Job Code"] || csv?.["Job Code"] || null,
+        "API Regular Hours": api?.["Regular Hours"] ?? null,
+        "CSV Regular Hours": csv?.["Regular Hours"] ?? null,
+        "API Overtime Hours": api?.["Overtime Hours"] ?? null,
+        "CSV Overtime Hours": csv?.["Overtime Hours"] ?? null,
+        "API Total Hours": api?.["Total Hours"] ?? null,
+        "CSV Total Hours": csv?.["Total Hours"] ?? null,
+        matches:
+          api &&
+          csv &&
+          Number(api["Regular Hours"] || 0).toFixed(2) === Number(csv["Regular Hours"] || 0).toFixed(2) &&
+          Number(api["Overtime Hours"] || 0).toFixed(2) === Number(csv["Overtime Hours"] || 0).toFixed(2),
+      });
+    });
+
+    return rows.sort((a, b) => {
+      const emp = String(a["Employee ID"] || "").localeCompare(String(b["Employee ID"] || ""));
+      if (emp !== 0) return emp;
+      return String(a.Department || "").localeCompare(String(b.Department || ""));
+    });
+  }
+
+  function renderDepartmentAuditTable(apiRows, csvRows) {
+    const rows = compareDepartmentHours(apiRows, csvRows);
+    const ordered = rows.slice().sort((a, b) => {
+      if (a.matches === b.matches) {
+        const emp = String(a["Employee ID"] || "").localeCompare(String(b["Employee ID"] || ""));
+        if (emp !== 0) return emp;
+        return String(a.Department || "").localeCompare(String(b.Department || ""));
+      }
+      return a.matches ? 1 : -1;
+    });
+
+    const body = ordered.length
+      ? ordered
+          .map((row) => {
+            return `
+              <tr>
+                <td>${escapeHtml(String(row.Employee || ""))}</td>
+                <td>${escapeHtml(String(row["Employee ID"] || ""))}</td>
+                <td>${escapeHtml(String(row.Department || ""))}</td>
+                <td>${escapeHtml(String(row["Job Code"] || ""))}</td>
+                <td>${escapeHtml(String(row["API Regular Hours"] ?? ""))}</td>
+                <td>${escapeHtml(String(row["CSV Regular Hours"] ?? ""))}</td>
+                <td>${escapeHtml(String(row["API Overtime Hours"] ?? ""))}</td>
+                <td>${escapeHtml(String(row["CSV Overtime Hours"] ?? ""))}</td>
+                <td>${escapeHtml(String(row["API Total Hours"] ?? ""))}</td>
+                <td>${escapeHtml(String(row["CSV Total Hours"] ?? ""))}</td>
+                <td>${row.matches ? pill("MATCH", "ok") : pill("CHECK", "warn")}</td>
+              </tr>
+            `;
+          })
+          .join("")
+      : `<tr><td colspan="11" class="muted">No employee + department totals available to compare.</td></tr>`;
+
+    return `
+      <div class="sectionTitle">Outcome Audit: Employee + Department Hours</div>
+      <p class="sectionHelp">This is the important audit. It compares total regular and overtime hours by employee + department. It does not care about line count.</p>
+      <div class="tableScroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Employee</th>
+              <th>Employee ID</th>
+              <th>Department</th>
+              <th>Job Code</th>
+              <th>API Regular Hours</th>
+              <th>CSV Regular Hours</th>
+              <th>API Overtime Hours</th>
+              <th>CSV Overtime Hours</th>
+              <th>API Total Hours</th>
+              <th>CSV Total Hours</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function renderToastOriginalTab() {
+    const content = document.getElementById("content");
+    const locationName = document.getElementById("locationSelect").value;
+    if (!locationName) {
+      content.innerHTML = "<div class='loading'>Select a location to use Toast Pay Period Data - Original.</div>";
+      return;
+    }
+    if (!state.toastOriginalSelector) {
+      content.innerHTML = "<div class='loading'>Loading pay period selector...</div>";
+      return;
+    }
+
+    const selector = state.toastOriginalSelector;
+    const current = selector.current_pay_period;
+    const next = selector.next_pay_period;
+    const prior = Array.isArray(selector.prior_pay_periods) ? selector.prior_pay_periods : [];
+    const selectedPeriod = toastOriginalSelectedPeriod();
+    const priorOptions = ["<option value=''>Select a prior pay period...</option>"]
+      .concat(
+        prior.map(
+          (p) =>
+            `<option value="${escapeAttr(p.record_id)}" ${
+              String(state.toastOriginalSelectionPriorRecordId) === String(p.record_id) ? "selected" : ""
+            }>${escapeHtml(fmtDateRange(p.start_date, p.end_date))}</option>`
+        )
+      )
+      .join("");
+
+    const data = state.toastOriginalData;
+    const columns = Array.isArray(data?.columns) ? data.columns : [];
+    const rows = Array.isArray(data?.rows) ? data.rows : [];
+    const comparison = state.toastOriginalComparison;
+    const csvRows = Array.isArray(state.toastOriginalCsvBaseline?.rows) ? state.toastOriginalCsvBaseline.rows : [];
+
+    let stableIdentityText = "";
+    if (rows.length) {
+      stableIdentityText = `<div class="muted" style="margin-top:8px;">Stable identity column shown: <b style="color:var(--text)">Employee ID</b> (sourced from <b style="color:var(--text)">Employee ID</b>).</div>`;
+    }
+
+    const tableRender = renderToastOriginalTable(columns, rows);
+
+    content.innerHTML = `
+      <div class="stack">
+        <div class="panel toastOriginalControlsPanel">
+          <div class="sectionTitle" style="margin-top:0;">View Control</div>
+          <div class="row" style="gap:8px;">
+            <button class="btn primary" type="button">See Original</button>
+            <button class="btn" type="button" disabled title="Coming later">See RDMS Format (Coming Soon)</button>
+          </div>
+
+          <div class="sectionTitle">Pay Period to Load</div>
+          <div class="gridTwo">
+            <label class="miniCard">
+              <div><input type="radio" name="toastOriginalBucket" value="current" ${
+                state.toastOriginalSelectionBucket === "current" ? "checked" : ""
+              } /> Current Pay Period</div>
+              <div class="muted">${escapeHtml(fmtDateRange(current?.start_date, current?.end_date) || "Not available")}</div>
+            </label>
+            <label class="miniCard">
+              <div><input type="radio" name="toastOriginalBucket" value="next" ${
+                state.toastOriginalSelectionBucket === "next" ? "checked" : ""
+              } /> Next Pay Period</div>
+              <div class="muted">${escapeHtml(fmtDateRange(next?.start_date, next?.end_date) || "Not available")}</div>
+            </label>
+          </div>
+
+          <div class="row" style="margin-top:10px;">
+            <label style="min-width:260px;flex:1;">
+              <div class="muted" style="margin-bottom:6px;">Prior Pay Period</div>
+              <select id="toastOriginalPriorSelect">${priorOptions}</select>
+            </label>
+            <button class="btn primary" id="loadToastOriginalBtn" type="button" ${state.toastOriginalLoading ? "disabled" : ""}>
+              ${state.toastOriginalLoading ? "Loading..." : "Load Original Toast Data"}
+            </button>
+            <button class="btn" id="loadToastOriginalDebugBtn" type="button" ${state.toastOriginalDebugLoading ? "disabled" : ""}>
+              ${state.toastOriginalDebugLoading ? "Loading Debug..." : "Load Barrio Debug Payload"}
+            </button>
+          </div>
+
+          <div class="sectionTitle">Optional Audit Baseline: Upload Toast Payroll Export CSV</div>
+          <p class="sectionHelp">Staff can upload the actual exported file for this selected pay period. Stored for audit trail and compared against API-derived rows.</p>
+          <div class="row" style="margin-top:8px;align-items:flex-end;">
+            <label style="min-width:320px;flex:1;">
+              <div class="muted" style="margin-bottom:6px;">Toast Payroll Export CSV file</div>
+              <input id="toastOriginalCsvFile" type="file" class="input" accept=".csv,text/csv" />
+            </label>
+            <button class="btn" id="uploadToastOriginalCsvBtn" type="button" ${state.toastOriginalCsvUploadBusy ? "disabled" : ""}>
+              ${state.toastOriginalCsvUploadBusy ? "Uploading..." : "Upload CSV Baseline"}
+            </button>
+          </div>
+          ${state.toastOriginalCsvUploadError ? `<div class="muted" style="margin-top:8px;">Upload failed: ${escapeHtml(state.toastOriginalCsvUploadError)}</div>` : ""}
+          ${
+            state.toastOriginalCsvBaseline
+              ? `<div class="miniCard" style="margin-top:12px;">
+                  <div><span class="muted">Latest baseline:</span> ${escapeHtml(state.toastOriginalCsvBaseline.file_name || "uploaded.csv")}</div>
+                  <div class="muted" style="margin-top:4px;">Uploaded by ${escapeHtml(state.toastOriginalCsvBaseline.uploaded_by || "")} at ${escapeHtml(state.toastOriginalCsvBaseline.uploaded_at || "")}</div>
+                </div>`
+              : ""
+          }
+          ${state.toastOriginalLoadError ? `<div class="muted" style="margin-top:10px;">Load failed: ${escapeHtml(state.toastOriginalLoadError)}</div>` : ""}
+        </div>
+
+        <div class="panel toastOriginalDataPanel">
+          <div class="sectionTitle" style="margin-top:0;">Original Toast Pay Period Rows</div>
+          <div class="row" style="gap:16px;">
+            <div><span class="muted">Location:</span> ${escapeHtml(locationName)}</div>
+            <div><span class="muted">Selected pay period:</span> ${escapeHtml(
+              fmtDateRange(selectedPeriod?.start_date, selectedPeriod?.end_date) || "Not selected"
+            )}</div>
+            <div><span class="muted">Rows:</span> ${escapeHtml(String(rows.length))}</div>
+          </div>
+          <div class="sectionHelp" style="margin-top:8px;">Raw/original Toast row payload rendered directly as a table for auditing.</div>
+
+          ${renderComparisonStatusAndMetrics(comparison)}
+          ${stableIdentityText}
+          ${tableRender.html}
+
+          ${
+            state.toastOriginalCsvBaseline
+              ? renderDepartmentAuditTable(rows, csvRows)
+              : "<div class='sectionTitle'>Outcome Audit: Employee + Department Hours</div><div class='muted'>Upload a CSV baseline to compare employee + department hour totals.</div>"
+          }
+
+          ${
+            comparison && Array.isArray(comparison.column_mismatches)
+              ? renderColumnMismatchesTable(comparison.column_mismatches)
+              : ""
+          }
+
+          ${
+            state.toastOriginalDebugData
+              ? `
+              <details class="debugSection">
+                <summary>Debug payload</summary>
+                <div class="debugSectionBody">
+                  <pre style="white-space:pre-wrap;word-break:break-word;">${escapeHtml(JSON.stringify(state.toastOriginalDebugData, null, 2))}</pre>
+                </div>
+              </details>
+            `
+              : ""
+          }
+        </div>
+      </div>
+    `;
+
+    content.querySelectorAll("input[name='toastOriginalBucket']").forEach((el) => {
+      el.addEventListener("change", () => {
+        state.toastOriginalSelectionBucket = el.value;
+        renderToastOriginalTab();
+      });
+    });
+
+    const priorSelect = document.getElementById("toastOriginalPriorSelect");
+    if (priorSelect) {
+      priorSelect.addEventListener("change", () => {
+        state.toastOriginalSelectionPriorRecordId = priorSelect.value;
+        if (state.toastOriginalSelectionPriorRecordId) state.toastOriginalSelectionBucket = "prior";
+        renderToastOriginalTab();
+      });
+    }
+
+    const loadBtn = document.getElementById("loadToastOriginalBtn");
+    if (loadBtn) loadBtn.addEventListener("click", () => loadToastOriginalData(false));
+
+    const debugBtn = document.getElementById("loadToastOriginalDebugBtn");
+    if (debugBtn) debugBtn.addEventListener("click", () => loadToastOriginalData(true));
+
+    const uploadBtn = document.getElementById("uploadToastOriginalCsvBtn");
+    if (uploadBtn) uploadBtn.addEventListener("click", uploadToastOriginalCsvBaseline);
+  }
+
+  async function loadToastOriginalSelectorForSelected() {
+    state.toastOriginalSelector = null;
+    state.toastOriginalData = null;
+    state.toastOriginalDebugData = null;
+    state.toastOriginalLoadError = "";
+    state.toastOriginalLoading = false;
+    state.toastOriginalDebugLoading = false;
+    state.toastOriginalCsvUploadBusy = false;
+    state.toastOriginalCsvUploadError = "";
+    state.toastOriginalComparison = null;
+    renderToastOriginalTab();
+
+    const name = document.getElementById("locationSelect").value;
+    if (!name) return;
+
+    const q = encodeURIComponent(name);
+    const { resp, body } = await apiGet(`/staff/pay-period-selector?locationName=${q}`);
+    if (!resp.ok) {
+      state.toastOriginalLoadError = body.error || "selector_load_failed";
+      state.toastOriginalSelector = { current_pay_period: null, next_pay_period: null, prior_pay_periods: [] };
+      renderToastOriginalTab();
+      return;
+    }
+
+    const selector = body.selector || {};
+    state.toastOriginalSelector = selector;
+    state.toastOriginalSelectionBucket = selector.default_selection?.bucket || "current";
+
+    await loadToastOriginalCsvBaselineMeta();
+    renderToastOriginalTab();
+  }
+
+  async function loadToastOriginalCsvBaselineMeta() {
+    const selected = toastOriginalSelectedPeriod();
+    const locationName = document.getElementById("locationSelect").value;
+    if (!locationName || !selected) {
+      state.toastOriginalCsvBaseline = null;
+      state.toastOriginalComparison = null;
+      return;
+    }
+
+    const query = new URLSearchParams({
+      locationName,
+      periodStart: selected.start_date,
+      periodEnd: selected.end_date,
+    });
+
+    const { resp, body } = await apiGet(`/staff/toast-original-csv-baseline?${query.toString()}`);
+    if (!resp.ok) {
+      state.toastOriginalCsvBaseline = null;
+      state.toastOriginalComparison = null;
+      return;
+    }
+
+    state.toastOriginalCsvBaseline = body.baseline || null;
+    state.toastOriginalComparison = body.comparison || null;
+  }
+
+  async function loadToastOriginalData(includeDebug) {
+    const selected = toastOriginalSelectedPeriod();
+    if (!selected) {
+      state.toastOriginalLoadError = "no_selected_pay_period";
+      renderToastOriginalTab();
+      return;
+    }
+
+    state.toastOriginalLoadError = "";
+    if (includeDebug) state.toastOriginalDebugLoading = true;
+    else state.toastOriginalLoading = true;
+    renderToastOriginalTab();
+
+    const locationName = document.getElementById("locationSelect").value;
+
+    try {
+      const { resp, body } = await apiPost("/staff/toast-original-pay-period", {
+        location_name: locationName,
+        period_start: selected.start_date,
+        period_end: selected.end_date,
+        debug_toast_mapping: !!includeDebug,
+      });
+
+      if (!resp.ok) {
+        state.toastOriginalLoadError = body.error || "toast_original_load_failed";
         state.toastOriginalData = null;
-        state.toastOriginalDebugData = null;
-        state.toastOriginalLoadError = "";
-        state.toastOriginalLoading = false;
-        state.toastOriginalDebugLoading = false;
-        state.toastOriginalCsvUploadBusy = false;
-        state.toastOriginalCsvUploadError = "";
-        state.toastOriginalCsvBaseline = null;
-        state.toastOriginalComparison = null;
-        state.toastOriginalSelectionBucket = "";
-        state.toastOriginalSelectionPriorRecordId = "";
+        if (includeDebug) state.toastOriginalDebugData = body || null;
         renderToastOriginalTab();
-
-        const name = document.getElementById("locationSelect").value;
-        if (!name) return;
-        const q = encodeURIComponent(name);
-        const { resp, body } = await apiGet(`/staff/pay-period-selector?locationName=${q}`);
-        if (!resp.ok) {
-          state.toastOriginalLoadError = body.error || "selector_load_failed";
-          state.toastOriginalSelector = { current_pay_period: null, next_pay_period: null, prior_pay_periods: [] };
-          renderToastOriginalTab();
-          return;
-        }
-        const selector = body.selector || {};
-        state.toastOriginalSelector = selector;
-        state.toastOriginalSelectionBucket = selector.default_selection?.bucket || "current";
-        await loadToastOriginalBaselineForSelectedPeriod();
-        renderToastOriginalTab();
+        return;
       }
 
-      async function loadToastOriginalDebugData() {
-        if (state.toastOriginalDebugLoading) return;
-        const selected = toastOriginalSelectedPeriod();
-        if (!selected) {
-          state.toastOriginalLoadError = "no_selected_pay_period";
-          renderToastOriginalTab();
-          return;
-        }
+      state.toastOriginalData = body || null;
+      state.toastOriginalDebugData = includeDebug ? body?.debug || body : null;
 
-        const locationName = document.getElementById("locationSelect").value;
-        state.toastOriginalDebugLoading = true;
-        state.toastOriginalLoadError = "";
-        renderToastOriginalTab();
-        try {
-          const { resp, body } = await apiPost("/staff/toast-original-pay-period", {
-            location_name: locationName,
-            period_start: selected.start_date,
-            period_end: selected.end_date,
-            debug_toast_mapping: true,
-          });
-          if (!resp.ok) {
-            state.toastOriginalLoadError = body.error || "debug_load_failed";
-            state.toastOriginalDebugData = null;
-            return;
-          }
-          state.toastOriginalDebugData = body?.data?.debug || null;
-        } catch (err) {
-          state.toastOriginalLoadError = (err && err.message) || "debug_load_failed";
-          state.toastOriginalDebugData = null;
-        } finally {
-          state.toastOriginalDebugLoading = false;
-          renderToastOriginalTab();
-        }
-      }
+      await loadToastOriginalCsvBaselineMeta();
+    } catch (err) {
+      state.toastOriginalLoadError = (err && err.message) || "toast_original_load_failed";
+      state.toastOriginalData = null;
+    } finally {
+      state.toastOriginalLoading = false;
+      state.toastOriginalDebugLoading = false;
+      renderToastOriginalTab();
+    }
+  }
 
-      async function loadToastOriginalData() {
-        if (state.toastOriginalLoading) return;
+  async function uploadToastOriginalCsvBaseline() {
+    const fileInput = document.getElementById("toastOriginalCsvFile");
+    const selected = toastOriginalSelectedPeriod();
+    const locationName = document.getElementById("locationSelect").value;
 
-        const friendlyToastOriginalError = (raw) => {
-          const msg = String(raw || "");
-          if (
-            msg.includes("toast_analytics_rate_limited") ||
-            msg.includes("toast_rate_limited") ||
-            msg.includes('"status":429') ||
-            msg.includes("429 Too Many Requests")
-          ) {
-            return "Toast rate-limited this request. Wait a moment and try again.";
-          }
-          return msg || "load_failed";
-        };
+    if (!selected) {
+      alert("Pick a pay period first.");
+      return;
+    }
+    if (!fileInput || !fileInput.files || !fileInput.files[0]) {
+      alert("Choose a CSV file first.");
+      return;
+    }
 
-        const selected = toastOriginalSelectedPeriod();
-        if (!selected) {
-          state.toastOriginalLoadError = "no_selected_pay_period";
-          renderToastOriginalTab();
-          return;
-        }
-        const locationName = document.getElementById("locationSelect").value;
-        state.toastOriginalLoading = true;
-        state.toastOriginalLoadError = "";
-        state.toastOriginalDebugData = null;
-        renderToastOriginalTab();
-        try {
-          const { resp, body } = await apiPost("/staff/toast-original-pay-period", {
-            location_name: locationName,
-            period_start: selected.start_date,
-            period_end: selected.end_date,
-          });
-          if (!resp.ok) {
-            console.error("[toast_original_load_failed]", body.error || "load_failed");
-            state.toastOriginalLoadError = friendlyToastOriginalError(body.error || "load_failed");
-            state.toastOriginalData = null;
-            state.toastOriginalComparison = null;
-            return;
-          }
-          state.toastOriginalData = body.data || null;
-          state.toastOriginalComparison = body.comparison || null;
-        } catch (err) {
-          console.error("[toast_original_load_failed]", err);
-          state.toastOriginalLoadError = friendlyToastOriginalError((err && err.message) || "load_failed");
-          state.toastOriginalData = null;
-          state.toastOriginalComparison = null;
-        } finally {
-          state.toastOriginalLoading = false;
-          renderToastOriginalTab();
-        }
-      }
+    state.toastOriginalCsvUploadBusy = true;
+    state.toastOriginalCsvUploadError = "";
+    renderToastOriginalTab();
 
-      async function loadToastOriginalBaselineForSelectedPeriod() {
-        const selected = toastOriginalSelectedPeriod();
-        state.toastOriginalCsvBaseline = null;
-        if (!selected) return;
-        const locationName = document.getElementById("locationSelect").value;
-        const q = new URLSearchParams({
-          locationName,
-          periodStart: selected.start_date,
-          periodEnd: selected.end_date,
-        });
-        const { resp, body } = await apiGet(`/staff/toast-original-pay-period/baseline?${q.toString()}`);
-        if (!resp.ok) {
-          state.toastOriginalCsvUploadError = body.error || "baseline_load_failed";
-          return;
-        }
-        state.toastOriginalCsvBaseline = body.baseline || null;
-      }
+    try {
+      const form = new FormData();
+      form.append("file", fileInput.files[0]);
+      form.append("location_name", locationName);
+      form.append("period_start", selected.start_date);
+      form.append("period_end", selected.end_date);
 
-      async function uploadToastOriginalCsvBaseline() {
-        if (state.toastOriginalCsvUploadBusy) return;
-        const selected = toastOriginalSelectedPeriod();
-        if (!selected) {
-          state.toastOriginalCsvUploadError = "no_selected_pay_period";
-          renderToastOriginalTab();
-          return;
-        }
-        const input = document.getElementById("toastOriginalCsvFile");
-        const file = input && input.files && input.files[0] ? input.files[0] : null;
-        if (!file) {
-          state.toastOriginalCsvUploadError = "csv_file_required";
-          renderToastOriginalTab();
-          return;
-        }
-
-        const text = await file.text();
-        state.toastOriginalCsvUploadBusy = true;
-        state.toastOriginalCsvUploadError = "";
-        renderToastOriginalTab();
-
-        try {
-          const locationName = document.getElementById("locationSelect").value;
-          const { resp, body } = await apiPost('/staff/toast-original-pay-period/baseline', {
-            location_name: locationName,
-            period_start: selected.start_date,
-            period_end: selected.end_date,
-            file_name: file.name,
-            raw_csv: text,
-          });
-          if (!resp.ok) {
-            state.toastOriginalCsvUploadError = body.error || 'csv_upload_failed';
-            return;
-          }
-          await loadToastOriginalBaselineForSelectedPeriod();
-          if (state.toastOriginalData && state.toastOriginalData.rows) {
-            await loadToastOriginalData();
-            return;
-          }
-        } catch (err) {
-          state.toastOriginalCsvUploadError = (err && err.message) || 'csv_upload_failed';
-        } finally {
-          state.toastOriginalCsvUploadBusy = false;
-          renderToastOriginalTab();
-        }
-      }
-
-      async function logout() {
-        await fetch("/auth/logout", { method: "POST", credentials: "include" });
-        window.location.href = "/auth/google";
-      }
-
-      document.getElementById("tabs").addEventListener("click", (e) => {
-        const tab = e.target && e.target.dataset ? e.target.dataset.tab : null;
-        if (!tab) return;
-        setActiveTab(tab);
+      const resp = await fetch("/staff/toast-original-csv-baseline/upload", {
+        method: "POST",
+        credentials: "include",
+        body: form,
       });
 
-      document.getElementById("locationSelect").addEventListener("change", () => {
-        if (state.tab === "confirmations") {
-          loadRecapForSelected();
-          return;
-        }
-        if (state.tab === "rules") {
-          loadRulesForSelected();
-          return;
-        }
-        if (state.tab === "excluded") {
-          loadExcludedForSelected();
-          return;
-        }
-        if (state.tab === "outcome") {
-          loadOutcomeSelectorForSelected();
-          return;
-        }
-        if (state.tab === "toastOriginal") {
-          loadToastOriginalSelectorForSelected();
-          return;
-        }
-        setActiveTab("confirmations");
-        loadRecapForSelected();
-      });
+      const body = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        state.toastOriginalCsvUploadError = body.error || "csv_upload_failed";
+        renderToastOriginalTab();
+        return;
+      }
 
-      document.getElementById("logoutBtn").addEventListener("click", logout);
+      fileInput.value = "";
+      await loadToastOriginalCsvBaselineMeta();
+    } catch (err) {
+      state.toastOriginalCsvUploadError = (err && err.message) || "csv_upload_failed";
+    } finally {
+      state.toastOriginalCsvUploadBusy = false;
+      renderToastOriginalTab();
+    }
+  }
 
-      (async function boot() {
-        await ensureLoggedIn();
-        await loadLocations();
-        setActiveTab("confirmations");
-      })();
-    </script>
+  document.getElementById("locationSelect").addEventListener("change", async () => {
+    const tab = state.tab;
+    state.recap = null;
+    state.rules = null;
+    state.outcomeSelector = null;
+    state.outcomeResult = null;
+    state.toastOriginalSelector = null;
+    state.toastOriginalData = null;
+    state.toastOriginalDebugData = null;
+    state.toastOriginalCsvBaseline = null;
+    state.toastOriginalComparison = null;
+
+    if (tab === "confirmations") await loadRecapForSelected();
+    else if (tab === "rules") await loadRulesForSelected();
+    else if (tab === "excluded") await loadExcludedForSelected();
+    else if (tab === "outcome") await loadOutcomeSelectorForSelected();
+    else if (tab === "toastOriginal") await loadToastOriginalSelectorForSelected();
+  });
+
+  document.querySelectorAll(".tab").forEach((el) => {
+    el.addEventListener("click", () => setActiveTab(el.dataset.tab));
+  });
+
+  document.getElementById("logoutBtn").addEventListener("click", async () => {
+    await fetch("/auth/logout", { method: "POST", credentials: "include" });
+    window.location.href = "/auth/google";
+  });
+
+  (async function init() {
+    await ensureLoggedIn();
+    await loadLocations();
+    renderConfirmations();
+  })();
+</script>
+```
+
   </body>
 </html>
