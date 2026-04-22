@@ -6,16 +6,17 @@
     <title>RDMS Payroll Validation</title>
     <style>
       :root {
-        --bg: #0b1220;
-        --card: #0f1a33;
-        --muted: #9fb0d0;
-        --text: #e9efff;
-        --border: rgba(255, 255, 255, 0.12);
-        --pill: rgba(255, 255, 255, 0.1);
+        --bg: #f5f5f5;
+        --card: #ffffff;
+        --muted: #6b7280;
+        --text: #111111;
+        --border: rgba(17, 17, 17, 0.12);
+        --pill: rgba(17, 17, 17, 0.04);
         --ok: rgba(46, 204, 113, 0.18);
         --warn: rgba(241, 196, 15, 0.18);
         --bad: rgba(231, 76, 60, 0.18);
-        --shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+        --focus-ring: rgba(75, 85, 99, 0.45);
+        --shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
       }
       * {
         box-sizing: border-box;
@@ -23,7 +24,7 @@
       body {
         margin: 0;
         font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
-        background: radial-gradient(1200px 800px at 20% 0%, #17254a 0%, var(--bg) 55%);
+        background: linear-gradient(180deg, #ffffff 0%, var(--bg) 100%);
         color: var(--text);
       }
       .wrap {
@@ -35,7 +36,7 @@
         position: sticky;
         top: 0;
         z-index: 5;
-        background: rgba(11, 18, 32, 0.72);
+        background: rgba(255, 255, 255, 0.9);
         border: 1px solid var(--border);
         border-radius: 16px;
         padding: 12px 14px;
@@ -67,7 +68,7 @@
         padding: 10px 12px;
         border-radius: 10px;
         border: 1px solid var(--border);
-        background: rgba(255, 255, 255, 0.06);
+        background: #ffffff;
         color: var(--text);
         outline: none;
       }
@@ -85,16 +86,20 @@
         padding: 10px 12px;
         border-radius: 10px;
         border: 1px solid var(--border);
-        background: rgba(255, 255, 255, 0.06);
+        background: #ffffff;
         color: var(--text);
         cursor: pointer;
       }
       .btn:hover {
-        background: rgba(255, 255, 255, 0.1);
+        background: #f3f4f6;
       }
       .btn.primary {
-        background: rgba(46, 204, 113, 0.18);
-        border-color: rgba(46, 204, 113, 0.35);
+        background: #111111;
+        border-color: #111111;
+        color: #ffffff;
+      }
+      .btn.primary:hover {
+        background: #1f2937;
       }
       .tabs {
         margin-top: 14px;
@@ -104,7 +109,7 @@
       }
       .tab {
         border: 1px solid var(--border);
-        background: rgba(255, 255, 255, 0.05);
+        background: #f9fafb;
         padding: 10px 12px;
         border-radius: 12px;
         cursor: pointer;
@@ -112,15 +117,16 @@
         color: var(--muted);
       }
       .tab.active {
-        background: rgba(46, 204, 113, 0.16);
-        border-color: rgba(46, 204, 113, 0.32);
+        background: #111111;
+        border-color: #111111;
         color: var(--text);
+        color: #ffffff;
       }
       .page {
         margin-top: 14px;
         border: 1px solid var(--border);
         border-radius: 16px;
-        background: rgba(15, 26, 51, 0.55);
+        background: var(--card);
         box-shadow: var(--shadow);
         overflow: hidden;
       }
@@ -152,7 +158,7 @@
         border: 1px solid var(--border);
         border-radius: 14px;
         overflow: hidden;
-        background: rgba(255, 255, 255, 0.03);
+        background: #ffffff;
       }
       th,
       td {
@@ -165,7 +171,7 @@
         text-align: left;
         color: var(--muted);
         font-weight: 600;
-        background: rgba(255, 255, 255, 0.04);
+        background: #f9fafb;
       }
       tr:last-child td {
         border-bottom: none;
@@ -197,7 +203,7 @@
         padding: 8px 10px;
         border-radius: 10px;
         border: 1px solid var(--border);
-        background: rgba(255, 255, 255, 0.06);
+        background: #ffffff;
         color: var(--text);
         outline: none;
       }
@@ -236,7 +242,7 @@
         padding: 10px 12px;
         border: 1px solid var(--border);
         border-radius: 12px;
-        background: rgba(255, 255, 255, 0.04);
+        background: #f9fafb;
       }
       .helperPanelTitle {
         margin: 0 0 6px;
@@ -267,7 +273,7 @@
       .panel {
         border: 1px solid var(--border);
         border-radius: 14px;
-        background: rgba(255, 255, 255, 0.03);
+        background: #ffffff;
         padding: 14px;
         min-width: 0;
       }
@@ -302,7 +308,7 @@
         border: 1px solid var(--border);
         border-radius: 12px;
         padding: 10px;
-        background: rgba(255, 255, 255, 0.03);
+        background: #ffffff;
       }
       .tableScroll {
         width: 100%;
@@ -330,7 +336,7 @@
         border: 1px solid var(--border);
         border-radius: 14px;
         padding: 12px;
-        background: rgba(255, 255, 255, 0.03);
+        background: #ffffff;
       }
       .statusCard.matched {
         border-color: rgba(46, 204, 113, 0.45);
@@ -379,7 +385,7 @@
         margin-top: 10px;
         border: 1px solid var(--border);
         border-radius: 12px;
-        background: rgba(255, 255, 255, 0.02);
+        background: #fafafa;
       }
       .debugSection > summary {
         cursor: pointer;
@@ -411,7 +417,7 @@
         top: 100%;
         margin-top: 8px;
         width: min(640px, 70vw);
-        background: rgba(15, 26, 51, 0.98);
+        background: #ffffff;
         border: 1px solid var(--border);
         border-radius: 12px;
         padding: 12px 12px;
@@ -428,8 +434,16 @@
         top: 100%;
         margin-top: 2px;
         border: 8px solid transparent;
-        border-bottom-color: rgba(15, 26, 51, 0.98);
+        border-bottom-color: #ffffff;
         z-index: 51;
+      }
+
+      select:focus,
+      .input:focus,
+      .btn:focus-visible,
+      .tab:focus-visible {
+        border-color: rgba(75, 85, 99, 0.45);
+        box-shadow: 0 0 0 3px var(--focus-ring);
       }
 
     </style>

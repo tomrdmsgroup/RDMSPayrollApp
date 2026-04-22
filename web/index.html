@@ -7,9 +7,56 @@
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script crossorigin src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; margin: 20px; }
-    .card { border: 1px solid #ddd; padding: 12px; margin-bottom: 12px; border-radius: 6px; }
-    label { display: block; margin-bottom: 4px; }
+    :root {
+      --bg: #f5f5f5;
+      --surface: #ffffff;
+      --border: #d4d4d8;
+      --text: #111111;
+      --muted: #52525b;
+      --focus: rgba(82, 82, 91, 0.4);
+    }
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .card {
+      border: 1px solid var(--border);
+      background: var(--surface);
+      padding: 12px;
+      margin-bottom: 12px;
+      border-radius: 6px;
+    }
+    label { display: block; margin-bottom: 4px; color: var(--muted); }
+    input {
+      margin-top: 4px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      width: 100%;
+      max-width: 320px;
+      color: var(--text);
+      background: #ffffff;
+    }
+    input:focus, button:focus-visible {
+      outline: none;
+      border-color: #52525b;
+      box-shadow: 0 0 0 3px var(--focus);
+    }
+    button {
+      margin-top: 8px;
+      padding: 8px 12px;
+      border-radius: 6px;
+      border: 1px solid #111111;
+      background: #111111;
+      color: #ffffff;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #27272a;
+      border-color: #27272a;
+    }
   </style>
 </head>
 <body>
