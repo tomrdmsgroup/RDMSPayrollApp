@@ -9,12 +9,13 @@ const {
   fetchToastEmployeesFromVitals,
   fetchToastTimeEntriesFromVitals,
 } = require('../providers/toastProvider');
+
 const inFlightPayPeriodLoads = new Map();
 
 function trimErrorText(value, maxLen = 1800) {
   const s = String(value || '');
   if (s.length <= maxLen) return s;
-  return `${s.slice(0, maxLen)}…[truncated ${s.length - maxLen} chars]`;
+  return `${s.slice(0, maxLen)}...[truncated ${s.length - maxLen} chars]`;
 }
 
 function formatAnalyticsError(analytics) {
@@ -66,6 +67,43 @@ function safeTrim(v) {
 
 function fullNameFromParts(first, last) {
   return [safeTrim(first), safeTrim(last)].filter(Boolean).join(' ').trim() || null;
+}
+
+function normalizeBusinessDate(value) {
+  const raw = safeTrim(value);
+  if (!raw) return null;
+  const digits = raw.replace(/[^\d]/g, '');
+  if (digits.length === 8) return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  return raw;
+}
+
+function sumNullable(current, next) {
+  if (next === null || next === undefined) return current;
+  return (current || 0) + next;
+}
+
+function sampleRows(rows, limit = 5) {
+  return (Array.isArray(rows) ? rows : []).slice(0, limit);
+}
+
+function sourceTag(sourceName, reason = null) {
+  return { source: sourceName || null, reason: reason || null };
+}
+
+function pickDominantSource(counter) {
+  if (!(counter instanceof Map) || counter.size === 0) return null;
+  return Array.from(counter.entries()).sort((a, b) => b[1] - a[1])[0][0];
+}
+
+function sourceIsPresent(sourceValue) {
+  return !!(sourceValue && typeof sourceValue === 'string' && sourceValue.trim());
+}
+
+function normalizeGroupPart(value, fallback = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized || fallback;
 }
 
 function normalizeEmployeeIdentity(row) {
@@ -127,13 +165,17 @@ function normalizeEmployeeIdentity(row) {
   };
 }
 
+function buildEmployeeLookupKeys(identity) {
+  return [identity?.employee_id, identity?.external_employee_id, identity?.toast_employee_id]
+    .filter(Boolean)
+    .map((x) => String(x).toLowerCase());
+}
+
 function buildEmployeeIndex(employeeRows) {
   const byKey = new Map();
   for (const row of employeeRows) {
     const identity = normalizeEmployeeIdentity(row);
-    const keys = [identity.employee_id, identity.external_employee_id, identity.toast_employee_id]
-      .filter(Boolean)
-      .map((x) => String(x).toLowerCase());
+    const keys = buildEmployeeLookupKeys(identity);
     for (const key of keys) {
       if (!byKey.has(key)) byKey.set(key, identity);
     }
@@ -154,6 +196,7 @@ function normalizeAnalyticsLaborRow(row, { location, periodStart, periodEnd, fal
       'employee.employeeId',
     ])
   );
+
   const analyticsExternalEmployeeId = safeTrim(
     pick(row, [
       'employeeExternalId',
@@ -203,6 +246,8 @@ function normalizeAnalyticsLaborRow(row, { location, periodStart, periodEnd, fal
         'job.id',
         'job.guid',
         'job.code',
+        'job.externalId',
+        'job.external_id',
       ])
     ) || null;
 
@@ -227,10 +272,14 @@ function normalizeAnalyticsLaborRow(row, { location, periodStart, periodEnd, fal
   const locationCode = safeTrim(
     pick(row, ['locationId', 'locationCode', 'restaurantGuid', 'restaurantExternalId', 'location.id', 'location.guid'])
   );
-  const locationName = safeTrim(pick(row, ['locationName', 'restaurantName', 'location.name', 'location.displayName'])) || location;
+
+  const locationName =
+    safeTrim(pick(row, ['locationName', 'restaurantName', 'location.name', 'location.displayName'])) || location;
+
   const businessDate = normalizeBusinessDate(
     pick(row, ['businessDate', 'business_date', 'date', 'workDate', 'shiftDate', 'day', 'reportDate'])
   );
+
   const payType = safeTrim(
     pick(row, ['payType', 'wageType', 'earningType', 'compensationType', 'pay.type', 'wage.type'])
   );
@@ -263,41 +312,706 @@ function normalizeAnalyticsLaborRow(row, { location, periodStart, periodEnd, fal
   };
 }
 
-function sumNullable(current, next) {
-  if (next === null || next === undefined) return current;
-  return (current || 0) + next;
+function normalizeJobIdentityPart(row) {
+  return safeTrim(row?.job_code) || safeTrim(row?.job_name) || null;
 }
 
-function normalizeGroupPart(value, fallback = '') {
-  const normalized = String(value || '').trim().toLowerCase();
-  return normalized || fallback;
+function buildEmployeeJobCompositeLookupKeys(row) {
+  const employeeKeys = buildEmployeeLookupKeys(row);
+  const jobPart = normalizeJobIdentityPart(row);
+  if (!jobPart) return [];
+  const normalizedJobPart = String(jobPart).trim().toLowerCase();
+  return employeeKeys.map((employeeKey) => `${employeeKey}|||${normalizedJobPart}`);
 }
 
-function normalizeBusinessDate(value) {
-  const raw = safeTrim(value);
-  if (!raw) return null;
-  const digits = raw.replace(/[^\d]/g, '');
-  if (digits.length === 8) return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
-  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
-  return raw;
+function normalizeTimeEntryRow(row, fallbackLocationName = null, fallbackLocationCode = null) {
+  const employeeId = safeTrim(
+    pick(row, [
+      'employeeGuid',
+      'employee_guid',
+      'employeeId',
+      'employee_id',
+      'employeeUUID',
+      'employee.uuid',
+      'employee.id',
+      'guid',
+      'id',
+    ])
+  );
+
+  const externalEmployeeId = safeTrim(
+    pick(row, [
+      'employeeExternalId',
+      'employee_external_id',
+      'externalEmployeeId',
+      'external_employee_id',
+      'employee.externalEmployeeId',
+      'employee.external_employee_id',
+      'payrollEmployeeId',
+      'payroll_employee_id',
+      'payrollId',
+      'employee.payrollEmployeeId',
+      'employee.payrollId',
+      'employee.employeeCode',
+      'employee.employeeNumber',
+      'employeeNumber',
+      'employeeCode',
+      'employee.posEmployeeId',
+      'employee.posEmployeeNumber',
+      'posEmployeeId',
+      'posEmployeeNumber',
+    ])
+  );
+
+  const employeeName =
+    safeTrim(
+      pick(row, [
+        'employeeName',
+        'employee_name',
+        'employee.fullName',
+        'employee.name',
+        'name',
+        'fullName',
+      ])
+    ) || fullNameFromParts(pick(row, ['employee.firstName', 'firstName']), pick(row, ['employee.lastName', 'lastName']));
+
+  return {
+    employee_id: externalEmployeeId || employeeId,
+    external_employee_id: externalEmployeeId,
+    toast_employee_id: employeeId,
+    employee_name: employeeName,
+    business_date: normalizeBusinessDate(
+      pick(row, ['businessDate', 'business_date', 'date', 'workDate', 'shiftDate', 'inDate', 'clockInDate'])
+    ),
+    pay_type: safeTrim(pick(row, ['payType', 'wageType', 'earningType'])),
+    job_code: safeTrim(
+      pick(row, [
+        'jobCode',
+        'job_code',
+        'job.id',
+        'job.guid',
+        'job.code',
+        'job.externalId',
+        'job.external_id',
+        'jobId',
+        'jobGuid',
+        'jobUuid',
+        'laborJobId',
+        'laborJobGuid',
+        'departmentId',
+        'departmentGuid',
+      ])
+    ),
+    job_name: safeTrim(
+      pick(row, [
+        'jobName',
+        'job_name',
+        'jobTitle',
+        'job_title',
+        'job.name',
+        'job.title',
+        'job.displayName',
+        'laborJobName',
+        'laborJobTitle',
+        'laborDepartmentName',
+        'departmentName',
+        'department',
+      ])
+    ),
+    regular_hours: toNum(pick(row, ['regularHours', 'regular_hours', 'hoursRegular'])),
+    overtime_hours: toNum(pick(row, ['overtimeHours', 'overtime_hours', 'otHours', 'ot_hours'])),
+    hourly_rate: toNum(pick(row, ['hourlyRate', 'hourly_rate', 'rate', 'payRate', 'wageRate', 'baseRate', 'wage.rate'])),
+    regular_pay: toNum(pick(row, ['regularPay', 'regular_pay', 'regularWages', 'regular_cost', 'regularCost'])),
+    overtime_pay: toNum(pick(row, ['overtimePay', 'overtime_pay', 'otPay', 'overtime_cost', 'overtimeCost'])),
+    total_pay: toNum(pick(row, ['totalPay', 'total_pay', 'grossPay', 'gross_pay', 'wages', 'wageAmount'])),
+    net_sales: toNum(pick(row, ['netSales', 'salesNet'])),
+    declared_tips: toNum(pick(row, ['declaredTips', 'tipsDeclared'])),
+    non_cash_tips: toNum(pick(row, ['nonCashTips', 'chargedTips', 'tipsNonCash'])),
+    tips_withheld: toNum(pick(row, ['tipsWithheld', 'withheldTips'])),
+    total_gratuity: toNum(pick(row, ['totalGratuity', 'gratuity', 'autoGratuity'])),
+    location_display_name:
+      safeTrim(
+        pick(row, [
+          'locationName',
+          'location_name',
+          'location.displayName',
+          'location.name',
+          'restaurantName',
+          'restaurant',
+        ])
+      ) || fallbackLocationName,
+    location_code:
+      safeTrim(
+        pick(row, [
+          'locationCode',
+          'location_code',
+          'locationId',
+          'location.id',
+          'restaurantGuid',
+          'restaurantExternalId',
+        ])
+      ) || fallbackLocationCode,
+  };
 }
 
-function sampleRows(rows, limit = 5) {
-  return (Array.isArray(rows) ? rows : []).slice(0, limit);
+function buildTimeEntryIdentityIndex(timeEntryRows, fallbackLocationName, fallbackLocationCode) {
+  const byCompositeKey = new Map();
+
+  for (const row of timeEntryRows) {
+    const normalized = normalizeTimeEntryRow(row, fallbackLocationName, fallbackLocationCode);
+    const employeeKeys = buildEmployeeLookupKeys(normalized);
+    const jobPart = normalizeJobIdentityPart(normalized);
+    if (!employeeKeys.length || !jobPart) continue;
+
+    const normalizedJobPart = String(jobPart).trim().toLowerCase();
+
+    for (const employeeKey of employeeKeys) {
+      const compositeKey = `${employeeKey}|||${normalizedJobPart}`;
+      if (!byCompositeKey.has(compositeKey)) {
+        byCompositeKey.set(compositeKey, {
+          employee_id: normalized.employee_id || null,
+          external_employee_id: normalized.external_employee_id || null,
+          toast_employee_id: normalized.toast_employee_id || null,
+          employee_name: normalized.employee_name || null,
+          job_name: normalized.job_name || null,
+          job_code: normalized.job_code || null,
+          location_display_name: normalized.location_display_name || null,
+          location_code: normalized.location_code || null,
+        });
+      }
+
+      const target = byCompositeKey.get(compositeKey);
+      if (!target.employee_id && normalized.employee_id) target.employee_id = normalized.employee_id;
+      if (!target.external_employee_id && normalized.external_employee_id) target.external_employee_id = normalized.external_employee_id;
+      if (!target.toast_employee_id && normalized.toast_employee_id) target.toast_employee_id = normalized.toast_employee_id;
+      if (!target.employee_name && normalized.employee_name) target.employee_name = normalized.employee_name;
+      if (!target.job_name && normalized.job_name) target.job_name = normalized.job_name;
+      if (!target.job_code && normalized.job_code) target.job_code = normalized.job_code;
+      if (!target.location_display_name && normalized.location_display_name) target.location_display_name = normalized.location_display_name;
+      if (!target.location_code && normalized.location_code) target.location_code = normalized.location_code;
+    }
+  }
+
+  return byCompositeKey;
 }
 
-function sourceTag(sourceName, reason = null) {
-  return { source: sourceName || null, reason: reason || null };
+function buildExportShapedRowsFromTimeEntries({
+  timeEntryRows,
+  employeeByKey,
+  fallbackLocationName,
+  fallbackLocationCode,
+  periodStart,
+  periodEnd,
+}) {
+  const byCompositeSegment = new Map();
+
+  for (const row of timeEntryRows) {
+    const normalized = normalizeTimeEntryRow(row, fallbackLocationName, fallbackLocationCode);
+    const employeeKeys = buildEmployeeLookupKeys(normalized);
+    const employeeMatch = employeeKeys.map((k) => employeeByKey.get(k)).find(Boolean) || null;
+
+    const exportEmployeeId = employeeMatch?.external_employee_id || normalized.external_employee_id || null;
+    const toastEmployeeId = employeeMatch?.toast_employee_id || normalized.toast_employee_id || null;
+    const canonicalEmployeeId = exportEmployeeId || employeeMatch?.employee_id || normalized.employee_id || null;
+
+    const jobKey = normalizeJobIdentityPart(normalized) || '__unassigned_job__';
+    const locationKey = String(
+      normalized.location_code ||
+        normalized.location_display_name ||
+        fallbackLocationCode ||
+        fallbackLocationName ||
+        '__unknown_location__'
+    ).toLowerCase();
+    const employeeKeyPart = String(canonicalEmployeeId || toastEmployeeId || '__unknown_employee__').toLowerCase();
+    const compositeKey = [employeeKeyPart, String(jobKey).toLowerCase(), locationKey].join('|||');
+
+    if (!byCompositeSegment.has(compositeKey)) {
+      byCompositeSegment.set(compositeKey, {
+        location_name: fallbackLocationName,
+        location_code: normalized.location_code || fallbackLocationCode || null,
+        location_display_name: normalized.location_display_name || fallbackLocationName || null,
+        business_date: normalized.business_date,
+        pay_type: normalized.pay_type,
+        pay_period_start: periodStart,
+        pay_period_end: periodEnd,
+        employee_id: canonicalEmployeeId,
+        external_employee_id: exportEmployeeId,
+        employee_name: employeeMatch?.employee_name || normalized.employee_name || null,
+        toast_employee_id: toastEmployeeId,
+        export_employee_id: exportEmployeeId,
+        job_code: normalized.job_code,
+        job_name: normalized.job_name,
+        regular_hours: 0,
+        overtime_hours: 0,
+        hourly_rate_weighted_sum: 0,
+        hourly_rate_weight: 0,
+        regular_pay: 0,
+        overtime_pay: 0,
+        total_pay: 0,
+        net_sales: 0,
+        declared_tips: 0,
+        non_cash_tips: 0,
+        tips_withheld: 0,
+        total_gratuity: 0,
+        __field_sources: {
+          employee_name: employeeMatch?.employee_name
+            ? sourceTag('toast_standard_employees', 'matched_by_employee_id_or_external_id')
+            : normalized.employee_name
+              ? sourceTag('toast_standard_time_entries', 'employee_name_present_on_time_entry')
+              : sourceTag(null),
+          job_title: normalized.job_name
+            ? sourceTag('toast_standard_time_entries', 'job_name_present_on_time_entry')
+            : normalized.job_code
+              ? sourceTag('toast_standard_time_entries', 'job_code_present_on_time_entry')
+              : sourceTag(null),
+          hourly_rate: normalized.hourly_rate !== null
+            ? sourceTag('toast_standard_time_entries', 'hourly_rate_on_time_entry')
+            : sourceTag(null),
+          employee_id: exportEmployeeId
+            ? sourceTag(
+                employeeMatch?.external_employee_id ? 'toast_standard_employees' : 'toast_standard_time_entries',
+                'payroll_id_for_employee_id_column'
+              )
+            : sourceTag(null),
+          location: normalized.location_display_name
+            ? sourceTag('toast_standard_time_entries', 'location_name_on_time_entry')
+            : fallbackLocationName
+              ? sourceTag('vitals_location_fallback', 'time_entry_missing_location_name')
+              : sourceTag(null),
+        },
+      });
+    }
+
+    const target = byCompositeSegment.get(compositeKey);
+    target.regular_hours += normalized.regular_hours || 0;
+    target.overtime_hours += normalized.overtime_hours || 0;
+    target.regular_pay += normalized.regular_pay || 0;
+    target.overtime_pay += normalized.overtime_pay || 0;
+    target.total_pay += normalized.total_pay || 0;
+    target.net_sales += normalized.net_sales || 0;
+    target.declared_tips += normalized.declared_tips || 0;
+    target.non_cash_tips += normalized.non_cash_tips || 0;
+    target.tips_withheld += normalized.tips_withheld || 0;
+    target.total_gratuity += normalized.total_gratuity || 0;
+
+    if (normalized.hourly_rate !== null && normalized.hourly_rate !== undefined) {
+      const weight = (normalized.regular_hours || 0) + (normalized.overtime_hours || 0) || 1;
+      target.hourly_rate_weighted_sum += normalized.hourly_rate * weight;
+      target.hourly_rate_weight += weight;
+    }
+  }
+
+  return Array.from(byCompositeSegment.values()).map((row) => ({
+    ...row,
+    hourly_rate: row.hourly_rate_weight > 0 ? row.hourly_rate_weighted_sum / row.hourly_rate_weight : null,
+    hourly_rate_weighted_sum: undefined,
+    hourly_rate_weight: undefined,
+  }));
 }
 
-function pickDominantSource(counter) {
-  if (!(counter instanceof Map) || counter.size === 0) return null;
-  return Array.from(counter.entries()).sort((a, b) => b[1] - a[1])[0][0];
+function buildEmployeeAnalyticsTotalsIndex(normalizedLaborRows) {
+  const byKey = new Map();
+
+  for (const row of normalizedLaborRows) {
+    const keys = buildEmployeeJobCompositeLookupKeys(row);
+    if (!keys.length) continue;
+
+    for (const key of keys) {
+      if (!byKey.has(key)) {
+        byKey.set(key, {
+          regular_hours: 0,
+          overtime_hours: 0,
+          regular_pay: 0,
+          overtime_pay: 0,
+          total_pay: 0,
+          net_sales: 0,
+          declared_tips: 0,
+          non_cash_tips: 0,
+          tips_withheld: 0,
+          total_gratuity: 0,
+        });
+      }
+
+      const target = byKey.get(key);
+      target.regular_hours += row.regular_hours || 0;
+      target.overtime_hours += row.overtime_hours || 0;
+      target.regular_pay += row.regular_pay || 0;
+      target.overtime_pay += row.overtime_pay || 0;
+      target.total_pay += row.total_pay || 0;
+      target.net_sales += row.net_sales || 0;
+      target.declared_tips += row.declared_tips || 0;
+      target.non_cash_tips += row.non_cash_tips || 0;
+      target.tips_withheld += row.tips_withheld || 0;
+      target.total_gratuity += row.total_gratuity || 0;
+    }
+  }
+
+  return byKey;
 }
 
-function sourceIsPresent(sourceValue) {
-  return !!(sourceValue && typeof sourceValue === 'string' && sourceValue.trim());
+function applyAnalyticsTotalsToTimeEntryRows(detailRows, analyticsTotalsByKey) {
+  const rows = Array.isArray(detailRows) ? detailRows : [];
+  if (!(analyticsTotalsByKey instanceof Map) || analyticsTotalsByKey.size === 0) return rows;
+
+  const byComposite = new Map();
+  for (const row of rows) {
+    const keys = buildEmployeeJobCompositeLookupKeys(row);
+    const key = keys.find((k) => analyticsTotalsByKey.has(k)) || keys[0] || null;
+    if (!key) continue;
+    if (!byComposite.has(key)) byComposite.set(key, []);
+    byComposite.get(key).push(row);
+  }
+
+  const allocationFields = [
+    'regular_hours',
+    'overtime_hours',
+    'regular_pay',
+    'overtime_pay',
+    'total_pay',
+    'net_sales',
+    'declared_tips',
+    'non_cash_tips',
+    'tips_withheld',
+    'total_gratuity',
+  ];
+
+  for (const [key, employeeJobRows] of byComposite.entries()) {
+    const totals = analyticsTotalsByKey.get(key);
+    if (!totals || !employeeJobRows.length) continue;
+
+    const weightTotal = employeeJobRows.reduce((sum, row) => sum + (row.regular_hours || 0) + (row.overtime_hours || 0), 0);
+    const fallbackWeight = employeeJobRows.length > 0 ? 1 / employeeJobRows.length : 0;
+
+    for (const row of employeeJobRows) {
+      const rowHours = (row.regular_hours || 0) + (row.overtime_hours || 0);
+      const weight = weightTotal > 0 ? rowHours / weightTotal : fallbackWeight;
+
+      for (const field of allocationFields) {
+        row[field] = (totals[field] || 0) * weight;
+      }
+
+      if (row.hourly_rate === null || row.hourly_rate === undefined) {
+        const totalHours = (row.regular_hours || 0) + (row.overtime_hours || 0);
+        if (totalHours > 0) row.hourly_rate = row.regular_pay / totalHours;
+      }
+
+      row.__analytics_allocation = {
+        composite_key_used: key,
+        allocation_method: 'employee_job_composite_prorata_by_hours',
+      };
+    }
+  }
+
+  return rows;
+}
+
+function joinLaborRowsToEmployees(laborRows, employeeByKey, timeEntryByKey = new Map()) {
+  const timeEntryByEmployee = new Map();
+
+  for (const [compositeKey, value] of timeEntryByKey.entries()) {
+    const [employeeLookupKey] = String(compositeKey).split('|||');
+    if (!timeEntryByEmployee.has(employeeLookupKey)) timeEntryByEmployee.set(employeeLookupKey, []);
+    timeEntryByEmployee.get(employeeLookupKey).push(value);
+  }
+
+  return laborRows.flatMap((row) => {
+    const lookupKeys = buildEmployeeLookupKeys(row);
+    const matched = lookupKeys.map((k) => employeeByKey.get(k)).find(Boolean) || null;
+
+    const rowCompositeKeys = buildEmployeeJobCompositeLookupKeys(row);
+    const exactTimeEntryMatch = rowCompositeKeys.map((k) => timeEntryByKey.get(k)).find(Boolean) || null;
+
+    let candidateTimeEntries = [];
+    if (exactTimeEntryMatch) {
+      candidateTimeEntries = [exactTimeEntryMatch];
+    } else if (!normalizeJobIdentityPart(row)) {
+      const aggregated = [];
+      for (const key of lookupKeys) {
+        const entries = timeEntryByEmployee.get(key) || [];
+        for (const entry of entries) aggregated.push(entry);
+      }
+
+      const unique = new Map();
+      for (const entry of aggregated) {
+        const uniqKey = `${String(entry.job_code || '').toLowerCase()}|||${String(entry.job_name || '').toLowerCase()}`;
+        if (!unique.has(uniqKey)) unique.set(uniqKey, entry);
+      }
+      candidateTimeEntries = Array.from(unique.values());
+    }
+
+    if (!candidateTimeEntries.length) candidateTimeEntries = [null];
+
+    return candidateTimeEntries.map((timeEntryMatch) => ({
+      ...row,
+      employee_id: matched?.employee_id || timeEntryMatch?.employee_id || row.external_employee_id || row.employee_id || null,
+      employee_name: matched?.employee_name || timeEntryMatch?.employee_name || row.employee_name || null,
+      toast_employee_id: matched?.toast_employee_id || timeEntryMatch?.toast_employee_id || row.toast_employee_id || null,
+      export_employee_id: matched?.external_employee_id || timeEntryMatch?.external_employee_id || row.external_employee_id || null,
+      job_name: row.job_name || timeEntryMatch?.job_name || null,
+      job_code: row.job_code || timeEntryMatch?.job_code || null,
+      location_display_name: row.location_display_name || timeEntryMatch?.location_display_name || row.location_name || null,
+      location_code: row.location_code || timeEntryMatch?.location_code || null,
+      __field_sources: {
+        employee_name: matched?.employee_name
+          ? sourceTag('toast_standard_employees', 'matched_by_employee_id_or_external_id')
+          : timeEntryMatch?.employee_name
+            ? sourceTag('toast_standard_time_entries', 'fallback_employee_name_from_time_entries')
+            : row.employee_name
+              ? sourceTag('toast_analytics_employee_grouped', 'employee_name_from_analytics')
+              : sourceTag(null),
+        job_title: row.job_name
+          ? sourceTag('toast_analytics_employee_grouped', 'job_name_from_analytics')
+          : timeEntryMatch?.job_name
+            ? sourceTag('toast_standard_time_entries', 'fallback_job_from_time_entries')
+            : timeEntryMatch?.job_code
+              ? sourceTag('toast_standard_time_entries', 'fallback_job_code_from_time_entries')
+              : sourceTag(null),
+        hourly_rate: row.hourly_rate !== null
+          ? sourceTag('toast_analytics_employee_grouped', 'hourly_rate_from_analytics')
+          : sourceTag(null),
+        employee_id: matched?.external_employee_id
+          ? sourceTag('toast_standard_employees', 'payroll_id_from_employee_record')
+          : timeEntryMatch?.external_employee_id
+            ? sourceTag('toast_standard_time_entries', 'fallback_external_employee_id_from_time_entries')
+            : row.external_employee_id
+              ? sourceTag('toast_analytics_employee_grouped', 'external_employee_id_from_analytics')
+              : sourceTag(null),
+        location: row.location_display_name
+          ? sourceTag('toast_analytics_employee_grouped', 'location_name_from_analytics')
+          : timeEntryMatch?.location_display_name
+            ? sourceTag('toast_standard_time_entries', 'fallback_location_from_time_entries')
+            : sourceTag(null),
+      },
+    }));
+  });
+}
+
+function buildPayrollExportRows(detailRows, fallbackLocationCode = null, { includeSourceAudit = false } = {}) {
+  const byEmployeeJobLocation = new Map();
+
+  for (const row of detailRows) {
+    const employeeName = String(row.employee_name || '').trim();
+    const employeeId = String(row.employee_id || '').trim();
+    const toastEmployeeId = String(row.toast_employee_id || employeeId || '').trim();
+    const exportEmployeeId = String(row.export_employee_id || '').trim();
+    const jobTitle = String(row.job_name || '').trim();
+    const jobCode = String(row.job_code || '').trim();
+    const locationName = row.location_display_name || row.location_name || '';
+    const locationCode = row.location_code || fallbackLocationCode || '';
+
+    const employeeKey = normalizeGroupPart(
+      exportEmployeeId,
+      normalizeGroupPart(toastEmployeeId, normalizeGroupPart(employeeId, '__unknown_employee__'))
+    );
+    const jobKey = normalizeGroupPart(jobCode, normalizeGroupPart(jobTitle, '__unassigned_job__'));
+    const locationKey = normalizeGroupPart(locationCode, normalizeGroupPart(locationName, '__unknown_location__'));
+    const key = [employeeKey, jobKey, locationKey].join('|||');
+
+    if (!byEmployeeJobLocation.has(key)) {
+      byEmployeeJobLocation.set(key, {
+        'Toast Employee ID': toastEmployeeId || null,
+        Employee: employeeName || null,
+        'Job Title': jobTitle || (jobCode ? `Job ${jobCode}` : 'Unassigned'),
+        'Regular Hours': 0,
+        'Overtime Hours': 0,
+        HourlyRateWeightedSum: 0,
+        HourlyRateWeight: 0,
+        HourlyRateSamples: 0,
+        'Regular Pay': 0,
+        'Overtime Pay': 0,
+        TotalPayFromSource: null,
+        'Net Sales': null,
+        'Declared Tips': 0,
+        'Non-Cash Tips': 0,
+        'Tips Withheld': null,
+        'Total Gratuity': null,
+        'Employee ID': exportEmployeeId || null,
+        'Job Code': jobCode || null,
+        Location: locationName || null,
+        'Location Code': locationCode || null,
+        __sourceCounters: {
+          employee_name: new Map(),
+          job_title: new Map(),
+          hourly_rate: new Map(),
+          employee_id: new Map(),
+          location: new Map(),
+        },
+        __debug_rows: [],
+      });
+    }
+
+    const agg = byEmployeeJobLocation.get(key);
+
+    if (!agg['Toast Employee ID'] && toastEmployeeId) agg['Toast Employee ID'] = toastEmployeeId;
+    if (!agg.Employee && employeeName) agg.Employee = employeeName;
+    if (!agg['Employee ID'] && exportEmployeeId) agg['Employee ID'] = exportEmployeeId;
+    if ((!agg['Job Title'] || agg['Job Title'] === 'Unassigned') && jobTitle) agg['Job Title'] = jobTitle;
+    if (!agg['Job Title'] && jobCode) agg['Job Title'] = `Job ${jobCode}`;
+    if (!agg['Job Code'] && jobCode) agg['Job Code'] = jobCode;
+    if (!agg.Location && locationName) agg.Location = locationName;
+    if (!agg['Location Code'] && locationCode) agg['Location Code'] = locationCode;
+
+    const rowSource = row.__field_sources || {};
+    for (const field of ['employee_name', 'job_title', 'hourly_rate', 'employee_id', 'location']) {
+      const src = rowSource[field]?.source || null;
+      if (sourceIsPresent(src)) {
+        const cur = agg.__sourceCounters[field].get(src) || 0;
+        agg.__sourceCounters[field].set(src, cur + 1);
+      }
+    }
+
+    agg['Regular Hours'] += row.regular_hours || 0;
+    agg['Overtime Hours'] += row.overtime_hours || 0;
+
+    if (row.hourly_rate !== null && row.hourly_rate !== undefined) {
+      const weight = (row.regular_hours || 0) + (row.overtime_hours || 0) || 1;
+      agg.HourlyRateWeightedSum += row.hourly_rate * weight;
+      agg.HourlyRateWeight += weight;
+      agg.HourlyRateSamples += 1;
+    }
+
+    agg['Regular Pay'] += row.regular_pay || 0;
+    agg['Overtime Pay'] += row.overtime_pay || 0;
+    agg.TotalPayFromSource = sumNullable(agg.TotalPayFromSource, row.total_pay);
+    agg['Net Sales'] = sumNullable(agg['Net Sales'], row.net_sales);
+    agg['Declared Tips'] += row.declared_tips || 0;
+    agg['Non-Cash Tips'] += row.non_cash_tips || 0;
+    agg['Tips Withheld'] = sumNullable(agg['Tips Withheld'], row.tips_withheld);
+    agg['Total Gratuity'] = sumNullable(agg['Total Gratuity'], row.total_gratuity);
+
+    agg.__debug_rows.push({
+      employee_id: row.employee_id || null,
+      export_employee_id: row.export_employee_id || null,
+      toast_employee_id: row.toast_employee_id || null,
+      job_code: row.job_code || null,
+      job_name: row.job_name || null,
+      location_display_name: row.location_display_name || null,
+      analytics_allocation: row.__analytics_allocation || null,
+    });
+  }
+
+  const result = Array.from(byEmployeeJobLocation.values()).map((agg) => {
+    const hourlyRate =
+      agg.HourlyRateSamples > 0 && agg.HourlyRateWeight > 0
+        ? agg.HourlyRateWeightedSum / agg.HourlyRateWeight
+        : null;
+
+    const derivedRegularPay = agg['Regular Pay'] || ((agg['Regular Hours'] || 0) * (hourlyRate || 0));
+    const derivedOvertimePay = agg['Overtime Pay'] || ((agg['Overtime Hours'] || 0) * (hourlyRate || 0) * 1.5);
+    const totalPay = agg.TotalPayFromSource !== null ? agg.TotalPayFromSource : derivedRegularPay + derivedOvertimePay;
+    const totalTips = (agg['Declared Tips'] || 0) + (agg['Non-Cash Tips'] || 0);
+
+    return {
+      'Toast Employee ID': agg['Toast Employee ID'],
+      Employee: agg.Employee,
+      'Job Title': agg['Job Title'],
+      'Regular Hours': Number((agg['Regular Hours'] || 0).toFixed(2)),
+      'Overtime Hours': Number((agg['Overtime Hours'] || 0).toFixed(2)),
+      'Hourly Rate': hourlyRate !== null ? Number(hourlyRate.toFixed(2)) : null,
+      'Regular Pay': Number((derivedRegularPay || 0).toFixed(2)),
+      'Overtime Pay': Number((derivedOvertimePay || 0).toFixed(2)),
+      'Total Pay': Number((totalPay || 0).toFixed(2)),
+      'Net Sales': agg['Net Sales'] !== null ? Number(agg['Net Sales'].toFixed(2)) : null,
+      'Declared Tips': Number((agg['Declared Tips'] || 0).toFixed(2)),
+      'Non-Cash Tips': Number((agg['Non-Cash Tips'] || 0).toFixed(2)),
+      'Total Tips': Number(totalTips.toFixed(2)),
+      'Tips Withheld': agg['Tips Withheld'] !== null ? Number(agg['Tips Withheld'].toFixed(2)) : null,
+      'Total Gratuity': agg['Total Gratuity'] !== null ? Number(agg['Total Gratuity'].toFixed(2)) : null,
+      'Employee ID': agg['Employee ID'],
+      'Job Code': agg['Job Code'],
+      Location: agg.Location,
+      'Location Code': agg['Location Code'],
+      __field_sources: {
+        employee_name: sourceTag(pickDominantSource(agg.__sourceCounters.employee_name)),
+        job_title: sourceTag(pickDominantSource(agg.__sourceCounters.job_title)),
+        hourly_rate: sourceTag(pickDominantSource(agg.__sourceCounters.hourly_rate)),
+        employee_id: sourceTag(pickDominantSource(agg.__sourceCounters.employee_id)),
+        location: sourceTag(pickDominantSource(agg.__sourceCounters.location)),
+      },
+      __debug_rows: agg.__debug_rows,
+    };
+  });
+
+  result.sort((a, b) => {
+    const empId = String(a['Employee ID'] || '').localeCompare(String(b['Employee ID'] || ''));
+    if (empId !== 0) return empId;
+    const emp = String(a.Employee || '').localeCompare(String(b.Employee || ''));
+    if (emp !== 0) return emp;
+    const jobCode = String(a['Job Code'] || '').localeCompare(String(b['Job Code'] || ''));
+    if (jobCode !== 0) return jobCode;
+    const jobTitle = String(a['Job Title'] || '').localeCompare(String(b['Job Title'] || ''));
+    if (jobTitle !== 0) return jobTitle;
+    const location = String(a.Location || '').localeCompare(String(b.Location || ''));
+    if (location !== 0) return location;
+    return String(a['Location Code'] || '').localeCompare(String(b['Location Code'] || ''));
+  });
+
+  const rows = result.map((row) => {
+    const cleaned = { ...row };
+    delete cleaned.__field_sources;
+    delete cleaned.__debug_rows;
+    return cleaned;
+  });
+
+  if (!includeSourceAudit) return rows;
+
+  const rowBuildDebugSample = result.slice(0, 10).map((row, idx) => ({
+    row_index: idx,
+    comparison_key_used: `${String(row['Employee ID'] || row['Toast Employee ID'] || '').toLowerCase()}|||${String(
+      row['Job Code'] || row['Job Title'] || ''
+    ).toLowerCase()}|||${String(row['Location Code'] || row.Location || '').toLowerCase()}`,
+    guid_used: row['Toast Employee ID'] || null,
+    payroll_employee_id_used: row['Employee ID'] || null,
+    employee_name: row.Employee || null,
+    employee_name_source: row.__field_sources?.employee_name?.source || null,
+    job_title: row['Job Title'] || null,
+    job_code: row['Job Code'] || null,
+    job_title_source: row.__field_sources?.job_title?.source || null,
+    hourly_rate: row['Hourly Rate'],
+    hourly_rate_source: row.__field_sources?.hourly_rate?.source || null,
+    location: row.Location || null,
+    location_source: row.__field_sources?.location?.source || null,
+    analytics_allocation_sample: row.__debug_rows?.[0]?.analytics_allocation || null,
+  }));
+
+  const rowSourceAudit = result.map((row, idx) => ({
+    row_index: idx,
+    employee: row.Employee || null,
+    toast_employee_id: row['Toast Employee ID'] || null,
+    employee_id: row['Employee ID'] || null,
+    job_title: row['Job Title'] || null,
+    job_code: row['Job Code'] || null,
+    location: row.Location || null,
+    location_code: row['Location Code'] || null,
+    field_sources: {
+      employee_name: row.__field_sources?.employee_name || sourceTag(null),
+      job_title: row.__field_sources?.job_title || sourceTag(null),
+      hourly_rate: row.__field_sources?.hourly_rate || sourceTag(null),
+      employee_id: row.__field_sources?.employee_id || sourceTag(null),
+      location: row.__field_sources?.location || sourceTag(null),
+    },
+    contributing_detail_rows: row.__debug_rows || [],
+  }));
+
+  return { rows, rowSourceAudit, rowBuildDebugSample };
+}
+
+function detectReturnedRowGrain(rows) {
+  const hasJobSplit = rows.some((row) => {
+    const title = safeTrim(row['Job Title']);
+    const code = safeTrim(row['Job Code']);
+    return (title && title.toLowerCase() !== 'unassigned') || !!code;
+  });
+
+  const hasLocationSplit = rows.some((row) => {
+    const name = safeTrim(row.Location);
+    const code = safeTrim(row['Location Code']);
+    return !!(name || code);
+  });
+
+  if (hasJobSplit && hasLocationSplit) return 'one row per Employee + Job Title + Location for selected pay period';
+  if (hasJobSplit) return 'one row per Employee + Job Title (location approximated) for selected pay period';
+  return 'one row per Employee (job/location not reliably returned by analytics payload) for selected pay period';
 }
 
 function fieldSourceStatus({ inEmployees, inTimeEntries, inAnalytics, strategy }) {
@@ -313,6 +1027,7 @@ function buildCsvShapeAssessment({ strategy, employeesShape, timeEntriesShape, a
   const inEmployees = (k) => hasAnyField(employeesShape, k);
   const inTimeEntries = (k) => hasAnyField(timeEntriesShape, k);
   const inAnalytics = (k) => hasAnyField(analyticsShape, k);
+
   const fields = {
     employee_name: fieldSourceStatus({
       inEmployees: inEmployees('employee_name'),
@@ -407,371 +1122,6 @@ function hasAnyField(sourceDebug, key) {
   return Array.isArray(sourceDebug?.available_field_candidates?.[key]) && sourceDebug.available_field_candidates[key].length > 0;
 }
 
-function lookupKeysForRow(row) {
-  return [row?.employee_id, row?.external_employee_id, row?.toast_employee_id]
-    .filter(Boolean)
-    .map((x) => String(x).toLowerCase());
-}
-
-function normalizeJobIdentityPart(row) {
-  return safeTrim(row?.job_code) || safeTrim(row?.job_name) || null;
-}
-
-function buildEmployeeJobCompositeLookupKeys(row) {
-  const employeeKeys = lookupKeysForRow(row);
-  const jobPart = normalizeJobIdentityPart(row);
-  if (!jobPart) return [];
-  const normalizedJobPart = String(jobPart).trim().toLowerCase();
-  return employeeKeys.map((employeeKey) => `${employeeKey}|||${normalizedJobPart}`);
-}
-
-function normalizeTimeEntryRow(row, fallbackLocationName = null, fallbackLocationCode = null) {
-  const employeeId = safeTrim(
-    pick(row, [
-      'employeeGuid',
-      'employee_guid',
-      'employeeId',
-      'employee_id',
-      'employeeUUID',
-      'employee.uuid',
-      'employee.id',
-      'guid',
-      'id',
-    ])
-  );
-  const externalEmployeeId = safeTrim(
-    pick(row, [
-      'employeeExternalId',
-      'employee_external_id',
-      'externalEmployeeId',
-      'external_employee_id',
-      'employee.externalEmployeeId',
-      'employee.external_employee_id',
-      'payrollEmployeeId',
-      'payroll_employee_id',
-      'payrollId',
-      'employee.payrollEmployeeId',
-      'employee.payrollId',
-      'employee.employeeCode',
-      'employee.employeeNumber',
-      'employeeNumber',
-      'employeeCode',
-      'employee.posEmployeeId',
-      'employee.posEmployeeNumber',
-      'posEmployeeId',
-      'posEmployeeNumber',
-    ])
-  );
-  const employeeName =
-    safeTrim(
-      pick(row, [
-        'employeeName',
-        'employee_name',
-        'employee.fullName',
-        'employee.name',
-        'name',
-        'fullName',
-      ])
-    ) || fullNameFromParts(pick(row, ['employee.firstName', 'firstName']), pick(row, ['employee.lastName', 'lastName']));
-
-  return {
-    employee_id: externalEmployeeId || employeeId,
-    external_employee_id: externalEmployeeId,
-    toast_employee_id: employeeId,
-    employee_name: employeeName,
-    business_date: normalizeBusinessDate(
-      pick(row, ['businessDate', 'business_date', 'date', 'workDate', 'shiftDate', 'inDate', 'clockInDate'])
-    ),
-    pay_type: safeTrim(pick(row, ['payType', 'wageType', 'earningType'])),
-    job_code: safeTrim(
-      pick(row, [
-        'jobCode',
-        'job_code',
-        'job.id',
-        'job.guid',
-        'job.code',
-        'jobId',
-        'jobGuid',
-        'jobUuid',
-        'laborJobId',
-        'laborJobGuid',
-        'departmentId',
-        'departmentGuid',
-      ])
-    ),
-    job_name: safeTrim(
-      pick(row, [
-        'jobName',
-        'job_name',
-        'jobTitle',
-        'job_title',
-        'job.name',
-        'job.title',
-        'job.displayName',
-        'laborJobName',
-        'laborJobTitle',
-        'laborDepartmentName',
-        'departmentName',
-        'department',
-      ])
-    ),
-    regular_hours: toNum(pick(row, ['regularHours', 'regular_hours', 'hoursRegular'])),
-    overtime_hours: toNum(pick(row, ['overtimeHours', 'overtime_hours', 'otHours', 'ot_hours'])),
-    hourly_rate: toNum(pick(row, ['hourlyRate', 'hourly_rate', 'rate', 'payRate', 'wageRate', 'baseRate', 'wage.rate'])),
-    regular_pay: toNum(pick(row, ['regularPay', 'regular_pay', 'regularWages', 'regular_cost', 'regularCost'])),
-    overtime_pay: toNum(pick(row, ['overtimePay', 'overtime_pay', 'otPay', 'overtime_cost', 'overtimeCost'])),
-    total_pay: toNum(pick(row, ['totalPay', 'total_pay', 'grossPay', 'gross_pay', 'wages', 'wageAmount'])),
-    net_sales: toNum(pick(row, ['netSales', 'salesNet'])),
-    declared_tips: toNum(pick(row, ['declaredTips', 'tipsDeclared'])),
-    non_cash_tips: toNum(pick(row, ['nonCashTips', 'chargedTips', 'tipsNonCash'])),
-    tips_withheld: toNum(pick(row, ['tipsWithheld', 'withheldTips'])),
-    total_gratuity: toNum(pick(row, ['totalGratuity', 'gratuity', 'autoGratuity'])),
-    location_display_name:
-      safeTrim(
-        pick(row, [
-          'locationName',
-          'location_name',
-          'location.displayName',
-          'location.name',
-          'restaurantName',
-          'restaurant',
-        ])
-      ) || fallbackLocationName,
-    location_code:
-      safeTrim(
-        pick(row, [
-          'locationCode',
-          'location_code',
-          'locationId',
-          'location.id',
-          'restaurantGuid',
-          'restaurantExternalId',
-        ])
-      ) || fallbackLocationCode,
-  };
-}
-
-function buildTimeEntryIdentityIndex(timeEntryRows, fallbackLocationName, fallbackLocationCode) {
-  const byCompositeKey = new Map();
-  for (const row of timeEntryRows) {
-    const normalized = normalizeTimeEntryRow(row, fallbackLocationName, fallbackLocationCode);
-    const employeeKeys = lookupKeysForRow(normalized);
-    const jobPart = normalizeJobIdentityPart(normalized);
-    if (!employeeKeys.length || !jobPart) continue;
-    const normalizedJobPart = String(jobPart).trim().toLowerCase();
-
-    for (const employeeKey of employeeKeys) {
-      const compositeKey = `${employeeKey}|||${normalizedJobPart}`;
-      if (!byCompositeKey.has(compositeKey)) {
-        byCompositeKey.set(compositeKey, {
-          employee_id: normalized.employee_id || null,
-          external_employee_id: normalized.external_employee_id || null,
-          toast_employee_id: normalized.toast_employee_id || null,
-          employee_name: normalized.employee_name || null,
-          job_name: normalized.job_name || null,
-          job_code: normalized.job_code || null,
-          location_display_name: normalized.location_display_name || null,
-          location_code: normalized.location_code || null,
-        });
-      }
-      const target = byCompositeKey.get(compositeKey);
-      if (!target.employee_id && normalized.employee_id) target.employee_id = normalized.employee_id;
-      if (!target.external_employee_id && normalized.external_employee_id) target.external_employee_id = normalized.external_employee_id;
-      if (!target.toast_employee_id && normalized.toast_employee_id) target.toast_employee_id = normalized.toast_employee_id;
-      if (!target.employee_name && normalized.employee_name) target.employee_name = normalized.employee_name;
-      if (!target.job_name && normalized.job_name) target.job_name = normalized.job_name;
-      if (!target.job_code && normalized.job_code) target.job_code = normalized.job_code;
-      if (!target.location_display_name && normalized.location_display_name) target.location_display_name = normalized.location_display_name;
-      if (!target.location_code && normalized.location_code) target.location_code = normalized.location_code;
-    }
-  }
-
-  return byCompositeKey;
-}
-
-function buildExportShapedRowsFromTimeEntries({
-  timeEntryRows,
-  employeeByKey,
-  fallbackLocationName,
-  fallbackLocationCode,
-  periodStart,
-  periodEnd,
-}) {
-  const byCompositeSegment = new Map();
-
-  for (const row of timeEntryRows) {
-    const normalized = normalizeTimeEntryRow(row, fallbackLocationName, fallbackLocationCode);
-    const employeeKeys = lookupKeysForRow(normalized);
-    const employeeMatch = employeeKeys.map((k) => employeeByKey.get(k)).find(Boolean) || null;
-    const exportEmployeeId = employeeMatch?.external_employee_id || normalized.external_employee_id || null;
-    const toastEmployeeId = employeeMatch?.toast_employee_id || normalized.toast_employee_id || null;
-    const canonicalEmployeeId = exportEmployeeId || employeeMatch?.employee_id || normalized.employee_id || null;
-    const jobKey = normalizeJobIdentityPart(normalized) || '__unassigned_job__';
-    const locationKey = (normalized.location_code || normalized.location_display_name || fallbackLocationCode || fallbackLocationName || '__unknown_location__').toLowerCase();
-    const employeeKeyPart = String(canonicalEmployeeId || toastEmployeeId || '__unknown_employee__').toLowerCase();
-    const compositeKey = [employeeKeyPart, String(jobKey).toLowerCase(), locationKey].join('|||');
-
-    if (!byCompositeSegment.has(compositeKey)) {
-      byCompositeSegment.set(compositeKey, {
-        location_name: fallbackLocationName,
-        location_code: normalized.location_code || fallbackLocationCode || null,
-        location_display_name: normalized.location_display_name || fallbackLocationName || null,
-        business_date: normalized.business_date,
-        pay_type: normalized.pay_type,
-        pay_period_start: periodStart,
-        pay_period_end: periodEnd,
-        employee_id: canonicalEmployeeId,
-        external_employee_id: exportEmployeeId,
-        employee_name: employeeMatch?.employee_name || normalized.employee_name || null,
-        toast_employee_id: toastEmployeeId,
-        export_employee_id: exportEmployeeId,
-        job_code: normalized.job_code,
-        job_name: normalized.job_name,
-        regular_hours: 0,
-        overtime_hours: 0,
-        hourly_rate_weighted_sum: 0,
-        hourly_rate_weight: 0,
-        regular_pay: 0,
-        overtime_pay: 0,
-        total_pay: 0,
-        net_sales: 0,
-        declared_tips: 0,
-        non_cash_tips: 0,
-        tips_withheld: 0,
-        total_gratuity: 0,
-        __field_sources: {
-          employee_name: employeeMatch?.employee_name
-            ? sourceTag('toast_standard_employees', 'matched_by_employee_id_or_external_id')
-            : normalized.employee_name
-              ? sourceTag('toast_standard_time_entries', 'employee_name_present_on_time_entry')
-              : sourceTag(null),
-          job_title: normalized.job_name
-            ? sourceTag('toast_standard_time_entries', 'job_name_present_on_time_entry')
-            : sourceTag(null),
-          hourly_rate: normalized.hourly_rate !== null ? sourceTag('toast_standard_time_entries', 'hourly_rate_on_time_entry') : sourceTag(null),
-          employee_id: exportEmployeeId
-            ? sourceTag(employeeMatch?.external_employee_id ? 'toast_standard_employees' : 'toast_standard_time_entries', 'payroll_id_for_employee_id_column')
-            : sourceTag(null),
-          location: normalized.location_display_name
-            ? sourceTag('toast_standard_time_entries', 'location_name_on_time_entry')
-            : fallbackLocationName
-              ? sourceTag('vitals_location_fallback', 'time_entry_missing_location_name')
-              : sourceTag(null),
-        },
-      });
-    }
-
-    const target = byCompositeSegment.get(compositeKey);
-    target.regular_hours += normalized.regular_hours || 0;
-    target.overtime_hours += normalized.overtime_hours || 0;
-    target.regular_pay += normalized.regular_pay || 0;
-    target.overtime_pay += normalized.overtime_pay || 0;
-    target.total_pay += normalized.total_pay || 0;
-    target.net_sales += normalized.net_sales || 0;
-    target.declared_tips += normalized.declared_tips || 0;
-    target.non_cash_tips += normalized.non_cash_tips || 0;
-    target.tips_withheld += normalized.tips_withheld || 0;
-    target.total_gratuity += normalized.total_gratuity || 0;
-    if (normalized.hourly_rate !== null && normalized.hourly_rate !== undefined) {
-      const weight = (normalized.regular_hours || 0) + (normalized.overtime_hours || 0) || 1;
-      target.hourly_rate_weighted_sum += normalized.hourly_rate * weight;
-      target.hourly_rate_weight += weight;
-    }
-  }
-
-  return Array.from(byCompositeSegment.values()).map((row) => ({
-    ...row,
-    hourly_rate: row.hourly_rate_weight > 0 ? row.hourly_rate_weighted_sum / row.hourly_rate_weight : null,
-    hourly_rate_weighted_sum: undefined,
-    hourly_rate_weight: undefined,
-  }));
-}
-
-function buildEmployeeAnalyticsTotalsIndex(normalizedLaborRows) {
-  const byKey = new Map();
-  for (const row of normalizedLaborRows) {
-    const keys = buildEmployeeJobCompositeLookupKeys(row);
-    if (!keys.length) continue;
-    for (const key of keys) {
-      if (!byKey.has(key)) {
-        byKey.set(key, {
-          regular_hours: 0,
-          overtime_hours: 0,
-          regular_pay: 0,
-          overtime_pay: 0,
-          total_pay: 0,
-          net_sales: 0,
-          declared_tips: 0,
-          non_cash_tips: 0,
-          tips_withheld: 0,
-          total_gratuity: 0,
-        });
-      }
-      const target = byKey.get(key);
-      target.regular_hours += row.regular_hours || 0;
-      target.overtime_hours += row.overtime_hours || 0;
-      target.regular_pay += row.regular_pay || 0;
-      target.overtime_pay += row.overtime_pay || 0;
-      target.total_pay += row.total_pay || 0;
-      target.net_sales += row.net_sales || 0;
-      target.declared_tips += row.declared_tips || 0;
-      target.non_cash_tips += row.non_cash_tips || 0;
-      target.tips_withheld += row.tips_withheld || 0;
-      target.total_gratuity += row.total_gratuity || 0;
-    }
-  }
-  return byKey;
-}
-
-function applyAnalyticsTotalsToTimeEntryRows(detailRows, analyticsTotalsByKey) {
-  const rows = Array.isArray(detailRows) ? detailRows : [];
-  if (!(analyticsTotalsByKey instanceof Map) || analyticsTotalsByKey.size === 0) return rows;
-
-  const byComposite = new Map();
-  for (const row of rows) {
-    const keys = buildEmployeeJobCompositeLookupKeys(row);
-    const key = keys.find((k) => analyticsTotalsByKey.has(k)) || keys[0] || null;
-    if (!key) continue;
-    if (!byComposite.has(key)) byComposite.set(key, []);
-    byComposite.get(key).push(row);
-  }
-
-  const allocationFields = [
-    'regular_hours',
-    'overtime_hours',
-    'regular_pay',
-    'overtime_pay',
-    'total_pay',
-    'net_sales',
-    'declared_tips',
-    'non_cash_tips',
-    'tips_withheld',
-    'total_gratuity',
-  ];
-
-  for (const [key, employeeRows] of byComposite.entries()) {
-    const totals = analyticsTotalsByKey.get(key);
-    if (!totals || !employeeRows.length) continue;
-    const weightTotal = employeeRows.reduce((sum, row) => sum + (row.regular_hours || 0) + (row.overtime_hours || 0), 0);
-    const fallbackWeight = employeeRows.length > 0 ? 1 / employeeRows.length : 0;
-
-    for (let i = 0; i < employeeRows.length; i++) {
-      const row = employeeRows[i];
-      const rowHours = (row.regular_hours || 0) + (row.overtime_hours || 0);
-      const weight = weightTotal > 0 ? rowHours / weightTotal : fallbackWeight;
-      for (const field of allocationFields) {
-        row[field] = (totals[field] || 0) * weight;
-      }
-      if (row.hourly_rate === null || row.hourly_rate === undefined) {
-        const totalHours = (row.regular_hours || 0) + (row.overtime_hours || 0);
-        if (totalHours > 0) row.hourly_rate = row.regular_pay / totalHours;
-      }
-    }
-  }
-
-  return rows;
-}
-
 function buildJoinDiagnostics({ employeeRows, employeeByKey, rawAnalyticsRows, normalizedLaborRows }) {
   const normalizedEmployeeRows = sampleRows(employeeRows, 25).map((row) => normalizeEmployeeIdentity(row));
   const normalizedAnalyticsRows = sampleRows(rawAnalyticsRows, 25).map((row) =>
@@ -794,17 +1144,20 @@ function buildJoinDiagnostics({ employeeRows, employeeByKey, rawAnalyticsRows, n
   const joinKeySamples = [];
 
   for (const row of normalizedLaborRows) {
-    const keys = lookupKeysForRow(row);
+    const keys = buildEmployeeLookupKeys(row);
     const match = keys.map((k) => employeeByKey.get(k)).find(Boolean) || null;
+
     if (match) {
       joinedStats.matched_rows += 1;
     } else {
       joinedStats.unmatched_rows += 1;
       if (unmatchedSamples.length < 10) unmatchedSamples.push(row);
     }
+
     if (joinKeySamples.length < 25) {
       joinKeySamples.push({
         analytics_lookup_keys: keys,
+        analytics_job_keys: buildEmployeeJobCompositeLookupKeys(row),
         matched_employee_id: match?.employee_id || null,
         matched_external_employee_id: match?.external_employee_id || null,
       });
@@ -827,285 +1180,11 @@ function buildJoinDiagnostics({ employeeRows, employeeByKey, rawAnalyticsRows, n
   };
 }
 
-function joinLaborRowsToEmployees(laborRows, employeeByKey, timeEntryByKey = new Map()) {
-  const timeEntryByEmployee = new Map();
-  for (const [compositeKey, value] of timeEntryByKey.entries()) {
-    const [employeeLookupKey] = String(compositeKey).split('|||');
-    if (!timeEntryByEmployee.has(employeeLookupKey)) timeEntryByEmployee.set(employeeLookupKey, []);
-    timeEntryByEmployee.get(employeeLookupKey).push(value);
-  }
-
-  return laborRows.flatMap((row) => {
-    const lookupKeys = lookupKeysForRow(row);
-    const matched = lookupKeys.map((k) => employeeByKey.get(k)).find(Boolean) || null;
-
-    const rowCompositeKeys = buildEmployeeJobCompositeLookupKeys(row);
-    const exactTimeEntryMatch = rowCompositeKeys.map((k) => timeEntryByKey.get(k)).find(Boolean) || null;
-
-    let candidateTimeEntries = [];
-    if (exactTimeEntryMatch) {
-      candidateTimeEntries = [exactTimeEntryMatch];
-    } else if (!normalizeJobIdentityPart(row)) {
-      const aggregated = [];
-      for (const key of lookupKeys) {
-        const entries = timeEntryByEmployee.get(key) || [];
-        for (const entry of entries) aggregated.push(entry);
-      }
-      const unique = new Map();
-      for (const entry of aggregated) {
-        const uniqKey = `${String(entry.job_code || '').toLowerCase()}|||${String(entry.job_name || '').toLowerCase()}`;
-        if (!unique.has(uniqKey)) unique.set(uniqKey, entry);
-      }
-      candidateTimeEntries = Array.from(unique.values());
-    }
-
-    if (!candidateTimeEntries.length) candidateTimeEntries = [null];
-
-    return candidateTimeEntries.map((timeEntryMatch) => ({
-      ...row,
-      employee_id: matched?.employee_id || timeEntryMatch?.employee_id || row.external_employee_id || row.employee_id || null,
-      employee_name: matched?.employee_name || timeEntryMatch?.employee_name || row.employee_name || null,
-      toast_employee_id: matched?.toast_employee_id || timeEntryMatch?.toast_employee_id || row.employee_id || null,
-      export_employee_id: matched?.external_employee_id || timeEntryMatch?.external_employee_id || row.external_employee_id || null,
-      job_name: row.job_name || timeEntryMatch?.job_name || null,
-      job_code: row.job_code || timeEntryMatch?.job_code || null,
-      location_display_name: row.location_display_name || timeEntryMatch?.location_display_name || row.location_name || null,
-      location_code: row.location_code || timeEntryMatch?.location_code || null,
-      __field_sources: {
-        employee_name: matched?.employee_name
-          ? sourceTag('toast_standard_employees', 'matched_by_employee_id_or_external_id')
-          : timeEntryMatch?.employee_name
-            ? sourceTag('toast_standard_time_entries', 'fallback_employee_name_from_time_entries')
-            : row.employee_name
-              ? sourceTag('toast_analytics_employee_grouped', 'employee_name_from_analytics')
-              : sourceTag(null),
-        job_title: row.job_name
-          ? sourceTag('toast_analytics_employee_grouped', 'job_name_from_analytics')
-          : timeEntryMatch?.job_name
-            ? sourceTag('toast_standard_time_entries', 'fallback_job_from_time_entries')
-            : sourceTag(null),
-        hourly_rate: row.hourly_rate !== null ? sourceTag('toast_analytics_employee_grouped', 'hourly_rate_from_analytics') : sourceTag(null),
-        employee_id: matched?.external_employee_id
-          ? sourceTag('toast_standard_employees', 'payroll_id_from_employee_record')
-          : timeEntryMatch?.external_employee_id
-            ? sourceTag('toast_standard_time_entries', 'fallback_external_employee_id_from_time_entries')
-            : row.external_employee_id
-              ? sourceTag('toast_analytics_employee_grouped', 'external_employee_id_from_analytics')
-              : sourceTag(null),
-        location: row.location_display_name
-          ? sourceTag('toast_analytics_employee_grouped', 'location_name_from_analytics')
-          : timeEntryMatch?.location_display_name
-            ? sourceTag('toast_standard_time_entries', 'fallback_location_from_time_entries')
-            : sourceTag(null),
-      },
-    }));
-  });
-}
-
-function buildPayrollExportRows(detailRows, fallbackLocationCode = null, { includeSourceAudit = false } = {}) {
-  const byEmployeeJobLocation = new Map();
-  for (const row of detailRows) {
-    const employeeName = String(row.employee_name || '').trim();
-    const employeeId = String(row.employee_id || '').trim();
-    const toastEmployeeId = String(row.toast_employee_id || employeeId || '').trim();
-    const exportEmployeeId = String(row.export_employee_id || '').trim();
-    const jobTitle = String(row.job_name || '').trim();
-    const jobCode = String(row.job_code || '').trim();
-    const locationName = row.location_display_name || row.location_name || '';
-    const locationCode = row.location_code || fallbackLocationCode || '';
-    const employeeKey = normalizeGroupPart(
-      exportEmployeeId,
-      normalizeGroupPart(toastEmployeeId, normalizeGroupPart(employeeId, '__unknown_employee__'))
-    );
-    const jobKey = normalizeGroupPart(jobTitle, normalizeGroupPart(jobCode, '__unassigned_job__'));
-    const locationKey = normalizeGroupPart(locationCode, normalizeGroupPart(locationName, '__unknown_location__'));
-    const key = [employeeKey, jobKey, locationKey].join('|||');
-
-    if (!byEmployeeJobLocation.has(key)) {
-      byEmployeeJobLocation.set(key, {
-        'Toast Employee ID': toastEmployeeId || null,
-        Employee: employeeName || null,
-        'Job Title': jobTitle || jobCode || 'Unassigned',
-        'Regular Hours': 0,
-        'Overtime Hours': 0,
-        HourlyRateWeightedSum: 0,
-        HourlyRateWeight: 0,
-        HourlyRateSamples: 0,
-        'Regular Pay': 0,
-        'Overtime Pay': 0,
-        TotalPayFromSource: null,
-        'Net Sales': null,
-        'Declared Tips': 0,
-        'Non-Cash Tips': 0,
-        'Tips Withheld': null,
-        'Total Gratuity': null,
-        'Employee ID': exportEmployeeId || null,
-        'Job Code': jobCode || null,
-        Location: locationName || null,
-        'Location Code': locationCode || null,
-        __sourceCounters: {
-          employee_name: new Map(),
-          job_title: new Map(),
-          hourly_rate: new Map(),
-          employee_id: new Map(),
-          location: new Map(),
-        },
-      });
-    }
-
-    const agg = byEmployeeJobLocation.get(key);
-    if (!agg['Toast Employee ID'] && toastEmployeeId) agg['Toast Employee ID'] = toastEmployeeId;
-    if (!agg.Employee && employeeName) agg.Employee = employeeName;
-    if (!agg['Employee ID'] && exportEmployeeId) agg['Employee ID'] = exportEmployeeId;
-    if ((!agg['Job Title'] || agg['Job Title'] === 'Unassigned') && jobTitle) agg['Job Title'] = jobTitle;
-    if (!agg['Job Code'] && jobCode) agg['Job Code'] = jobCode;
-    if (!agg.Location && locationName) agg.Location = locationName;
-    if (!agg['Location Code'] && locationCode) agg['Location Code'] = locationCode;
-    const rowSource = row.__field_sources || {};
-    for (const field of ['employee_name', 'job_title', 'hourly_rate', 'employee_id', 'location']) {
-      const src = rowSource[field]?.source || null;
-      if (sourceIsPresent(src)) {
-        const cur = agg.__sourceCounters[field].get(src) || 0;
-        agg.__sourceCounters[field].set(src, cur + 1);
-      }
-    }
-
-    agg['Regular Hours'] += row.regular_hours || 0;
-    agg['Overtime Hours'] += row.overtime_hours || 0;
-
-    if (row.hourly_rate !== null && row.hourly_rate !== undefined) {
-      const weight = (row.regular_hours || 0) + (row.overtime_hours || 0) || 1;
-      agg.HourlyRateWeightedSum += row.hourly_rate * weight;
-      agg.HourlyRateWeight += weight;
-      agg.HourlyRateSamples += 1;
-    }
-
-    agg['Regular Pay'] += row.regular_pay || 0;
-    agg['Overtime Pay'] += row.overtime_pay || 0;
-    agg.TotalPayFromSource = sumNullable(agg.TotalPayFromSource, row.total_pay);
-    agg['Net Sales'] = sumNullable(agg['Net Sales'], row.net_sales);
-    agg['Declared Tips'] += row.declared_tips || 0;
-    agg['Non-Cash Tips'] += row.non_cash_tips || 0;
-    agg['Tips Withheld'] = sumNullable(agg['Tips Withheld'], row.tips_withheld);
-    agg['Total Gratuity'] = sumNullable(agg['Total Gratuity'], row.total_gratuity);
-  }
-
-  const result = Array.from(byEmployeeJobLocation.values()).map((agg) => {
-    const hourlyRate =
-      agg.HourlyRateSamples > 0 && agg.HourlyRateWeight > 0
-        ? agg.HourlyRateWeightedSum / agg.HourlyRateWeight
-        : null;
-
-    const derivedRegularPay = agg['Regular Pay'] || ((agg['Regular Hours'] || 0) * (hourlyRate || 0));
-    const derivedOvertimePay = agg['Overtime Pay'] || ((agg['Overtime Hours'] || 0) * (hourlyRate || 0) * 1.5);
-    const totalPay = agg.TotalPayFromSource !== null ? agg.TotalPayFromSource : derivedRegularPay + derivedOvertimePay;
-    const totalTips = (agg['Declared Tips'] || 0) + (agg['Non-Cash Tips'] || 0);
-
-    return {
-      'Toast Employee ID': agg['Toast Employee ID'],
-      Employee: agg.Employee,
-      'Job Title': agg['Job Title'],
-      'Regular Hours': Number((agg['Regular Hours'] || 0).toFixed(2)),
-      'Overtime Hours': Number((agg['Overtime Hours'] || 0).toFixed(2)),
-      'Hourly Rate': hourlyRate !== null ? Number(hourlyRate.toFixed(2)) : null,
-      'Regular Pay': Number((derivedRegularPay || 0).toFixed(2)),
-      'Overtime Pay': Number((derivedOvertimePay || 0).toFixed(2)),
-      'Total Pay': Number((totalPay || 0).toFixed(2)),
-      'Net Sales': agg['Net Sales'] !== null ? Number(agg['Net Sales'].toFixed(2)) : null,
-      'Declared Tips': Number((agg['Declared Tips'] || 0).toFixed(2)),
-      'Non-Cash Tips': Number((agg['Non-Cash Tips'] || 0).toFixed(2)),
-      'Total Tips': Number(totalTips.toFixed(2)),
-      'Tips Withheld': agg['Tips Withheld'] !== null ? Number(agg['Tips Withheld'].toFixed(2)) : null,
-      'Total Gratuity': agg['Total Gratuity'] !== null ? Number(agg['Total Gratuity'].toFixed(2)) : null,
-      'Employee ID': agg['Employee ID'],
-      'Job Code': agg['Job Code'],
-      Location: agg.Location,
-      'Location Code': agg['Location Code'],
-      __field_sources: {
-        employee_name: sourceTag(pickDominantSource(agg.__sourceCounters.employee_name)),
-        job_title: sourceTag(pickDominantSource(agg.__sourceCounters.job_title)),
-        hourly_rate: sourceTag(pickDominantSource(agg.__sourceCounters.hourly_rate)),
-        employee_id: sourceTag(pickDominantSource(agg.__sourceCounters.employee_id)),
-        location: sourceTag(pickDominantSource(agg.__sourceCounters.location)),
-      },
-    };
-  });
-
-  result.sort((a, b) => {
-    const empId = String(a['Employee ID'] || '').localeCompare(String(b['Employee ID'] || ''));
-    if (empId !== 0) return empId;
-    const emp = String(a.Employee || '').localeCompare(String(b.Employee || ''));
-    if (emp !== 0) return emp;
-    const jobTitle = String(a['Job Title'] || '').localeCompare(String(b['Job Title'] || ''));
-    if (jobTitle !== 0) return jobTitle;
-    const jobCode = String(a['Job Code'] || '').localeCompare(String(b['Job Code'] || ''));
-    if (jobCode !== 0) return jobCode;
-    const location = String(a.Location || '').localeCompare(String(b.Location || ''));
-    if (location !== 0) return location;
-    return String(a['Location Code'] || '').localeCompare(String(b['Location Code'] || ''));
-  });
-
-  const rows = result.map((row) => {
-    const cleaned = { ...row };
-    delete cleaned.__field_sources;
-    return cleaned;
-  });
-
-  if (!includeSourceAudit) return rows;
-  const rowBuildDebugSample = result.slice(0, 10).map((row, idx) => ({
-    row_index: idx,
-    guid_used: row['Toast Employee ID'] || null,
-    payroll_employee_id_used: row['Employee ID'] || null,
-    employee_name: row.Employee || null,
-    employee_name_source: row.__field_sources?.employee_name?.source || null,
-    job_title: row['Job Title'] || null,
-    job_title_source: row.__field_sources?.job_title?.source || null,
-    hourly_rate: row['Hourly Rate'],
-    hourly_rate_source: row.__field_sources?.hourly_rate?.source || null,
-    location: row.Location || null,
-    location_source: row.__field_sources?.location?.source || null,
-  }));
-  const rowSourceAudit = result.map((row, idx) => ({
-    row_index: idx,
-    employee: row.Employee || null,
-    toast_employee_id: row['Toast Employee ID'] || null,
-    employee_id: row['Employee ID'] || null,
-    job_title: row['Job Title'] || null,
-    job_code: row['Job Code'] || null,
-    location: row.Location || null,
-    location_code: row['Location Code'] || null,
-    field_sources: {
-      employee_name: row.__field_sources?.employee_name || sourceTag(null),
-      job_title: row.__field_sources?.job_title || sourceTag(null),
-      hourly_rate: row.__field_sources?.hourly_rate || sourceTag(null),
-      employee_id: row.__field_sources?.employee_id || sourceTag(null),
-      location: row.__field_sources?.location || sourceTag(null),
-    },
-  }));
-  return { rows, rowSourceAudit, rowBuildDebugSample };
-}
-
-function detectReturnedRowGrain(rows) {
-  const hasJobSplit = rows.some((row) => {
-    const title = safeTrim(row['Job Title']);
-    const code = safeTrim(row['Job Code']);
-    return (title && title.toLowerCase() !== 'unassigned') || !!code;
-  });
-  const hasLocationSplit = rows.some((row) => {
-    const name = safeTrim(row.Location);
-    const code = safeTrim(row['Location Code']);
-    return !!(name || code);
-  });
-
-  if (hasJobSplit && hasLocationSplit) return 'one row per Employee + Job Title + Location for selected pay period';
-  if (hasJobSplit) return 'one row per Employee + Job Title (location approximated) for selected pay period';
-  return 'one row per Employee (job/location not reliably returned by analytics payload) for selected pay period';
-}
-
 async function fetchOriginalToastPayPeriodData({ locationName, periodStart, periodEnd, includeDebug = false }) {
   const location = String(locationName || '').trim();
   const start = String(periodStart || '').trim();
   const end = String(periodEnd || '').trim();
+
   if (!location || !start || !end) throw new Error('missing_required_fields');
 
   const inflightKey = `${location.toLowerCase()}|${start}|${end}`;
@@ -1144,21 +1223,23 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
 
     const employeeRows = extractRows(employees.data);
     const employeeByKey = buildEmployeeIndex(employeeRows);
+
     const timeEntryRows = timeEntries && timeEntries.ok ? extractRows(timeEntries.data) : [];
-    const timeEntryByKey = buildTimeEntryIdentityIndex(
-      timeEntryRows,
-      location,
-      vitalsRecord['Toast Location ID'] ? String(vitalsRecord['Toast Location ID']) : null
-    );
     const rawAnalyticsRows = extractRows(analytics.data);
+
+    const fallbackLocationCode = vitalsRecord['Toast Location ID'] ? String(vitalsRecord['Toast Location ID']) : null;
+
+    const timeEntryByKey = buildTimeEntryIdentityIndex(timeEntryRows, location, fallbackLocationCode);
+
     const normalizedLaborRows = rawAnalyticsRows.map((row) =>
       normalizeAnalyticsLaborRow(row, {
         location,
         periodStart: start,
         periodEnd: end,
-        fallbackLocationCode: vitalsRecord['Toast Location ID'] ? String(vitalsRecord['Toast Location ID']) : null,
+        fallbackLocationCode,
       })
     );
+
     const employeesShape = sourceShapeDebug({
       label: 'toast_standard_employees',
       rows: employeeRows,
@@ -1168,6 +1249,7 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
       },
       naturalGrainHint: 'one row per employee',
     });
+
     const timeEntriesShape = sourceShapeDebug({
       label: 'toast_standard_time_entries',
       rows: timeEntryRows,
@@ -1181,6 +1263,7 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
       },
       naturalGrainHint: 'one row per time entry / punch segment (employee + job + location when populated)',
     });
+
     const analyticsShape = sourceShapeDebug({
       label: 'toast_analytics_labor_grouped_employee',
       rows: rawAnalyticsRows,
@@ -1197,7 +1280,10 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
 
     const canTimeEntriesShapeRows =
       hasAnyField(timeEntriesShape, 'job_title_or_code') && hasAnyField(timeEntriesShape, 'location_text_or_code');
-    const strategy = canTimeEntriesShapeRows ? 'time_entries_primary_with_employee_enrichment' : 'analytics_primary_fallback';
+
+    const strategy = canTimeEntriesShapeRows
+      ? 'time_entries_primary_with_employee_enrichment'
+      : 'analytics_primary_fallback';
 
     const sourceDetailRows =
       strategy === 'time_entries_primary_with_employee_enrichment'
@@ -1206,7 +1292,7 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
               timeEntryRows,
               employeeByKey,
               fallbackLocationName: location,
-              fallbackLocationCode: vitalsRecord['Toast Location ID'] ? String(vitalsRecord['Toast Location ID']) : null,
+              fallbackLocationCode,
               periodStart: start,
               periodEnd: end,
             }),
@@ -1220,11 +1306,11 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
       timeEntriesShape,
       analyticsShape,
     });
-    const rowBuild = buildPayrollExportRows(
-      sourceDetailRows,
-      vitalsRecord['Toast Location ID'] ? String(vitalsRecord['Toast Location ID']) : null,
-      { includeSourceAudit: includeDebug }
-    );
+
+    const rowBuild = buildPayrollExportRows(sourceDetailRows, fallbackLocationCode, {
+      includeSourceAudit: includeDebug,
+    });
+
     const rows = includeDebug ? rowBuild.rows : rowBuild;
     const rowSourceAudit = includeDebug ? rowBuild.rowSourceAudit : null;
     const rowBuildDebugSample = includeDebug ? rowBuild.rowBuildDebugSample : null;
@@ -1293,29 +1379,30 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
         employee_identity_source: 'Toast Standard labor/hr employees endpoint',
         labor_totals_source:
           strategy === 'time_entries_primary_with_employee_enrichment'
-            ? 'Toast Standard labor time entries payload (plus fields available in that payload)'
+            ? 'Toast Analytics ERA labor report allocated onto Standard time-entry employee+job rows'
             : 'Toast Analytics ERA labor report (groupBy: EMPLOYEE) for selected pay period',
-        employee_column_mapping: 'Employee column prefers Toast Standard employee full name; falls back to analytics name, then Toast employee id only when no name is available',
+        employee_column_mapping:
+          'Employee column prefers Toast Standard employee full name; falls back to analytics name, then Toast employee id only when no name is available',
         employee_id_column_mapping:
           'Employee ID column prefers payrollEmployeeId/payrollId/payrollEmployeeNumber/employeeNumber/employeeCode/externalEmployeeId from Toast Standard employees; remains blank when unavailable',
         join_key_between_sources:
-          'analytics.employeeGuid/employeeId + analytics.employeeExternalId -> standard employee id/externalEmployeeId (case-insensitive string match)',
+          'analytics employee identity and payroll identity are matched against standard employee keys; employee+job composite keys are used where job identity exists',
         grouping_key_after_transform:
-          'lower(payroll employee id when present, else toast_employee_id), lower(job_title OR job_code), lower(location_code OR location_name)',
+          'lower(payroll employee id when present, else toast_employee_id), lower(job_code when present else job_title), lower(location_code OR location_name)',
         row_grain_target: 'one row per Employee + Job + Location for selected pay period',
         row_grain_returned: rowGrain,
         csv_shape_recreation_assessment: csvShapeAssessment,
         exact_payroll_export_endpoint_available: false,
         note:
           strategy === 'time_entries_primary_with_employee_enrichment'
-            ? 'Direct Toast Payroll Export endpoint is not configured in this codebase; rows are primarily shaped from Standard time entries and enriched with Standard employees.'
+            ? 'Direct Toast Payroll Export endpoint is not configured in this codebase; rows are shaped from Standard time entries, enriched with Standard employees, and analytics totals are allocated by employee+job composite key when possible.'
             : 'Direct Toast Payroll Export endpoint is not configured in this codebase; data is reconstructed from Standard employees + Analytics labor rows.',
         approximation_notes:
           strategy === 'time_entries_primary_with_employee_enrichment'
             ? [
                 'Time entries are used for row grain (employee + job + location) when those fields exist in the payload.',
-                'Columns not present on time entries remain null/0 or derived approximations after aggregation.',
-                'Analytics is still fetched for diagnostics but is not the primary row-shape source in this strategy.',
+                'Analytics totals are allocated onto time-entry-shaped rows using employee+job composite matching when possible.',
+                'Columns absent from available payloads remain null/0 or derived approximations after aggregation.',
               ]
             : [
                 'Toast ERA rows are fetched at employee grain, then enriched with Standard data and rolled up to employee + job + location for returned rows.',
@@ -1351,5 +1438,7 @@ module.exports = {
     buildExportShapedRowsFromTimeEntries,
     joinLaborRowsToEmployees,
     buildPayrollExportRows,
+    buildTimeEntryIdentityIndex,
+    buildEmployeeJobCompositeLookupKeys,
   },
 };
