@@ -267,11 +267,9 @@ function chooseEraRange(ymdStart, ymdEnd) {
   return { ok: true, range: d <= 7 ? 'week' : 'month', days: d };
 }
 
-function buildGroupBy(groups) {
-  const values = (Array.isArray(groups) ? groups : [groups])
-    .map((group) => String(group || '').trim().toUpperCase())
-    .filter(Boolean);
-  return values.length ? values : ['EMPLOYEE'];
+function singleGroupBy(group) {
+  const normalized = String(group || '').trim().toUpperCase();
+  return [normalized || 'EMPLOYEE'];
 }
 
 function parseRetryAfterMs(headers) {
@@ -530,8 +528,8 @@ async function fetchToastAnalyticsJobsFromVitals({ vitalsRecord, periodStart, pe
     endBusinessDate: endBD,
     restaurantIds: [cfg.restaurantGuid],
     excludedRestaurantIds: [],
-    // Prefer employee + job grain from ERA so multi-job employees stay split upstream.
-    groupBy: buildGroupBy(['EMPLOYEE', 'JOB']),
+    // This ERA endpoint only supports a single groupBy option.
+    groupBy: singleGroupBy('EMPLOYEE'),
   };
 
   const { response: createRes } = await fetchWith429Retry(

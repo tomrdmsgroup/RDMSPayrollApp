@@ -63,7 +63,7 @@ async function testFetchToastDataHandlesFailures() {
   global.fetch = originalFetch;
 }
 
-async function testToastAnalyticsUsesEmployeeAndJobGrouping() {
+async function testToastAnalyticsUsesSingleEmployeeGrouping() {
   const originalFetch = global.fetch;
   const requests = [];
   global.fetch = (url, options = {}) => {
@@ -126,7 +126,7 @@ async function testToastAnalyticsUsesEmployeeAndJobGrouping() {
   const createRequest = requests.find((r) => r.url.includes('/era/v1/labor/week') && r.method === 'POST');
   assert.ok(createRequest, 'expected analytics create request');
   const createBody = JSON.parse(createRequest.body);
-  assert.deepEqual(createBody.groupBy, ['EMPLOYEE', 'JOB']);
+  assert.deepEqual(createBody.groupBy, ['EMPLOYEE']);
 
   global.fetch = originalFetch;
 }
@@ -135,5 +135,5 @@ module.exports = {
   testBuildsExpectedUrl,
   testFetchesToastDataWithAuthAndMapping,
   testFetchToastDataHandlesFailures,
-  testToastAnalyticsUsesEmployeeAndJobGrouping,
+  testToastAnalyticsUsesSingleEmployeeGrouping,
 };
