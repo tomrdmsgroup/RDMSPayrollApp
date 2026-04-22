@@ -120,8 +120,9 @@ function normalizeEmployeeIdentity(row) {
     ) || fullNameFromParts(row?.firstName, row?.lastName);
 
   return {
-    employee_id: toastEmployeeId,
+    employee_id: payrollEmployeeId || toastEmployeeId,
     external_employee_id: payrollEmployeeId,
+    toast_employee_id: toastEmployeeId,
     employee_name: employeeName,
   };
 }
@@ -130,7 +131,9 @@ function buildEmployeeIndex(employeeRows) {
   const byKey = new Map();
   for (const row of employeeRows) {
     const identity = normalizeEmployeeIdentity(row);
-    const keys = [identity.employee_id, identity.external_employee_id].filter(Boolean).map((x) => String(x).toLowerCase());
+    const keys = [identity.employee_id, identity.external_employee_id, identity.toast_employee_id]
+      .filter(Boolean)
+      .map((x) => String(x).toLowerCase());
     for (const key of keys) {
       if (!byKey.has(key)) byKey.set(key, identity);
     }
@@ -240,8 +243,9 @@ function normalizeAnalyticsLaborRow(row, { location, periodStart, periodEnd, fal
     pay_type: payType,
     pay_period_start: periodStart,
     pay_period_end: periodEnd,
-    employee_id: analyticsEmployeeId,
+    employee_id: analyticsExternalEmployeeId || analyticsEmployeeId,
     external_employee_id: analyticsExternalEmployeeId,
+    toast_employee_id: analyticsEmployeeId,
     employee_name: analyticsEmployeeName,
     job_code: jobCode,
     job_name: jobTitle,
@@ -404,9 +408,21 @@ function hasAnyField(sourceDebug, key) {
 }
 
 function lookupKeysForRow(row) {
-  return [row?.employee_id, row?.external_employee_id]
+  return [row?.employee_id, row?.external_employee_id, row?.toast_employee_id]
     .filter(Boolean)
     .map((x) => String(x).toLowerCase());
+}
+
+function normalizeJobIdentityPart(row) {
+  return safeTrim(row?.job_code) || safeTrim(row?.job_name) || null;
+}
+
+function buildEmployeeJobCompositeLookupKeys(row) {
+  const employeeKeys = lookupKeysForRow(row);
+  const jobPart = normalizeJobIdentityPart(row);
+  if (!jobPart) return [];
+  const normalizedJobPart = String(jobPart).trim().toLowerCase();
+  return employeeKeys.map((employeeKey) => `${employeeKey}|||${normalizedJobPart}`);
 }
 
 function normalizeTimeEntryRow(row, fallbackLocationName = null, fallbackLocationCode = null) {
@@ -459,8 +475,9 @@ function normalizeTimeEntryRow(row, fallbackLocationName = null, fallbackLocatio
     ) || fullNameFromParts(pick(row, ['employee.firstName', 'firstName']), pick(row, ['employee.lastName', 'lastName']));
 
   return {
-    employee_id: employeeId,
+    employee_id: externalEmployeeId || employeeId,
     external_employee_id: externalEmployeeId,
+    toast_employee_id: employeeId,
     employee_name: employeeName,
     business_date: normalizeBusinessDate(
       pick(row, ['businessDate', 'business_date', 'date', 'workDate', 'shiftDate', 'inDate', 'clockInDate'])
@@ -535,53 +552,41 @@ function normalizeTimeEntryRow(row, fallbackLocationName = null, fallbackLocatio
 }
 
 function buildTimeEntryIdentityIndex(timeEntryRows, fallbackLocationName, fallbackLocationCode) {
-  const byKey = new Map();
+  const byCompositeKey = new Map();
   for (const row of timeEntryRows) {
     const normalized = normalizeTimeEntryRow(row, fallbackLocationName, fallbackLocationCode);
-    const keys = [normalized.employee_id, normalized.external_employee_id]
-      .filter(Boolean)
-      .map((x) => String(x).toLowerCase());
-    if (!keys.length) continue;
-    const weight = 1;
-    for (const key of keys) {
-      if (!byKey.has(key)) {
-        byKey.set(key, {
+    const employeeKeys = lookupKeysForRow(normalized);
+    const jobPart = normalizeJobIdentityPart(normalized);
+    if (!employeeKeys.length || !jobPart) continue;
+    const normalizedJobPart = String(jobPart).trim().toLowerCase();
+
+    for (const employeeKey of employeeKeys) {
+      const compositeKey = `${employeeKey}|||${normalizedJobPart}`;
+      if (!byCompositeKey.has(compositeKey)) {
+        byCompositeKey.set(compositeKey, {
           employee_id: normalized.employee_id || null,
           external_employee_id: normalized.external_employee_id || null,
+          toast_employee_id: normalized.toast_employee_id || null,
           employee_name: normalized.employee_name || null,
-          top_job_name: null,
-          top_job_code: null,
-          top_location_name: null,
-          top_location_code: null,
-          jobCounts: new Map(),
-          locationCounts: new Map(),
+          job_name: normalized.job_name || null,
+          job_code: normalized.job_code || null,
+          location_display_name: normalized.location_display_name || null,
+          location_code: normalized.location_code || null,
         });
       }
-      const target = byKey.get(key);
+      const target = byCompositeKey.get(compositeKey);
       if (!target.employee_id && normalized.employee_id) target.employee_id = normalized.employee_id;
       if (!target.external_employee_id && normalized.external_employee_id) target.external_employee_id = normalized.external_employee_id;
+      if (!target.toast_employee_id && normalized.toast_employee_id) target.toast_employee_id = normalized.toast_employee_id;
       if (!target.employee_name && normalized.employee_name) target.employee_name = normalized.employee_name;
-      if (normalized.job_name) {
-        const c = target.jobCounts.get(normalized.job_name) || 0;
-        target.jobCounts.set(normalized.job_name, c + weight);
-      }
-      if (normalized.location_display_name) {
-        const c = target.locationCounts.get(normalized.location_display_name) || 0;
-        target.locationCounts.set(normalized.location_display_name, c + weight);
-      }
-      if (!target.top_job_code && normalized.job_code) target.top_job_code = normalized.job_code;
-      if (!target.top_location_code && normalized.location_code) target.top_location_code = normalized.location_code;
+      if (!target.job_name && normalized.job_name) target.job_name = normalized.job_name;
+      if (!target.job_code && normalized.job_code) target.job_code = normalized.job_code;
+      if (!target.location_display_name && normalized.location_display_name) target.location_display_name = normalized.location_display_name;
+      if (!target.location_code && normalized.location_code) target.location_code = normalized.location_code;
     }
   }
 
-  for (const info of byKey.values()) {
-    info.top_job_name = Array.from(info.jobCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
-    info.top_location_name = Array.from(info.locationCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
-    delete info.jobCounts;
-    delete info.locationCounts;
-  }
-
-  return byKey;
+  return byCompositeKey;
 }
 
 function buildExportShapedRowsFromTimeEntries({
@@ -592,65 +597,100 @@ function buildExportShapedRowsFromTimeEntries({
   periodStart,
   periodEnd,
 }) {
-  return timeEntryRows.map((row) => {
+  const byCompositeSegment = new Map();
+
+  for (const row of timeEntryRows) {
     const normalized = normalizeTimeEntryRow(row, fallbackLocationName, fallbackLocationCode);
-    const keys = lookupKeysForRow(normalized);
-    const employeeMatch = keys.map((k) => employeeByKey.get(k)).find(Boolean) || null;
-    return {
-      location_name: fallbackLocationName,
-      location_code: normalized.location_code || fallbackLocationCode || null,
-      location_display_name: normalized.location_display_name || fallbackLocationName || null,
-      business_date: normalized.business_date,
-      pay_type: normalized.pay_type,
-      pay_period_start: periodStart,
-      pay_period_end: periodEnd,
-      employee_id: employeeMatch?.employee_id || normalized.employee_id || null,
-      external_employee_id: employeeMatch?.external_employee_id || normalized.external_employee_id || null,
-      employee_name: employeeMatch?.employee_name || normalized.employee_name || null,
-      toast_employee_id: employeeMatch?.employee_id || normalized.employee_id || null,
-      export_employee_id: employeeMatch?.external_employee_id || normalized.external_employee_id || null,
-      job_code: normalized.job_code,
-      job_name: normalized.job_name,
-      regular_hours: normalized.regular_hours || 0,
-      overtime_hours: normalized.overtime_hours || 0,
-      hourly_rate: normalized.hourly_rate,
-      regular_pay: normalized.regular_pay || 0,
-      overtime_pay: normalized.overtime_pay || 0,
-      total_pay: normalized.total_pay,
-      net_sales: normalized.net_sales,
-      declared_tips: normalized.declared_tips || 0,
-      non_cash_tips: normalized.non_cash_tips || 0,
-      tips_withheld: normalized.tips_withheld,
-      total_gratuity: normalized.total_gratuity,
-      __field_sources: {
-        employee_name: employeeMatch?.employee_name
-          ? sourceTag('toast_standard_employees', 'matched_by_employee_id_or_external_id')
-          : normalized.employee_name
-            ? sourceTag('toast_standard_time_entries', 'employee_name_present_on_time_entry')
+    const employeeKeys = lookupKeysForRow(normalized);
+    const employeeMatch = employeeKeys.map((k) => employeeByKey.get(k)).find(Boolean) || null;
+    const exportEmployeeId = employeeMatch?.external_employee_id || normalized.external_employee_id || null;
+    const toastEmployeeId = employeeMatch?.toast_employee_id || normalized.toast_employee_id || null;
+    const canonicalEmployeeId = exportEmployeeId || employeeMatch?.employee_id || normalized.employee_id || null;
+    const jobKey = normalizeJobIdentityPart(normalized) || '__unassigned_job__';
+    const locationKey = (normalized.location_code || normalized.location_display_name || fallbackLocationCode || fallbackLocationName || '__unknown_location__').toLowerCase();
+    const employeeKeyPart = String(canonicalEmployeeId || toastEmployeeId || '__unknown_employee__').toLowerCase();
+    const compositeKey = [employeeKeyPart, String(jobKey).toLowerCase(), locationKey].join('|||');
+
+    if (!byCompositeSegment.has(compositeKey)) {
+      byCompositeSegment.set(compositeKey, {
+        location_name: fallbackLocationName,
+        location_code: normalized.location_code || fallbackLocationCode || null,
+        location_display_name: normalized.location_display_name || fallbackLocationName || null,
+        business_date: normalized.business_date,
+        pay_type: normalized.pay_type,
+        pay_period_start: periodStart,
+        pay_period_end: periodEnd,
+        employee_id: canonicalEmployeeId,
+        external_employee_id: exportEmployeeId,
+        employee_name: employeeMatch?.employee_name || normalized.employee_name || null,
+        toast_employee_id: toastEmployeeId,
+        export_employee_id: exportEmployeeId,
+        job_code: normalized.job_code,
+        job_name: normalized.job_name,
+        regular_hours: 0,
+        overtime_hours: 0,
+        hourly_rate_weighted_sum: 0,
+        hourly_rate_weight: 0,
+        regular_pay: 0,
+        overtime_pay: 0,
+        total_pay: 0,
+        net_sales: 0,
+        declared_tips: 0,
+        non_cash_tips: 0,
+        tips_withheld: 0,
+        total_gratuity: 0,
+        __field_sources: {
+          employee_name: employeeMatch?.employee_name
+            ? sourceTag('toast_standard_employees', 'matched_by_employee_id_or_external_id')
+            : normalized.employee_name
+              ? sourceTag('toast_standard_time_entries', 'employee_name_present_on_time_entry')
+              : sourceTag(null),
+          job_title: normalized.job_name
+            ? sourceTag('toast_standard_time_entries', 'job_name_present_on_time_entry')
             : sourceTag(null),
-        job_title: normalized.job_name
-          ? sourceTag('toast_standard_time_entries', 'job_name_present_on_time_entry')
-          : sourceTag(null),
-        hourly_rate: normalized.hourly_rate !== null ? sourceTag('toast_standard_time_entries', 'hourly_rate_on_time_entry') : sourceTag(null),
-        employee_id: employeeMatch?.external_employee_id
-          ? sourceTag('toast_standard_employees', 'payroll_id_from_employee_record')
-          : normalized.external_employee_id
-            ? sourceTag('toast_standard_time_entries', 'external_employee_id_on_time_entry')
+          hourly_rate: normalized.hourly_rate !== null ? sourceTag('toast_standard_time_entries', 'hourly_rate_on_time_entry') : sourceTag(null),
+          employee_id: exportEmployeeId
+            ? sourceTag(employeeMatch?.external_employee_id ? 'toast_standard_employees' : 'toast_standard_time_entries', 'payroll_id_for_employee_id_column')
             : sourceTag(null),
-        location: normalized.location_display_name
-          ? sourceTag('toast_standard_time_entries', 'location_name_on_time_entry')
-          : fallbackLocationName
-            ? sourceTag('vitals_location_fallback', 'time_entry_missing_location_name')
-            : sourceTag(null),
-      },
-    };
-  });
+          location: normalized.location_display_name
+            ? sourceTag('toast_standard_time_entries', 'location_name_on_time_entry')
+            : fallbackLocationName
+              ? sourceTag('vitals_location_fallback', 'time_entry_missing_location_name')
+              : sourceTag(null),
+        },
+      });
+    }
+
+    const target = byCompositeSegment.get(compositeKey);
+    target.regular_hours += normalized.regular_hours || 0;
+    target.overtime_hours += normalized.overtime_hours || 0;
+    target.regular_pay += normalized.regular_pay || 0;
+    target.overtime_pay += normalized.overtime_pay || 0;
+    target.total_pay += normalized.total_pay || 0;
+    target.net_sales += normalized.net_sales || 0;
+    target.declared_tips += normalized.declared_tips || 0;
+    target.non_cash_tips += normalized.non_cash_tips || 0;
+    target.tips_withheld += normalized.tips_withheld || 0;
+    target.total_gratuity += normalized.total_gratuity || 0;
+    if (normalized.hourly_rate !== null && normalized.hourly_rate !== undefined) {
+      const weight = (normalized.regular_hours || 0) + (normalized.overtime_hours || 0) || 1;
+      target.hourly_rate_weighted_sum += normalized.hourly_rate * weight;
+      target.hourly_rate_weight += weight;
+    }
+  }
+
+  return Array.from(byCompositeSegment.values()).map((row) => ({
+    ...row,
+    hourly_rate: row.hourly_rate_weight > 0 ? row.hourly_rate_weighted_sum / row.hourly_rate_weight : null,
+    hourly_rate_weighted_sum: undefined,
+    hourly_rate_weight: undefined,
+  }));
 }
 
 function buildEmployeeAnalyticsTotalsIndex(normalizedLaborRows) {
   const byKey = new Map();
   for (const row of normalizedLaborRows) {
-    const keys = lookupKeysForRow(row);
+    const keys = buildEmployeeJobCompositeLookupKeys(row);
     if (!keys.length) continue;
     for (const key of keys) {
       if (!byKey.has(key)) {
@@ -687,13 +727,13 @@ function applyAnalyticsTotalsToTimeEntryRows(detailRows, analyticsTotalsByKey) {
   const rows = Array.isArray(detailRows) ? detailRows : [];
   if (!(analyticsTotalsByKey instanceof Map) || analyticsTotalsByKey.size === 0) return rows;
 
-  const byEmployee = new Map();
+  const byComposite = new Map();
   for (const row of rows) {
-    const keys = lookupKeysForRow(row);
+    const keys = buildEmployeeJobCompositeLookupKeys(row);
     const key = keys.find((k) => analyticsTotalsByKey.has(k)) || keys[0] || null;
     if (!key) continue;
-    if (!byEmployee.has(key)) byEmployee.set(key, []);
-    byEmployee.get(key).push(row);
+    if (!byComposite.has(key)) byComposite.set(key, []);
+    byComposite.get(key).push(row);
   }
 
   const allocationFields = [
@@ -709,7 +749,7 @@ function applyAnalyticsTotalsToTimeEntryRows(detailRows, analyticsTotalsByKey) {
     'total_gratuity',
   ];
 
-  for (const [key, employeeRows] of byEmployee.entries()) {
+  for (const [key, employeeRows] of byComposite.entries()) {
     const totals = analyticsTotalsByKey.get(key);
     if (!totals || !employeeRows.length) continue;
     const weightTotal = employeeRows.reduce((sum, row) => sum + (row.regular_hours || 0) + (row.overtime_hours || 0), 0);
@@ -788,22 +828,49 @@ function buildJoinDiagnostics({ employeeRows, employeeByKey, rawAnalyticsRows, n
 }
 
 function joinLaborRowsToEmployees(laborRows, employeeByKey, timeEntryByKey = new Map()) {
-  return laborRows.map((row) => {
-    const lookupKeys = [row.employee_id, row.external_employee_id]
-      .filter(Boolean)
-      .map((x) => String(x).toLowerCase());
+  const timeEntryByEmployee = new Map();
+  for (const [compositeKey, value] of timeEntryByKey.entries()) {
+    const [employeeLookupKey] = String(compositeKey).split('|||');
+    if (!timeEntryByEmployee.has(employeeLookupKey)) timeEntryByEmployee.set(employeeLookupKey, []);
+    timeEntryByEmployee.get(employeeLookupKey).push(value);
+  }
+
+  return laborRows.flatMap((row) => {
+    const lookupKeys = lookupKeysForRow(row);
     const matched = lookupKeys.map((k) => employeeByKey.get(k)).find(Boolean) || null;
-    const timeEntryMatch = lookupKeys.map((k) => timeEntryByKey.get(k)).find(Boolean) || null;
-    return {
+
+    const rowCompositeKeys = buildEmployeeJobCompositeLookupKeys(row);
+    const exactTimeEntryMatch = rowCompositeKeys.map((k) => timeEntryByKey.get(k)).find(Boolean) || null;
+
+    let candidateTimeEntries = [];
+    if (exactTimeEntryMatch) {
+      candidateTimeEntries = [exactTimeEntryMatch];
+    } else if (!normalizeJobIdentityPart(row)) {
+      const aggregated = [];
+      for (const key of lookupKeys) {
+        const entries = timeEntryByEmployee.get(key) || [];
+        for (const entry of entries) aggregated.push(entry);
+      }
+      const unique = new Map();
+      for (const entry of aggregated) {
+        const uniqKey = `${String(entry.job_code || '').toLowerCase()}|||${String(entry.job_name || '').toLowerCase()}`;
+        if (!unique.has(uniqKey)) unique.set(uniqKey, entry);
+      }
+      candidateTimeEntries = Array.from(unique.values());
+    }
+
+    if (!candidateTimeEntries.length) candidateTimeEntries = [null];
+
+    return candidateTimeEntries.map((timeEntryMatch) => ({
       ...row,
-      employee_id: matched?.employee_id || timeEntryMatch?.employee_id || row.employee_id || null,
+      employee_id: matched?.employee_id || timeEntryMatch?.employee_id || row.external_employee_id || row.employee_id || null,
       employee_name: matched?.employee_name || timeEntryMatch?.employee_name || row.employee_name || null,
-      toast_employee_id: matched?.employee_id || timeEntryMatch?.employee_id || row.employee_id || null,
+      toast_employee_id: matched?.toast_employee_id || timeEntryMatch?.toast_employee_id || row.employee_id || null,
       export_employee_id: matched?.external_employee_id || timeEntryMatch?.external_employee_id || row.external_employee_id || null,
-      job_name: row.job_name || timeEntryMatch?.top_job_name || null,
-      job_code: row.job_code || timeEntryMatch?.top_job_code || null,
-      location_display_name: row.location_display_name || timeEntryMatch?.top_location_name || row.location_name || null,
-      location_code: row.location_code || timeEntryMatch?.top_location_code || null,
+      job_name: row.job_name || timeEntryMatch?.job_name || null,
+      job_code: row.job_code || timeEntryMatch?.job_code || null,
+      location_display_name: row.location_display_name || timeEntryMatch?.location_display_name || row.location_name || null,
+      location_code: row.location_code || timeEntryMatch?.location_code || null,
       __field_sources: {
         employee_name: matched?.employee_name
           ? sourceTag('toast_standard_employees', 'matched_by_employee_id_or_external_id')
@@ -814,8 +881,8 @@ function joinLaborRowsToEmployees(laborRows, employeeByKey, timeEntryByKey = new
               : sourceTag(null),
         job_title: row.job_name
           ? sourceTag('toast_analytics_employee_grouped', 'job_name_from_analytics')
-          : timeEntryMatch?.top_job_name
-            ? sourceTag('toast_standard_time_entries', 'fallback_most_common_job_from_time_entries')
+          : timeEntryMatch?.job_name
+            ? sourceTag('toast_standard_time_entries', 'fallback_job_from_time_entries')
             : sourceTag(null),
         hourly_rate: row.hourly_rate !== null ? sourceTag('toast_analytics_employee_grouped', 'hourly_rate_from_analytics') : sourceTag(null),
         employee_id: matched?.external_employee_id
@@ -827,11 +894,11 @@ function joinLaborRowsToEmployees(laborRows, employeeByKey, timeEntryByKey = new
               : sourceTag(null),
         location: row.location_display_name
           ? sourceTag('toast_analytics_employee_grouped', 'location_name_from_analytics')
-          : timeEntryMatch?.top_location_name
-            ? sourceTag('toast_standard_time_entries', 'fallback_most_common_location_from_time_entries')
+          : timeEntryMatch?.location_display_name
+            ? sourceTag('toast_standard_time_entries', 'fallback_location_from_time_entries')
             : sourceTag(null),
       },
-    };
+    }));
   });
 }
 
