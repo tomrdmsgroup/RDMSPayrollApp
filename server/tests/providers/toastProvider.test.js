@@ -1,5 +1,9 @@
 const assert = require('assert');
-const { fetchToastData, buildTimeEntriesUrl } = require('../../src/providers/toastProvider');
+const {
+  fetchToastData,
+  buildTimeEntriesUrl,
+  fetchToastAnalyticsJobsFromVitals,
+} = require('../../src/providers/toastProvider');
 
 async function testBuildsExpectedUrl() {
   const url = buildTimeEntriesUrl('https://toast.example', 'LOC1', '2024-01-01', '2024-01-07');
@@ -59,4 +63,77 @@ async function testFetchToastDataHandlesFailures() {
   global.fetch = originalFetch;
 }
 
-module.exports = { testBuildsExpectedUrl, testFetchesToastDataWithAuthAndMapping, testFetchToastDataHandlesFailures };
+async function testToastAnalyticsUsesEmployeeAndJobGrouping() {
+  const originalFetch = global.fetch;
+  const requests = [];
+  global.fetch = (url, options = {}) => {
+    const method = (options.method || 'GET').toUpperCase();
+    const entry = { url: url.toString(), method, headers: options.headers || {}, body: options.body || null };
+    requests.push(entry);
+
+    if (entry.url.includes('/oauth') && method === 'POST') {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: { get: () => 'application/json' },
+        json: () => Promise.resolve({ token: { accessToken: 'analytics-token' } }),
+      });
+    }
+
+    if (entry.url.includes('/era/v1/labor/') && method === 'POST') {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: { get: () => 'application/json' },
+        json: () => Promise.resolve({ guid: 'report-1' }),
+      });
+    }
+
+    if (entry.url.includes('/era/v1/labor/report-1') && method === 'GET') {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: { get: () => 'application/json' },
+        json: () => Promise.resolve([]),
+      });
+    }
+
+    return Promise.resolve({
+      ok: false,
+      status: 404,
+      statusText: 'not found',
+      headers: { get: () => 'application/json' },
+      json: () => Promise.resolve({ error: 'unexpected-url' }),
+      text: () => Promise.resolve('unexpected-url'),
+    });
+  };
+
+  const result = await fetchToastAnalyticsJobsFromVitals({
+    vitalsRecord: {
+      'Toast API Hostname': 'ws-api.toasttab.com',
+      'Toast API Client ID - ANALYTICS': 'cid',
+      'Toast API Client Secret - ANALYTICS': 'sec',
+      'Toast API User Access Type': 'TOAST_MACHINE_CLIENT',
+      'Toast API Restaurant GUID': 'rest-guid-1',
+      'Toast API OAuth URL': 'https://auth.toasttab.com/oauth',
+    },
+    periodStart: '2026-03-01',
+    periodEnd: '2026-03-07',
+    locationName: 'Barrio',
+  });
+
+  assert.equal(result.ok, true);
+  const createRequest = requests.find((r) => r.url.includes('/era/v1/labor/week') && r.method === 'POST');
+  assert.ok(createRequest, 'expected analytics create request');
+  const createBody = JSON.parse(createRequest.body);
+  assert.deepEqual(createBody.groupBy, ['EMPLOYEE', 'JOB']);
+
+  global.fetch = originalFetch;
+}
+
+module.exports = {
+  testBuildsExpectedUrl,
+  testFetchesToastDataWithAuthAndMapping,
+  testFetchToastDataHandlesFailures,
+  testToastAnalyticsUsesEmployeeAndJobGrouping,
+};

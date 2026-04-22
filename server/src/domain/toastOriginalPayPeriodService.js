@@ -204,14 +204,14 @@ function normalizeAnalyticsLaborRow(row, { location, periodStart, periodEnd, fal
         'job_name',
         'jobTitle',
         'job_title',
-        'job',
+        'job.name',
+        'job.title',
+        'job.displayName',
         'departmentName',
         'department_name',
         'department',
         'laborDepartmentName',
         'labor_department_name',
-        'job.name',
-        'job.title',
       ])
     ) || null;
 
@@ -997,7 +997,7 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
       naturalGrainHint: 'one row per time entry / punch segment (employee + job + location when populated)',
     });
     const analyticsShape = sourceShapeDebug({
-      label: 'toast_analytics_labor_grouped_employee',
+      label: 'toast_analytics_labor_grouped_employee_job',
       rows: rawAnalyticsRows,
       requiredFieldHints: {
         employee_name: ['employeeName', 'employeeFullName', 'employee.firstName', 'employee.lastName'],
@@ -1007,7 +1007,7 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
         regular_or_ot_hours: ['regularHours', 'overtimeHours'],
         pay_amounts: ['regularPay', 'overtimePay', 'totalPay', 'regularCost', 'totalLaborCost'],
       },
-      naturalGrainHint: 'employee-grouped summary rows (ERA groupBy EMPLOYEE)',
+      naturalGrainHint: 'employee + job grouped summary rows (ERA groupBy EMPLOYEE+JOB)',
     });
 
     const canTimeEntriesShapeRows =
@@ -1075,13 +1075,13 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
           source_shape_diagnostics: {
             employees: employeesShape,
             time_entries: timeEntriesShape,
-            analytics_employee_grouped: analyticsShape,
+            analytics_employee_job_grouped: analyticsShape,
           },
           source_strategy_selected: strategy,
           source_strategy_reason:
             strategy === 'time_entries_primary_with_employee_enrichment'
               ? 'Standard time entries expose job/location fields, so row grain is built from time entries and employee names/IDs are enriched from Standard employees.'
-              : 'Time entries do not expose sufficient job/location fields in sampled payload; fallback uses analytics employee-grouped reconstruction.',
+              : 'Time entries do not expose sufficient job/location fields in sampled payload; fallback uses analytics employee+job grouped rows.',
           row_field_source_audit: rowSourceAudit,
           row_build_debug_sample: rowBuildDebugSample,
         }
@@ -1101,12 +1101,12 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
         source_row_grain_before_transform:
           strategy === 'time_entries_primary_with_employee_enrichment'
             ? 'one row per Toast Standard time entry for selected period'
-            : 'one row per Toast ERA labor row grouped by EMPLOYEE for selected period',
+            : 'one row per Toast ERA labor row grouped by EMPLOYEE + JOB for selected period',
         employee_identity_source: 'Toast Standard labor/hr employees endpoint',
         labor_totals_source:
           strategy === 'time_entries_primary_with_employee_enrichment'
             ? 'Toast Standard labor time entries payload (plus fields available in that payload)'
-            : 'Toast Analytics ERA labor report (groupBy: EMPLOYEE) for selected pay period',
+            : 'Toast Analytics ERA labor report (groupBy: EMPLOYEE + JOB) for selected pay period',
         employee_column_mapping: 'Employee column prefers Toast Standard employee full name; falls back to analytics name, then Toast employee id only when no name is available',
         employee_id_column_mapping:
           'Employee ID column prefers payrollEmployeeId/payrollId/payrollEmployeeNumber/employeeNumber/employeeCode/externalEmployeeId from Toast Standard employees; remains blank when unavailable',
@@ -1130,7 +1130,7 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
                 'Analytics is still fetched for diagnostics but is not the primary row-shape source in this strategy.',
               ]
             : [
-                'Toast ERA create rejects multi-groupBy requests; analytics alone cannot guarantee employee+job+location row grain.',
+                'Toast ERA rows are fetched at employee + job grain, then rolled up to employee + job + location for returned rows.',
                 'Hourly Rate is a weighted average of available analytics rates.',
                 'Regular Pay and Overtime Pay are summed from analytics rows when present, otherwise derived from hours x rate.',
                 'Total Pay is summed from source when available, otherwise derived as Regular Pay + Overtime Pay.',

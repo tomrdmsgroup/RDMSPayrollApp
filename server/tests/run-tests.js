@@ -43,6 +43,7 @@ const {
   testNormalizeEmployeeIdentityUsesFallbackMappings,
   testJoinAndBuildPayrollExportRowsAggregatesToEmployeeJobLocationGrain,
   testJoinLaborRowsUsesTimeEntryFallbackForJobAndLocation,
+  testNormalizeAnalyticsLaborRowPrefersNestedJobFieldsOverObjectValue,
 } = require('./toastOriginalPayPeriodService.test');
 
 const {
@@ -128,6 +129,7 @@ async function runAll() {
     testNormalizeEmployeeIdentityUsesFallbackMappings,
     testJoinAndBuildPayrollExportRowsAggregatesToEmployeeJobLocationGrain,
     testJoinLaborRowsUsesTimeEntryFallbackForJobAndLocation,
+    testNormalizeAnalyticsLaborRowPrefersNestedJobFieldsOverObjectValue,
     testParseCsvHandlesQuotedFields,
     testCompareRowsDetectsMissingAndMismatches,
     testBuildStableKeyPrefersEmployeeIdOverToastGuid,
