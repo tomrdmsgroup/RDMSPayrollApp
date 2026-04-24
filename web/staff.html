@@ -2085,7 +2085,7 @@
       periodEnd: selected.end_date,
     });
 
-    const { resp, body } = await apiGet(`/staff/toast-original-csv-baseline?${query.toString()}`);
+    const { resp, body } = await apiGet(`/staff/toast-original-pay-period/baseline?${query.toString()}`);
     if (!resp.ok) {
       state.toastOriginalCsvBaseline = null;
       state.toastOriginalComparison = null;
@@ -2166,7 +2166,7 @@
       form.append("period_start", selected.start_date);
       form.append("period_end", selected.end_date);
 
-      const resp = await fetch("/staff/toast-original-csv-baseline/upload", {
+      const resp = await fetch("/staff/toast-original-pay-period/baseline/upload", {
         method: "POST",
         credentials: "include",
         body: form,
