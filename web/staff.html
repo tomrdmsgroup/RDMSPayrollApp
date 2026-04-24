@@ -1311,24 +1311,29 @@
     const list = Array.isArray(selector.prior_pay_periods) ? selector.prior_pay_periods : [];
 
     const priorSelect = document.getElementById("toastOriginalPriorSelect");
-    const priorRecordId = priorSelect ? String(priorSelect.value || "") : String(state.toastOriginalSelectionPriorRecordId || "");
-
-    let bucket = state.toastOriginalSelectionBucket || "";
-    const checkedBucket = document.querySelector("input[name='toastOriginalBucket']:checked");
-    if (checkedBucket && checkedBucket.value) bucket = checkedBucket.value;
-    if (bucket === "prior" && !priorRecordId && list.length) {
-      state.toastOriginalSelectionPriorRecordId = String(list[0].record_id || "");
-    }
-
-    state.toastOriginalSelectionBucket = bucket || "current";
-    if (priorRecordId) state.toastOriginalSelectionPriorRecordId = priorRecordId;
+    const priorRecordId = priorSelect ? String(priorSelect.value || "") : "";
 
     let selected = null;
-    if (bucket === "current") selected = selector.current_pay_period || null;
-    else if (bucket === "next") selected = selector.next_pay_period || null;
-    else if (bucket === "prior") {
-      const effectivePriorId = String(state.toastOriginalSelectionPriorRecordId || priorRecordId || "");
-      selected = list.find((p) => String(p.record_id) === effectivePriorId) || null;
+    let source = "unknown";
+
+    if (priorRecordId) {
+      state.toastOriginalSelectionBucket = "prior";
+      state.toastOriginalSelectionPriorRecordId = priorRecordId;
+      selected = list.find((p) => String(p.record_id) === priorRecordId) || null;
+      source = "prior";
+    } else {
+      const checkedBucket = document.querySelector("input[name='toastOriginalBucket']:checked");
+      const bucket = checkedBucket?.value || state.toastOriginalSelectionBucket || "current";
+
+      if (bucket === "current") {
+        selected = selector.current_pay_period || null;
+      } else if (bucket === "next") {
+        selected = selector.next_pay_period || null;
+      } else if (bucket === "prior") {
+        const savedPriorRecordId = String(state.toastOriginalSelectionPriorRecordId || "");
+        selected = list.find((p) => String(p.record_id) === savedPriorRecordId) || null;
+      }
+      source = bucket;
     }
 
     if (!selected) return null;
@@ -1340,7 +1345,7 @@
       period_end: endDate,
       start_date: startDate,
       end_date: endDate,
-      source: bucket || "unknown",
+      source,
       label: fmtDateRange(startDate, endDate),
       period: selected,
     };
@@ -2081,6 +2086,9 @@
     content.querySelectorAll("input[name='toastOriginalBucket']").forEach((el) => {
       el.addEventListener("change", () => {
         state.toastOriginalSelectionBucket = el.value;
+        state.toastOriginalSelectionPriorRecordId = "";
+        const priorSelectEl = document.getElementById("toastOriginalPriorSelect");
+        if (priorSelectEl) priorSelectEl.value = "";
         renderToastOriginalTab();
       });
     });
@@ -2088,8 +2096,10 @@
     const priorSelect = document.getElementById("toastOriginalPriorSelect");
     if (priorSelect) {
       priorSelect.addEventListener("change", () => {
-        state.toastOriginalSelectionPriorRecordId = priorSelect.value;
-        if (state.toastOriginalSelectionPriorRecordId) state.toastOriginalSelectionBucket = "prior";
+        if (priorSelect.value) {
+          state.toastOriginalSelectionBucket = "prior";
+          state.toastOriginalSelectionPriorRecordId = priorSelect.value;
+        }
         renderToastOriginalTab();
       });
     }
