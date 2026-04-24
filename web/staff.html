@@ -1568,9 +1568,18 @@
     `;
   }
 
-  function getToastComparisonStatus(comparison) {
+  function getToastComparisonStatus(comparison, fallbackCsvRowCount) {
     const s = comparison && comparison.summary ? comparison.summary : null;
-    if (!s) return { label: "CLOSE / REVIEW", klass: "review", reason: "Upload a CSV baseline to score a full comparison." };
+    if (!s) {
+      if ((fallbackCsvRowCount || 0) > 0) {
+        return {
+          label: "CLOSE / REVIEW",
+          klass: "review",
+          reason: "CSV baseline uploaded. Load Original Toast Data to score comparison.",
+        };
+      }
+      return { label: "CLOSE / REVIEW", klass: "review", reason: "Upload a CSV baseline to score a full comparison." };
+    }
     const hardProblem = (s.missing_in_csv_count || 0) > 0 || (s.missing_in_api_count || 0) > 0;
     if (hardProblem) {
       return { label: "PROBLEM", klass: "problem", reason: "Rows are missing on one side of the comparison." };
@@ -1581,12 +1590,24 @@
     return { label: "MATCHED", klass: "matched", reason: "API and uploaded CSV rows align with no detected mismatches." };
   }
 
+  function extractToastOriginalCsvRows(source) {
+    if (!source || typeof source !== "object") return [];
+    if (Array.isArray(source.normalized_rows)) return source.normalized_rows;
+    if (Array.isArray(source.uploaded_csv_rows)) return source.uploaded_csv_rows;
+    if (Array.isArray(source.csv_rows)) return source.csv_rows;
+    if (Array.isArray(source.rows)) return source.rows;
+    return [];
+  }
+
   function renderComparisonStatusAndMetrics(comparison, fallbackCsvRowCount, fallbackApiRowCount) {
-    const status = getToastComparisonStatus(comparison);
+    const status = getToastComparisonStatus(comparison, fallbackCsvRowCount);
     const s = comparison && comparison.summary ? comparison.summary : null;
-    const uploadedCsvRows = Array.isArray(comparison?.uploaded_csv_rows) ? comparison.uploaded_csv_rows.length : null;
     const apiRows = s ? s.api_row_count || 0 : fallbackApiRowCount || 0;
-    const csvRows = uploadedCsvRows !== null ? uploadedCsvRows : s ? s.csv_row_count || 0 : fallbackCsvRowCount || 0;
+    const csvRows = s && Number.isFinite(s.csv_row_count)
+      ? s.csv_row_count
+      : Array.isArray(comparison?.uploaded_csv_rows)
+      ? comparison.uploaded_csv_rows.length
+      : fallbackCsvRowCount || 0;
     const missingInCsv = s ? s.missing_in_csv_count || 0 : 0;
     const missingInApi = s ? s.missing_in_api_count || 0 : 0;
     const mismatchCount = s ? s.mismatch_count || 0 : 0;
@@ -1939,7 +1960,7 @@
     const columns = Array.isArray(data?.columns) ? data.columns : [];
     const rows = Array.isArray(data?.rows) ? data.rows : [];
     const comparison = state.toastOriginalComparison;
-    const csvRows = Array.isArray(state.toastOriginalCsvBaseline?.rows) ? state.toastOriginalCsvBaseline.rows : [];
+    const csvRows = extractToastOriginalCsvRows(state.toastOriginalCsvBaseline);
     const debugUploadPayload = state.toastOriginalLastUploadPayload || {};
     const debugApiPayload = state.toastOriginalLastApiLoadPayload || {};
     const debugUploadResponse = state.toastOriginalLastUploadResponse || {};
@@ -2024,7 +2045,12 @@
           </div>
           <div class="sectionHelp" style="margin-top:8px;">Raw/original Toast row payload rendered directly as a table for auditing.</div>
 
-          ${renderComparisonStatusAndMetrics(comparison, state.toastOriginalCsvBaselineRowCount, rows.length)}
+          ${renderComparisonStatusAndMetrics(
+            comparison,
+            state.toastOriginalCsvBaselineRowCount ||
+              (Array.isArray(state.toastOriginalCsvBaseline?.normalized_rows) ? state.toastOriginalCsvBaseline.normalized_rows.length : 0),
+            rows.length
+          )}
           ${stableIdentityText}
           ${tableRender.html}
 
@@ -2175,14 +2201,17 @@
       return;
     }
 
-    state.toastOriginalCsvBaseline = body.baseline || null;
+    const baselineRows = extractToastOriginalCsvRows(body?.baseline);
+    const fallbackBodyRows = extractToastOriginalCsvRows(body);
+    state.toastOriginalCsvBaseline = body.baseline
+      ? {
+          ...body.baseline,
+          normalized_rows: baselineRows.length ? baselineRows : fallbackBodyRows,
+        }
+      : null;
     state.toastOriginalComparison = body.comparison || null;
-    const baselineRows = body?.baseline?.rows;
-    state.toastOriginalCsvBaselineRowCount = Array.isArray(baselineRows)
-      ? baselineRows.length
-      : Array.isArray(body?.comparison?.uploaded_csv_rows)
-      ? body.comparison.uploaded_csv_rows.length
-      : 0;
+    state.toastOriginalCsvBaselineRowCount = (baselineRows.length ? baselineRows : fallbackBodyRows).length;
+    renderToastOriginalTab();
   }
 
   async function loadToastOriginalData(includeDebug) {
@@ -2289,17 +2318,20 @@
         return;
       }
 
-      const normalizedRows = Array.isArray(body?.normalized_rows) ? body.normalized_rows : [];
+      const responseLevelRows = extractToastOriginalCsvRows(body);
+      const normalizedRows = responseLevelRows.length ? responseLevelRows : extractToastOriginalCsvRows(body?.baseline);
       const returnedBaseline = body?.baseline || body?.upload || {};
       state.toastOriginalCsvBaseline = {
         ...returnedBaseline,
         file_name: returnedBaseline.file_name || file.name || "uploaded.csv",
-        rows: normalizedRows,
+        normalized_rows: normalizedRows,
       };
       state.toastOriginalCsvBaselineRowCount = normalizedRows.length;
-      state.toastOriginalComparison = body?.comparison || state.toastOriginalComparison;
+      if (body?.comparison) {
+        state.toastOriginalComparison = body.comparison;
+      }
       fileInput.value = "";
-      await loadToastOriginalCsvBaselineMeta();
+      renderToastOriginalTab();
     } catch (err) {
       state.toastOriginalCsvUploadError = (err && err.message) || "csv_upload_failed";
       state.toastOriginalLastUploadResponse = { status: "network_error", error: state.toastOriginalCsvUploadError };
