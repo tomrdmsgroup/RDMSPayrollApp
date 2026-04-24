@@ -279,6 +279,19 @@ async function getLatestBaseline({ locationName, periodStart, periodEnd }) {
   };
 }
 
+async function clearBaseline({ locationName, periodStart, periodEnd }) {
+  const resp = await query(
+    `
+      DELETE FROM toast_payroll_baseline_uploads
+      WHERE location_name = $1 AND period_start = $2 AND period_end = $3
+    `,
+    [locationName, periodStart, periodEnd],
+  );
+  return {
+    deleted_upload_count: Number(resp.rowCount || 0),
+  };
+}
+
 module.exports = {
   parseCsv,
   normalizeUploadedRow,
@@ -287,4 +300,5 @@ module.exports = {
   compareRows,
   saveUploadedBaseline,
   getLatestBaseline,
+  clearBaseline,
 };

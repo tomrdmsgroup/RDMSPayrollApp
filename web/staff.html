@@ -529,6 +529,8 @@
     toastOriginalDebugLoading: false,
     toastOriginalCsvUploadBusy: false,
     toastOriginalCsvUploadError: "",
+    toastOriginalCsvClearBusy: false,
+    toastOriginalCsvClearError: "",
     toastOriginalCsvBaseline: null,
     toastOriginalComparison: null,
     toastOriginalCsvBaselineRowCount: 0,
@@ -621,10 +623,12 @@
     return { resp, body };
   }
 
-  async function apiDelete(p) {
+  async function apiDelete(p, payload) {
     const resp = await fetch(p, {
       method: "DELETE",
+      headers: payload ? { "Content-Type": "application/json" } : undefined,
       credentials: "include",
+      body: payload ? JSON.stringify(payload) : undefined,
     });
     const body = await resp.json().catch(() => ({}));
     return { resp, body };
@@ -2021,8 +2025,14 @@
             <button class="btn" id="uploadToastOriginalCsvBtn" type="button" ${state.toastOriginalCsvUploadBusy ? "disabled" : ""}>
               ${state.toastOriginalCsvUploadBusy ? "Uploading..." : "Upload CSV Baseline"}
             </button>
+            <button class="btn" id="clearToastOriginalCsvBtn" type="button" ${
+              state.toastOriginalCsvClearBusy || !state.toastOriginalCsvBaseline ? "disabled" : ""
+            }>
+              ${state.toastOriginalCsvClearBusy ? "Clearing..." : "Clear CSV Baseline"}
+            </button>
           </div>
           ${state.toastOriginalCsvUploadError ? `<div class="muted" style="margin-top:8px;">Upload failed: ${escapeHtml(state.toastOriginalCsvUploadError)}</div>` : ""}
+          ${state.toastOriginalCsvClearError ? `<div class="muted" style="margin-top:8px;">Clear failed: ${escapeHtml(state.toastOriginalCsvClearError)}</div>` : ""}
           ${
             state.toastOriginalCsvBaseline
               ? `<div class="miniCard" style="margin-top:12px;">
@@ -2138,6 +2148,9 @@
 
     const uploadBtn = document.getElementById("uploadToastOriginalCsvBtn");
     if (uploadBtn) uploadBtn.addEventListener("click", uploadToastOriginalCsvBaseline);
+
+    const clearBtn = document.getElementById("clearToastOriginalCsvBtn");
+    if (clearBtn) clearBtn.addEventListener("click", clearToastOriginalCsvBaseline);
   }
 
   async function loadToastOriginalSelectorForSelected() {
@@ -2149,6 +2162,8 @@
     state.toastOriginalDebugLoading = false;
     state.toastOriginalCsvUploadBusy = false;
     state.toastOriginalCsvUploadError = "";
+    state.toastOriginalCsvClearBusy = false;
+    state.toastOriginalCsvClearError = "";
     state.toastOriginalComparison = null;
     state.toastOriginalCsvBaselineRowCount = 0;
     state.toastOriginalLastUploadPayload = null;
@@ -2291,6 +2306,7 @@
 
     state.toastOriginalCsvUploadBusy = true;
     state.toastOriginalCsvUploadError = "";
+    state.toastOriginalCsvClearError = "";
     renderToastOriginalTab();
 
     try {
@@ -2341,6 +2357,53 @@
     }
   }
 
+  async function clearToastOriginalCsvBaseline() {
+    const selected = getSelectedToastOriginalPeriod();
+    const locationName = document.getElementById("locationSelect").value;
+
+    if (!locationName) {
+      alert("Select a location before continuing.");
+      return;
+    }
+    if (!selected) {
+      alert("Select a pay period before continuing.");
+      return;
+    }
+    if (!state.toastOriginalCsvBaseline) return;
+
+    const confirmed = window.confirm("Clear the uploaded CSV baseline for this location and pay period?");
+    if (!confirmed) return;
+
+    state.toastOriginalCsvClearBusy = true;
+    state.toastOriginalCsvClearError = "";
+    renderToastOriginalTab();
+
+    try {
+      const { resp, body } = await apiDelete("/staff/toast-original-pay-period/baseline", {
+        location_name: locationName,
+        period_start: selected.period_start,
+        period_end: selected.period_end,
+      });
+      if (!resp.ok) {
+        state.toastOriginalCsvClearError = body.error || "csv_clear_failed";
+        renderToastOriginalTab();
+        return;
+      }
+
+      state.toastOriginalCsvBaseline = null;
+      state.toastOriginalComparison = null;
+      state.toastOriginalCsvBaselineRowCount = 0;
+      state.toastOriginalLastUploadResponse = null;
+      state.toastOriginalCsvUploadError = "";
+      renderToastOriginalTab();
+    } catch (err) {
+      state.toastOriginalCsvClearError = (err && err.message) || "csv_clear_failed";
+    } finally {
+      state.toastOriginalCsvClearBusy = false;
+      renderToastOriginalTab();
+    }
+  }
+
   document.getElementById("locationSelect").addEventListener("change", async () => {
     const tab = state.tab;
     state.recap = null;
@@ -2353,6 +2416,8 @@
     state.toastOriginalCsvBaseline = null;
     state.toastOriginalComparison = null;
     state.toastOriginalCsvBaselineRowCount = 0;
+    state.toastOriginalCsvClearBusy = false;
+    state.toastOriginalCsvClearError = "";
     state.toastOriginalLastUploadPayload = null;
     state.toastOriginalLastApiLoadPayload = null;
     state.toastOriginalLastUploadResponse = null;

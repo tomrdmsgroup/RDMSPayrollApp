@@ -27,7 +27,16 @@ const {
 } = require('../domain/airtableRecapService');
 const { runBarrioToastProof, searchToastEmployeesForLocation } = require('../domain/toastBarrioProofService');
 const { fetchOriginalToastPayPeriodData } = require('../domain/toastOriginalPayPeriodService');
-const { parseCsv, normalizeUploadedRow, normalizeApiRow, buildStableKey, compareRows, saveUploadedBaseline, getLatestBaseline } = require('../domain/toastPayrollBaselineService');
+const {
+  parseCsv,
+  normalizeUploadedRow,
+  normalizeApiRow,
+  buildStableKey,
+  compareRows,
+  saveUploadedBaseline,
+  getLatestBaseline,
+  clearBaseline,
+} = require('../domain/toastPayrollBaselineService');
 
 const { rulesCatalog } = require('../domain/rulesCatalog');
 const { getRuleConfigsForLocation, upsertRuleConfig } = require('../domain/rulesConfigDb');
@@ -483,6 +492,31 @@ function router(req, res) {
             normalized_rows: baseline.rows.map((row) => row.normalized),
             raw_rows: baseline.rows.map((row) => row.raw),
           },
+        });
+      } catch (e) {
+        return handleError(res, e);
+      }
+    })();
+    return;
+  }
+
+  if (url.pathname === '/staff/toast-original-pay-period/baseline' && req.method === 'DELETE') {
+    (async () => {
+      const user = await requireStaff(req, res);
+      if (!user) return;
+      try {
+        const body = await parseBody(req);
+        const locationName = String(body.location_name || '').trim();
+        const periodStart = String(body.period_start || '').trim();
+        const periodEnd = String(body.period_end || '').trim();
+        if (!locationName || !periodStart || !periodEnd) {
+          return json(res, 400, { error: 'missing_required_fields' });
+        }
+
+        const result = await clearBaseline({ locationName, periodStart, periodEnd });
+        return json(res, 200, {
+          ok: true,
+          deleted_upload_count: result.deleted_upload_count,
         });
       } catch (e) {
         return handleError(res, e);
