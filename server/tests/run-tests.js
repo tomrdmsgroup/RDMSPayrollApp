@@ -42,12 +42,10 @@ const {
 } = require('./validationEngine.test');
 const {
   testNormalizeEmployeeIdentityUsesFallbackMappings,
-  testJoinAndBuildPayrollExportRowsAggregatesToEmployeeJobLocationGrain,
-  testJoinLaborRowsUsesTimeEntryFallbackForJobAndLocation,
-  testNormalizeAnalyticsLaborRowPrefersNestedJobFieldsOverObjectValue,
-  testNormalizeTimeEntryRowSupportsNestedPayrollAndLaborJobAliases,
-  testTimeEntryRowsCanPreserveMultipleJobsForOneEmployee,
-  testAppliesEmployeeGroupedAnalyticsTotalsAcrossTimeEntryJobSplits,
+  testGroupingUsesToastGuidNotPayrollEmployeeId,
+  testGroupingSplitsSameEmployeeAndDepartmentAcrossRates,
+  testGroupingSplitsSameEmployeeAcrossDepartments,
+  testOutputContainsOnlyHoursColumnsForToastOriginalRows,
 } = require('./toastOriginalPayPeriodService.test');
 
 const {
@@ -133,12 +131,10 @@ async function runAll() {
     testRunValidationFindsNewEmpRateDept,
     testRunValidationHonorsExclusionsAndActiveRules,
     testNormalizeEmployeeIdentityUsesFallbackMappings,
-    testJoinAndBuildPayrollExportRowsAggregatesToEmployeeJobLocationGrain,
-    testJoinLaborRowsUsesTimeEntryFallbackForJobAndLocation,
-    testNormalizeAnalyticsLaborRowPrefersNestedJobFieldsOverObjectValue,
-    testNormalizeTimeEntryRowSupportsNestedPayrollAndLaborJobAliases,
-    testTimeEntryRowsCanPreserveMultipleJobsForOneEmployee,
-    testAppliesEmployeeGroupedAnalyticsTotalsAcrossTimeEntryJobSplits,
+    testGroupingUsesToastGuidNotPayrollEmployeeId,
+    testGroupingSplitsSameEmployeeAndDepartmentAcrossRates,
+    testGroupingSplitsSameEmployeeAcrossDepartments,
+    testOutputContainsOnlyHoursColumnsForToastOriginalRows,
     testParseCsvHandlesQuotedFields,
     testCompareRowsDetectsMissingAndMismatches,
     testBuildStableKeyPrefersEmployeeIdOverToastGuid,
