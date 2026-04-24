@@ -1301,15 +1301,34 @@
     return null;
   }
 
-  function toastOriginalSelectedPeriod() {
+  function getSelectedToastOriginalPeriod() {
     const selector = state.toastOriginalSelector || {};
-    if (state.toastOriginalSelectionBucket === "current") return selector.current_pay_period || null;
-    if (state.toastOriginalSelectionBucket === "next") return selector.next_pay_period || null;
-    if (state.toastOriginalSelectionBucket === "prior") {
-      const list = Array.isArray(selector.prior_pay_periods) ? selector.prior_pay_periods : [];
-      return list.find((p) => String(p.record_id) === String(state.toastOriginalSelectionPriorRecordId)) || null;
-    }
-    return null;
+    const list = Array.isArray(selector.prior_pay_periods) ? selector.prior_pay_periods : [];
+
+    const priorSelect = document.getElementById("toastOriginalPriorSelect");
+    const priorRecordId = priorSelect ? String(priorSelect.value || "") : String(state.toastOriginalSelectionPriorRecordId || "");
+
+    let bucket = state.toastOriginalSelectionBucket || "";
+    const checkedBucket = document.querySelector("input[name='toastOriginalBucket']:checked");
+    if (checkedBucket && checkedBucket.value) bucket = checkedBucket.value;
+    if (priorRecordId) bucket = "prior";
+
+    state.toastOriginalSelectionBucket = bucket || "current";
+    state.toastOriginalSelectionPriorRecordId = priorRecordId;
+
+    let selected = null;
+    if (bucket === "current") selected = selector.current_pay_period || null;
+    else if (bucket === "next") selected = selector.next_pay_period || null;
+    else if (bucket === "prior") selected = list.find((p) => String(p.record_id) === priorRecordId) || null;
+
+    if (!selected || !selected.start_date || !selected.end_date) return null;
+    return {
+      period_start: selected.start_date,
+      period_end: selected.end_date,
+      source: bucket || "unknown",
+      label: fmtDateRange(selected.start_date, selected.end_date),
+      period: selected,
+    };
   }
 
   function renderOutcomeTab() {
@@ -1883,7 +1902,7 @@
     const current = selector.current_pay_period;
     const next = selector.next_pay_period;
     const prior = Array.isArray(selector.prior_pay_periods) ? selector.prior_pay_periods : [];
-    const selectedPeriod = toastOriginalSelectedPeriod();
+    const selectedPeriod = getSelectedToastOriginalPeriod();
     const priorOptions = ["<option value=''>Select a prior pay period...</option>"]
       .concat(
         prior.map(
@@ -1974,7 +1993,7 @@
           <div class="row" style="gap:16px;">
             <div><span class="muted">Location:</span> ${escapeHtml(locationName)}</div>
             <div><span class="muted">Selected pay period:</span> ${escapeHtml(
-              fmtDateRange(selectedPeriod?.start_date, selectedPeriod?.end_date) || "Not selected"
+              selectedPeriod?.label || "Not selected"
             )}</div>
             <div><span class="muted">Rows:</span> ${escapeHtml(String(rows.length))}</div>
           </div>
@@ -2071,7 +2090,7 @@
   }
 
   async function loadToastOriginalCsvBaselineMeta() {
-    const selected = toastOriginalSelectedPeriod();
+    const selected = getSelectedToastOriginalPeriod();
     const locationName = document.getElementById("locationSelect").value;
     if (!locationName || !selected) {
       state.toastOriginalCsvBaseline = null;
@@ -2081,8 +2100,8 @@
 
     const query = new URLSearchParams({
       locationName,
-      periodStart: selected.start_date,
-      periodEnd: selected.end_date,
+      periodStart: selected.period_start,
+      periodEnd: selected.period_end,
     });
 
     const { resp, body } = await apiGet(`/staff/toast-original-pay-period/baseline?${query.toString()}`);
@@ -2097,8 +2116,14 @@
   }
 
   async function loadToastOriginalData(includeDebug) {
-    const selected = toastOriginalSelectedPeriod();
+    const selected = getSelectedToastOriginalPeriod();
+    const locationName = document.getElementById("locationSelect").value;
+    if (!locationName) {
+      alert("Select a location before continuing.");
+      return;
+    }
     if (!selected) {
+      alert("Select a pay period before continuing.");
       state.toastOriginalLoadError = "no_selected_pay_period";
       renderToastOriginalTab();
       return;
@@ -2109,13 +2134,11 @@
     else state.toastOriginalLoading = true;
     renderToastOriginalTab();
 
-    const locationName = document.getElementById("locationSelect").value;
-
     try {
       const { resp, body } = await apiPost("/staff/toast-original-pay-period", {
         location_name: locationName,
-        period_start: selected.start_date,
-        period_end: selected.end_date,
+        period_start: selected.period_start,
+        period_end: selected.period_end,
         debug_toast_mapping: !!includeDebug,
       });
 
@@ -2143,15 +2166,19 @@
 
   async function uploadToastOriginalCsvBaseline() {
     const fileInput = document.getElementById("toastOriginalCsvFile");
-    const selected = toastOriginalSelectedPeriod();
+    const selected = getSelectedToastOriginalPeriod();
     const locationName = document.getElementById("locationSelect").value;
 
+    if (!locationName) {
+      alert("Select a location before continuing.");
+      return;
+    }
     if (!selected) {
-      alert("Pick a pay period first.");
+      alert("Select a pay period before continuing.");
       return;
     }
     if (!fileInput || !fileInput.files || !fileInput.files[0]) {
-      alert("Choose a CSV file first.");
+      alert("Choose a CSV file before uploading.");
       return;
     }
 
@@ -2160,19 +2187,17 @@
     renderToastOriginalTab();
 
     try {
-      const form = new FormData();
-      form.append("file", fileInput.files[0]);
-      form.append("location_name", locationName);
-      form.append("period_start", selected.start_date);
-      form.append("period_end", selected.end_date);
+      const file = fileInput.files[0];
+      const rawCsv = await file.text();
 
-      const resp = await fetch("/staff/toast-original-pay-period/baseline", {
-        method: "POST",
-        credentials: "include",
-        body: form,
+      const { resp, body } = await apiPost("/staff/toast-original-pay-period/baseline", {
+        location_name: locationName,
+        period_start: selected.period_start,
+        period_end: selected.period_end,
+        raw_csv: rawCsv,
+        file_name: file.name || "uploaded.csv",
       });
 
-      const body = await resp.json().catch(() => ({}));
       if (!resp.ok) {
         state.toastOriginalCsvUploadError = body.error || "csv_upload_failed";
         renderToastOriginalTab();
