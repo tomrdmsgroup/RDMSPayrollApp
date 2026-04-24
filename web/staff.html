@@ -531,6 +531,11 @@
     toastOriginalCsvUploadError: "",
     toastOriginalCsvBaseline: null,
     toastOriginalComparison: null,
+    toastOriginalCsvBaselineRowCount: 0,
+    toastOriginalLastUploadPayload: null,
+    toastOriginalLastApiLoadPayload: null,
+    toastOriginalLastUploadResponse: null,
+    toastOriginalLastApiLoadResponse: null,
   };
 
   function setActiveTab(tab) {
@@ -1311,22 +1316,32 @@
     let bucket = state.toastOriginalSelectionBucket || "";
     const checkedBucket = document.querySelector("input[name='toastOriginalBucket']:checked");
     if (checkedBucket && checkedBucket.value) bucket = checkedBucket.value;
-    if (priorRecordId) bucket = "prior";
+    if (bucket === "prior" && !priorRecordId && list.length) {
+      state.toastOriginalSelectionPriorRecordId = String(list[0].record_id || "");
+    }
 
     state.toastOriginalSelectionBucket = bucket || "current";
-    state.toastOriginalSelectionPriorRecordId = priorRecordId;
+    if (priorRecordId) state.toastOriginalSelectionPriorRecordId = priorRecordId;
 
     let selected = null;
     if (bucket === "current") selected = selector.current_pay_period || null;
     else if (bucket === "next") selected = selector.next_pay_period || null;
-    else if (bucket === "prior") selected = list.find((p) => String(p.record_id) === priorRecordId) || null;
+    else if (bucket === "prior") {
+      const effectivePriorId = String(state.toastOriginalSelectionPriorRecordId || priorRecordId || "");
+      selected = list.find((p) => String(p.record_id) === effectivePriorId) || null;
+    }
 
-    if (!selected || !selected.start_date || !selected.end_date) return null;
+    if (!selected) return null;
+    const startDate = selected.start_date || selected.period_start || null;
+    const endDate = selected.end_date || selected.period_end || null;
+    if (!startDate || !endDate) return null;
     return {
-      period_start: selected.start_date,
-      period_end: selected.end_date,
+      period_start: startDate,
+      period_end: endDate,
+      start_date: startDate,
+      end_date: endDate,
       source: bucket || "unknown",
-      label: fmtDateRange(selected.start_date, selected.end_date),
+      label: fmtDateRange(startDate, endDate),
       period: selected,
     };
   }
@@ -1561,11 +1576,12 @@
     return { label: "MATCHED", klass: "matched", reason: "API and uploaded CSV rows align with no detected mismatches." };
   }
 
-  function renderComparisonStatusAndMetrics(comparison) {
+  function renderComparisonStatusAndMetrics(comparison, fallbackCsvRowCount, fallbackApiRowCount) {
     const status = getToastComparisonStatus(comparison);
     const s = comparison && comparison.summary ? comparison.summary : null;
-    const apiRows = s ? s.api_row_count || 0 : 0;
-    const csvRows = s ? s.csv_row_count || 0 : 0;
+    const uploadedCsvRows = Array.isArray(comparison?.uploaded_csv_rows) ? comparison.uploaded_csv_rows.length : null;
+    const apiRows = s ? s.api_row_count || 0 : fallbackApiRowCount || 0;
+    const csvRows = uploadedCsvRows !== null ? uploadedCsvRows : s ? s.csv_row_count || 0 : fallbackCsvRowCount || 0;
     const missingInCsv = s ? s.missing_in_csv_count || 0 : 0;
     const missingInApi = s ? s.missing_in_api_count || 0 : 0;
     const mismatchCount = s ? s.mismatch_count || 0 : 0;
@@ -1919,6 +1935,10 @@
     const rows = Array.isArray(data?.rows) ? data.rows : [];
     const comparison = state.toastOriginalComparison;
     const csvRows = Array.isArray(state.toastOriginalCsvBaseline?.rows) ? state.toastOriginalCsvBaseline.rows : [];
+    const debugUploadPayload = state.toastOriginalLastUploadPayload || {};
+    const debugApiPayload = state.toastOriginalLastApiLoadPayload || {};
+    const debugUploadResponse = state.toastOriginalLastUploadResponse || {};
+    const debugApiResponse = state.toastOriginalLastApiLoadResponse || {};
 
     let stableIdentityText = "";
     if (rows.length) {
@@ -1999,7 +2019,7 @@
           </div>
           <div class="sectionHelp" style="margin-top:8px;">Raw/original Toast row payload rendered directly as a table for auditing.</div>
 
-          ${renderComparisonStatusAndMetrics(comparison)}
+          ${renderComparisonStatusAndMetrics(comparison, state.toastOriginalCsvBaselineRowCount, rows.length)}
           ${stableIdentityText}
           ${tableRender.html}
 
@@ -2027,6 +2047,33 @@
             `
               : ""
           }
+
+          <div class="sectionTitle">Temporary Debug Panel (Toast Original)</div>
+          <div class="miniCard">
+            <div><span class="muted">selected location_name:</span> ${escapeHtml(String(locationName || ""))}</div>
+            <div><span class="muted">selected period_start:</span> ${escapeHtml(String(selectedPeriod?.period_start || ""))}</div>
+            <div><span class="muted">selected period_end:</span> ${escapeHtml(String(selectedPeriod?.period_end || ""))}</div>
+            <div style="margin-top:8px;"><span class="muted">upload payload keys present:</span>
+              location_name=${debugUploadPayload.location_name ? "yes" : "no"},
+              period_start=${debugUploadPayload.period_start ? "yes" : "no"},
+              period_end=${debugUploadPayload.period_end ? "yes" : "no"},
+              raw_csv_length=${escapeHtml(String(debugUploadPayload.raw_csv_length || 0))},
+              file_name=${debugUploadPayload.file_name ? "yes" : "no"}
+            </div>
+            <div><span class="muted">API load payload keys present:</span>
+              location_name=${debugApiPayload.location_name ? "yes" : "no"},
+              period_start=${debugApiPayload.period_start ? "yes" : "no"},
+              period_end=${debugApiPayload.period_end ? "yes" : "no"}
+            </div>
+            <div style="margin-top:8px;"><span class="muted">last upload response:</span>
+              status=${escapeHtml(String(debugUploadResponse.status || ""))},
+              error=${escapeHtml(String(debugUploadResponse.error || ""))}
+            </div>
+            <div><span class="muted">last API load response:</span>
+              status=${escapeHtml(String(debugApiResponse.status || ""))},
+              error=${escapeHtml(String(debugApiResponse.error || ""))}
+            </div>
+          </div>
         </div>
       </div>
     `;
@@ -2067,6 +2114,11 @@
     state.toastOriginalCsvUploadBusy = false;
     state.toastOriginalCsvUploadError = "";
     state.toastOriginalComparison = null;
+    state.toastOriginalCsvBaselineRowCount = 0;
+    state.toastOriginalLastUploadPayload = null;
+    state.toastOriginalLastApiLoadPayload = null;
+    state.toastOriginalLastUploadResponse = null;
+    state.toastOriginalLastApiLoadResponse = null;
     renderToastOriginalTab();
 
     const name = document.getElementById("locationSelect").value;
@@ -2095,6 +2147,7 @@
     if (!locationName || !selected) {
       state.toastOriginalCsvBaseline = null;
       state.toastOriginalComparison = null;
+      state.toastOriginalCsvBaselineRowCount = 0;
       return;
     }
 
@@ -2108,11 +2161,18 @@
     if (!resp.ok) {
       state.toastOriginalCsvBaseline = null;
       state.toastOriginalComparison = null;
+      state.toastOriginalCsvBaselineRowCount = 0;
       return;
     }
 
     state.toastOriginalCsvBaseline = body.baseline || null;
     state.toastOriginalComparison = body.comparison || null;
+    const baselineRows = body?.baseline?.rows;
+    state.toastOriginalCsvBaselineRowCount = Array.isArray(baselineRows)
+      ? baselineRows.length
+      : Array.isArray(body?.comparison?.uploaded_csv_rows)
+      ? body.comparison.uploaded_csv_rows.length
+      : 0;
   }
 
   async function loadToastOriginalData(includeDebug) {
@@ -2132,31 +2192,39 @@
     state.toastOriginalLoadError = "";
     if (includeDebug) state.toastOriginalDebugLoading = true;
     else state.toastOriginalLoading = true;
+    state.toastOriginalLastApiLoadPayload = {
+      location_name: locationName,
+      period_start: selected.period_start,
+      period_end: selected.period_end,
+      debug_toast_mapping: !!includeDebug,
+    };
     renderToastOriginalTab();
 
     try {
-      const { resp, body } = await apiPost("/staff/toast-original-pay-period", {
-        location_name: locationName,
-        period_start: selected.period_start,
-        period_end: selected.period_end,
-        debug_toast_mapping: !!includeDebug,
-      });
+      const { resp, body } = await apiPost("/staff/toast-original-pay-period", state.toastOriginalLastApiLoadPayload);
+      state.toastOriginalLastApiLoadResponse = { status: resp.status, error: body?.error || "" };
 
       if (!resp.ok) {
         state.toastOriginalLoadError = body.error || "toast_original_load_failed";
         state.toastOriginalData = null;
+        state.toastOriginalComparison = body?.comparison || null;
         if (includeDebug) state.toastOriginalDebugData = body || null;
         renderToastOriginalTab();
         return;
       }
 
-      state.toastOriginalData = body || null;
+      state.toastOriginalData = body?.data || null;
+      state.toastOriginalComparison = body?.comparison || null;
       state.toastOriginalDebugData = includeDebug ? body?.debug || body : null;
+      if (Array.isArray(body?.comparison?.uploaded_csv_rows)) {
+        state.toastOriginalCsvBaselineRowCount = body.comparison.uploaded_csv_rows.length;
+      }
 
       await loadToastOriginalCsvBaselineMeta();
     } catch (err) {
       state.toastOriginalLoadError = (err && err.message) || "toast_original_load_failed";
       state.toastOriginalData = null;
+      state.toastOriginalLastApiLoadResponse = { status: "network_error", error: state.toastOriginalLoadError };
     } finally {
       state.toastOriginalLoading = false;
       state.toastOriginalDebugLoading = false;
@@ -2189,7 +2257,13 @@
     try {
       const file = fileInput.files[0];
       const rawCsv = await file.text();
-
+      state.toastOriginalLastUploadPayload = {
+        location_name: locationName,
+        period_start: selected.period_start,
+        period_end: selected.period_end,
+        raw_csv_length: rawCsv.length,
+        file_name: file.name || "uploaded.csv",
+      };
       const { resp, body } = await apiPost("/staff/toast-original-pay-period/baseline", {
         location_name: locationName,
         period_start: selected.period_start,
@@ -2197,6 +2271,7 @@
         raw_csv: rawCsv,
         file_name: file.name || "uploaded.csv",
       });
+      state.toastOriginalLastUploadResponse = { status: resp.status, error: body?.error || "" };
 
       if (!resp.ok) {
         state.toastOriginalCsvUploadError = body.error || "csv_upload_failed";
@@ -2204,10 +2279,20 @@
         return;
       }
 
+      const normalizedRows = Array.isArray(body?.normalized_rows) ? body.normalized_rows : [];
+      const returnedBaseline = body?.baseline || body?.upload || {};
+      state.toastOriginalCsvBaseline = {
+        ...returnedBaseline,
+        file_name: returnedBaseline.file_name || file.name || "uploaded.csv",
+        rows: normalizedRows,
+      };
+      state.toastOriginalCsvBaselineRowCount = normalizedRows.length;
+      state.toastOriginalComparison = body?.comparison || state.toastOriginalComparison;
       fileInput.value = "";
       await loadToastOriginalCsvBaselineMeta();
     } catch (err) {
       state.toastOriginalCsvUploadError = (err && err.message) || "csv_upload_failed";
+      state.toastOriginalLastUploadResponse = { status: "network_error", error: state.toastOriginalCsvUploadError };
     } finally {
       state.toastOriginalCsvUploadBusy = false;
       renderToastOriginalTab();
@@ -2225,6 +2310,11 @@
     state.toastOriginalDebugData = null;
     state.toastOriginalCsvBaseline = null;
     state.toastOriginalComparison = null;
+    state.toastOriginalCsvBaselineRowCount = 0;
+    state.toastOriginalLastUploadPayload = null;
+    state.toastOriginalLastApiLoadPayload = null;
+    state.toastOriginalLastUploadResponse = null;
+    state.toastOriginalLastApiLoadResponse = null;
 
     if (tab === "confirmations") await loadRecapForSelected();
     else if (tab === "rules") await loadRulesForSelected();
