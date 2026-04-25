@@ -294,16 +294,31 @@
         border: 1px solid var(--border);
         border-radius: 10px;
         overflow: hidden;
+        max-height: 220px;
+        overflow-y: auto;
       }
       .searchItem {
         display: flex;
         gap: 10px;
-        align-items: center;
+        align-items: flex-start;
         padding: 8px 10px;
         border-bottom: 1px solid var(--border);
+        cursor: pointer;
       }
       .searchItem:last-child {
         border-bottom: none;
+      }
+      .searchPrimary {
+        font-size: 13px;
+      }
+      .searchSecondary {
+        margin-top: 2px;
+        font-size: 12px;
+      }
+      .searchHint {
+        margin-top: 8px;
+        font-size: 13px;
+        color: var(--muted);
       }
       .gridTwo {
         display: grid;
@@ -511,6 +526,8 @@
     employeeSearchResults: [],
     selectedSearchEmployeeId: null,
     excludedSearchQuery: "",
+    excludedSearchLoading: false,
+    excludedHasSearched: false,
     excludedDraftReason: "",
     excludedDraftNote: "",
     outcomeSelector: null,
@@ -539,6 +556,7 @@
     toastOriginalLastUploadResponse: null,
     toastOriginalLastApiLoadResponse: null,
   };
+  let excludedSearchDebounceTimer = null;
 
   const NAV_CONFIG = [
     { key: "dashboardMain", label: "Payroll Dashboard", tabs: [] },
@@ -1155,8 +1173,12 @@
     state.employeeSearchResults = [];
     state.selectedSearchEmployeeId = null;
     state.excludedSearchQuery = "";
+    state.excludedSearchLoading = false;
+    state.excludedHasSearched = false;
     state.excludedDraftReason = "";
     state.excludedDraftNote = "";
+    clearTimeout(excludedSearchDebounceTimer);
+    excludedSearchDebounceTimer = null;
 
     if (!name) {
       content.innerHTML = "<div class='loading'>Select a location to manage excluded staff.</div>";
@@ -1193,12 +1215,11 @@
           ${state.excluded
             .map((row) => {
               const name = row.employee_name || "Unknown";
-              const emp = `${name} (${row.toast_employee_id || "n/a"})`;
               const reason = [row.reason, row.notes].filter(Boolean).join(" / ");
               const status = row.active ? "Active (skipped downstream)" : "Inactive";
               return `
                 <tr data-excluded-id="${escapeAttr(row.id)}">
-                  <td>${escapeHtml(emp)}</td>
+                  <td>${escapeHtml(name)}</td>
                   <td>${escapeHtml(reason || "No note")}</td>
                   <td>${escapeHtml(status)}</td>
                   <td>
@@ -1215,8 +1236,14 @@
   }
 
   function renderSearchResults() {
+    if (state.excludedSearchLoading) {
+      return `<div class="searchHint">Searching employees...</div>`;
+    }
+    if (!state.excludedHasSearched) {
+      return `<div class="searchHint">Type at least 2 characters to search.</div>`;
+    }
     if (!state.employeeSearchResults.length) {
-      return `<div class="muted" style="margin-top:8px;">Search by name or ID to find one employee.</div>`;
+      return `<div class="searchHint">No matching employees found.</div>`;
     }
 
     return `
@@ -1227,7 +1254,10 @@
             return `
               <label class="searchItem">
                 <input type="radio" name="excludedSearchChoice" value="${escapeAttr(emp.employeeId)}" ${checked} />
-                <span>${escapeHtml(emp.employeeName)} <span class="muted">(${escapeHtml(emp.employeeId)})</span></span>
+                <span>
+                  <div class="searchPrimary">${escapeHtml(emp.employeeName || "Unknown Employee")}</div>
+                  <div class="searchSecondary muted">${escapeHtml(emp.employeeId || "ID unavailable")}</div>
+                </span>
               </label>
             `;
           })
@@ -1273,11 +1303,15 @@
     const searchInput = document.getElementById("excludedSearchInput");
     if (searchInput) searchInput.value = state.excludedSearchQuery;
     searchBtn.addEventListener("click", searchEmployeesForExcluded);
+    searchInput.addEventListener("input", onExcludedSearchInputChange);
     addBtn.addEventListener("click", addSelectedExcludedStaff);
 
     content.querySelectorAll("input[name='excludedSearchChoice']").forEach((el) => {
       el.addEventListener("change", () => {
         state.selectedSearchEmployeeId = el.value;
+        const selected = state.employeeSearchResults.find((x) => x.employeeId === el.value);
+        if (selected) state.excludedSearchQuery = selected.employeeName || state.excludedSearchQuery;
+        renderExcludedTab();
       });
     });
     content.querySelectorAll("button[data-action='edit-excluded']").forEach((btn) => {
@@ -1288,23 +1322,50 @@
     });
   }
 
-  async function searchEmployeesForExcluded() {
+  function onExcludedSearchInputChange(e) {
+    state.excludedSearchQuery = (e.target.value || "").trim();
+    clearTimeout(excludedSearchDebounceTimer);
+    excludedSearchDebounceTimer = null;
+    if (state.excludedSearchQuery.length < 2) {
+      state.excludedSearchLoading = false;
+      state.excludedHasSearched = false;
+      state.employeeSearchResults = [];
+      state.selectedSearchEmployeeId = null;
+      renderExcludedTab();
+      return;
+    }
+
+    excludedSearchDebounceTimer = setTimeout(() => {
+      searchEmployeesForExcluded({ allowShortQuery: false, silentEmpty: true });
+    }, 300);
+  }
+
+  async function searchEmployeesForExcluded(opts = {}) {
+    const { allowShortQuery = true, silentEmpty = false } = opts;
     if (!state.excludedLocationName) return;
     const input = document.getElementById("excludedSearchInput");
     const q = (input && input.value ? input.value : "").trim();
     state.excludedSearchQuery = q;
     if (!q) {
-      alert("Enter a search term first.");
+      if (!silentEmpty) alert("Enter a search term first.");
+      return;
+    }
+    if (!allowShortQuery && q.length < 2) {
       return;
     }
 
+    state.excludedSearchLoading = true;
+    state.excludedHasSearched = true;
+    renderExcludedTab();
     const query = new URLSearchParams({
       locationName: state.excludedLocationName,
       q,
       limit: "12",
     });
     const { resp, body } = await apiGet(`/staff/toast-employees?${query.toString()}`);
+    state.excludedSearchLoading = false;
     if (!resp.ok) {
+      renderExcludedTab();
       alert(`Employee search failed: ${body.error || "unknown_error"}`);
       return;
     }
