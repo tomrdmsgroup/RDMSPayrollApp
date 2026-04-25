@@ -1476,6 +1476,65 @@
     return null;
   }
 
+  function buildOutcomePeriodOptions(selector) {
+    const options = [];
+    if (selector?.next_pay_period) {
+      options.push({
+        bucket: "next",
+        recordId: "",
+        value: "next",
+        label: `${fmtDateRange(selector.next_pay_period.start_date, selector.next_pay_period.end_date)}    Next Pay Period`,
+      });
+    }
+    if (selector?.current_pay_period) {
+      options.push({
+        bucket: "current",
+        recordId: "",
+        value: "current",
+        label: `${fmtDateRange(selector.current_pay_period.start_date, selector.current_pay_period.end_date)}    Current Pay Period`,
+      });
+    }
+    const prior = Array.isArray(selector?.prior_pay_periods) ? selector.prior_pay_periods : [];
+    prior.forEach((p) => {
+      options.push({
+        bucket: "prior",
+        recordId: String(p.record_id || ""),
+        value: `prior:${String(p.record_id || "")}`,
+        label: fmtDateRange(p.start_date, p.end_date),
+      });
+    });
+    return options;
+  }
+
+  function ensureOutcomeSelection(selector) {
+    const options = buildOutcomePeriodOptions(selector);
+    if (!options.length) {
+      state.outcomeSelectionBucket = "";
+      state.outcomeSelectionPriorRecordId = "";
+      return;
+    }
+
+    const selectedValue =
+      state.outcomeSelectionBucket === "prior"
+        ? `prior:${String(state.outcomeSelectionPriorRecordId || "")}`
+        : state.outcomeSelectionBucket || "";
+
+    const existing = options.find((opt) => opt.value === selectedValue);
+    if (existing) {
+      state.outcomeSelectionBucket = existing.bucket;
+      state.outcomeSelectionPriorRecordId = existing.recordId;
+      return;
+    }
+
+    const defaultBucket = selector?.default_selection?.bucket || "";
+    const defaultRecordId = String(selector?.default_selection?.record_id || selector?.default_selection?.prior_record_id || "");
+    const defaultValue = defaultBucket === "prior" ? `prior:${defaultRecordId}` : defaultBucket;
+    const preferred = options.find((opt) => opt.value === defaultValue) || options[0];
+
+    state.outcomeSelectionBucket = preferred.bucket;
+    state.outcomeSelectionPriorRecordId = preferred.recordId;
+  }
+
   function getSelectedToastOriginalPeriod() {
     const selector = state.toastOriginalSelector || {};
     const list = Array.isArray(selector.prior_pay_periods) ? selector.prior_pay_periods : [];
@@ -1535,25 +1594,12 @@
     }
 
     const selector = state.outcomeSelector;
-    const current = selector.current_pay_period;
-    const next = selector.next_pay_period;
-    const prior = Array.isArray(selector.prior_pay_periods) ? selector.prior_pay_periods : [];
+    ensureOutcomeSelection(selector);
     const selectedPeriod = outcomeSelectedPeriod();
     const run = state.outcomeResult ? state.outcomeResult.run : null;
     const outcome = state.outcomeResult ? state.outcomeResult.outcome : null;
     const findings = Array.isArray(outcome && outcome.findings) ? outcome.findings : [];
     const excluded = Array.isArray(outcome && outcome.excluded_staff) ? outcome.excluded_staff : [];
-
-    const priorOptions = ["<option value=''>Select a prior pay period...</option>"]
-      .concat(
-        prior.map(
-          (p) =>
-            `<option value="${escapeAttr(p.record_id)}" ${
-              String(state.outcomeSelectionPriorRecordId) === String(p.record_id) ? "selected" : ""
-            }>${escapeHtml(fmtDateRange(p.start_date, p.end_date))}</option>`
-        )
-      )
-      .join("");
 
     const statusPill = run
       ? pill(run.status || "completed", run.status === "completed" ? "ok" : run.status === "failed" ? "bad" : "warn")
@@ -1585,37 +1631,32 @@
       <div class="stack">
         <div class="panel">
           <div class="sectionTitle" style="margin-top:0;">Pay Period to Validate</div>
-          <div class="gridTwo">
-            <label class="miniCard">
-              <div><input type="radio" name="outcomeBucket" value="current" ${
-                state.outcomeSelectionBucket === "current" ? "checked" : ""
-              } /> Current Pay Period</div>
-              <div class="muted">${escapeHtml(fmtDateRange(current?.start_date, current?.end_date) || "Not available")}</div>
-            </label>
-            <label class="miniCard">
-              <div><input type="radio" name="outcomeBucket" value="next" ${
-                state.outcomeSelectionBucket === "next" ? "checked" : ""
-              } /> Next Pay Period</div>
-              <div class="muted">${escapeHtml(fmtDateRange(next?.start_date, next?.end_date) || "Not available")}</div>
-            </label>
-          </div>
-          <div class="row" style="margin-top:10px;">
-            <label style="min-width:260px;flex:1;">
-              <div class="muted" style="margin-bottom:6px;">Prior Pay Period</div>
-              <select id="outcomePriorSelect">${priorOptions}</select>
-            </label>
-            <button class="btn primary" id="runValidationBtn" type="button" ${state.outcomeRunning ? "disabled" : ""}>${
-              state.outcomeRunning ? "Running..." : "Run Validation"
-            }</button>
-          </div>
+          <label style="display:block;">
+            <div class="muted" style="margin-bottom:6px;">Pay Period</div>
+            <div class="row" style="gap:12px;align-items:flex-end;">
+              <select id="outcomePayPeriodSelect" style="flex:1;min-width:280px;">
+                ${buildOutcomePeriodOptions(selector)
+                  .map((opt) => {
+                    const selectedValue =
+                      state.outcomeSelectionBucket === "prior"
+                        ? `prior:${String(state.outcomeSelectionPriorRecordId || "")}`
+                        : state.outcomeSelectionBucket;
+                    return `<option value="${escapeAttr(opt.value)}" ${selectedValue === opt.value ? "selected" : ""}>${escapeHtml(
+                      opt.label
+                    )}</option>`;
+                  })
+                  .join("")}
+              </select>
+              <button class="btn primary" id="runValidationBtn" type="button" ${state.outcomeRunning ? "disabled" : ""}>${
+                state.outcomeRunning ? "Running..." : "Run Internal Validation"
+              }</button>
+            </div>
+          </label>
           ${
-            !selector.current_pay_period && !selector.next_pay_period && !prior.length
+            !selector.current_pay_period &&
+            !selector.next_pay_period &&
+            !(Array.isArray(selector.prior_pay_periods) ? selector.prior_pay_periods.length : 0)
               ? "<div class='muted' style='margin-top:10px;'>No selector data available for this location.</div>"
-              : ""
-          }
-          ${
-            state.outcomeSelectionBucket === "prior" && !state.outcomeSelectionPriorRecordId
-              ? "<div class='muted' style='margin-top:10px;'>Pick a prior pay period from the dropdown before running.</div>"
               : ""
           }
           ${state.outcomeRunError ? `<div class="muted" style="margin-top:10px;">Run failed: ${escapeHtml(state.outcomeRunError)}</div>` : ""}
@@ -1644,18 +1685,17 @@
       </div>
     `;
 
-    content.querySelectorAll("input[name='outcomeBucket']").forEach((el) => {
-      el.addEventListener("change", () => {
-        state.outcomeSelectionBucket = el.value;
-        renderOutcomeTab();
-      });
-    });
-
-    const priorSelect = document.getElementById("outcomePriorSelect");
-    if (priorSelect) {
-      priorSelect.addEventListener("change", () => {
-        state.outcomeSelectionPriorRecordId = priorSelect.value;
-        if (state.outcomeSelectionPriorRecordId) state.outcomeSelectionBucket = "prior";
+    const payPeriodSelect = document.getElementById("outcomePayPeriodSelect");
+    if (payPeriodSelect) {
+      payPeriodSelect.addEventListener("change", () => {
+        const val = String(payPeriodSelect.value || "");
+        if (val.startsWith("prior:")) {
+          state.outcomeSelectionBucket = "prior";
+          state.outcomeSelectionPriorRecordId = val.slice(6);
+        } else {
+          state.outcomeSelectionBucket = val;
+          state.outcomeSelectionPriorRecordId = "";
+        }
         renderOutcomeTab();
       });
     }
@@ -1684,7 +1724,7 @@
     }
     const selector = body.selector || {};
     state.outcomeSelector = selector;
-    state.outcomeSelectionBucket = selector.default_selection?.bucket || "current";
+    ensureOutcomeSelection(selector);
     renderOutcomeTab();
   }
 
