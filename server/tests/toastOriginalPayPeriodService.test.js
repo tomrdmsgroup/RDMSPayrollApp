@@ -154,14 +154,14 @@ function testBuildToastOriginalHoursRowsJoinsEmployeesAndJobsFromStandardSources
 
   assert.equal(result.rows.length, 1, 'rows should group by employee guid + job guid + hourly wage');
   assert.deepEqual(result.rows[0], {
-    Employee: 'Alex',
+    Employee: 'Alexander Fox',
     'Employee ID': 'E-100',
     'Job Code': 'S-1',
     'Job Title': 'Server',
     'Hourly Rate': 18.5,
     'Regular Hours': 8.25,
     'Overtime Hours': 1,
-    employee_name: 'Alex',
+    employee_name: 'Alexander Fox',
     employee_id: 'E-100',
     job_name: 'Server',
     job_code: 'S-1',
