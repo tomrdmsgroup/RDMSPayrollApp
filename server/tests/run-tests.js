@@ -46,6 +46,9 @@ const {
   testGroupingSplitsSameEmployeeAndDepartmentAcrossRates,
   testGroupingSplitsSameEmployeeAcrossDepartments,
   testOutputContainsOnlyHoursColumnsForToastOriginalRows,
+  testBuildToastOriginalHoursRowsJoinsEmployeesAndJobsFromStandardSources,
+  testBuildToastOriginalHoursRowsUsesMissingLabelsOnlyWhenJoinFails,
+  testStep2ServicePathDoesNotImportToastAnalyticsProvider,
 } = require('./toastOriginalPayPeriodService.test');
 
 const {
@@ -135,6 +138,9 @@ async function runAll() {
     testGroupingSplitsSameEmployeeAndDepartmentAcrossRates,
     testGroupingSplitsSameEmployeeAcrossDepartments,
     testOutputContainsOnlyHoursColumnsForToastOriginalRows,
+    testBuildToastOriginalHoursRowsJoinsEmployeesAndJobsFromStandardSources,
+    testBuildToastOriginalHoursRowsUsesMissingLabelsOnlyWhenJoinFails,
+    testStep2ServicePathDoesNotImportToastAnalyticsProvider,
     testParseCsvHandlesQuotedFields,
     testCompareRowsDetectsMissingAndMismatches,
     testBuildStableKeyPrefersEmployeeIdOverToastGuid,
