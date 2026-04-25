@@ -1246,12 +1246,6 @@
     content.innerHTML = `
       <div class="stack">
         <div class="panel">
-          <div class="sectionTitle" style="margin-top:0;">Currently Excluded Staff</div>
-          <p class="sectionHelp">These employees are skipped or handled differently in later payroll validation steps.</p>
-          ${renderExcludedRows()}
-        </div>
-
-        <div class="panel">
           <div class="sectionTitle" style="margin-top:0;">Add Excluded Staff</div>
           <p class="sectionHelp">Search for one employee, add a reason, then save.</p>
           <div class="row">
@@ -1264,6 +1258,12 @@
             <input class="input" id="excludedNoteInput" placeholder="Note (optional)" style="flex:1;min-width:220px;" value="${escapeAttr(state.excludedDraftNote)}" />
             <button class="btn primary" id="addExcludedBtn" type="button">Add</button>
           </div>
+        </div>
+
+        <div class="panel">
+          <div class="sectionTitle" style="margin-top:0;">Currently Excluded Staff</div>
+          <p class="sectionHelp">These employees are skipped or handled differently in later payroll validation steps.</p>
+          ${renderExcludedRows()}
         </div>
       </div>
     `;
