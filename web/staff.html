@@ -435,6 +435,58 @@
         font-size: 17px;
         font-weight: 700;
       }
+      .comparisonTilesGrid {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: repeat(4, minmax(180px, 1fr));
+      }
+      @media (max-width: 1100px) {
+        .comparisonTilesGrid {
+          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        }
+      }
+      .comparisonTile {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 10px 12px;
+        background: #ffffff;
+      }
+      .comparisonTile.positive {
+        border-color: rgba(46, 204, 113, 0.45);
+        background: rgba(46, 204, 113, 0.1);
+      }
+      .comparisonTile.negative {
+        border-color: rgba(231, 76, 60, 0.45);
+        background: rgba(231, 76, 60, 0.12);
+      }
+      .comparisonTile.caution {
+        border-color: rgba(241, 196, 15, 0.45);
+        background: rgba(241, 196, 15, 0.12);
+      }
+      .comparisonTileTitle {
+        font-size: 13px;
+        font-weight: 700;
+        margin-bottom: 6px;
+      }
+      .comparisonTileStatus {
+        font-size: 18px;
+        font-weight: 700;
+        margin-bottom: 8px;
+      }
+      .comparisonTileLine {
+        font-size: 13px;
+        color: #374151;
+        margin-top: 2px;
+      }
+      .comparisonExceptionsTable th {
+        text-align: center;
+      }
+      .comparisonExceptionsTable td {
+        text-align: center;
+      }
+      .comparisonExceptionsTable td:first-child {
+        text-align: left;
+      }
       .debugSection {
         margin-top: 10px;
         border: 1px solid var(--border);
@@ -2375,6 +2427,218 @@
     return `<div class="tableScroll"><table class="toastOriginalRowsTable"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
   }
 
+  function toNumericComparisonValue(value) {
+    if (value === null || value === undefined) return 0;
+    if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+    const cleaned = String(value)
+      .trim()
+      .replace(/[$,%\s]/g, "")
+      .replace(/,/g, "");
+    const parsed = Number(cleaned);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function formatComparisonNumber(value) {
+    return toNumericComparisonValue(value).toFixed(2);
+  }
+
+  function normalizeComparisonKeyPart(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+
+  function groupEarningsRowsForComparison(rows) {
+    const map = new Map();
+    const normalizedRows = (Array.isArray(rows) ? rows : []).map(normalizeEarningsRow);
+
+    normalizedRows.forEach((row) => {
+      const employeeId = String(row.employeeId || "").trim();
+      const jobCode = String(row.jobCode || "").trim();
+      const key = `${normalizeComparisonKeyPart(employeeId)}|||${normalizeComparisonKeyPart(jobCode)}`;
+
+      if (!map.has(key)) {
+        map.set(key, {
+          employee: String(row.employee || "").trim(),
+          employeeId,
+          jobTitle: String(row.jobTitle || "").trim(),
+          jobCode,
+          regHours: 0,
+          otHours: 0,
+          rateSum: 0,
+          rateCount: 0,
+        });
+      }
+
+      const group = map.get(key);
+      if (!group.employee && row.employee) group.employee = String(row.employee || "").trim();
+      if (!group.jobTitle && row.jobTitle) group.jobTitle = String(row.jobTitle || "").trim();
+      group.regHours += toNumericComparisonValue(row.regHours);
+      group.otHours += toNumericComparisonValue(row.otHours);
+      const rate = toNumericComparisonValue(row.hourlyRate);
+      if (rate > 0) {
+        group.rateSum += rate;
+        group.rateCount += 1;
+      }
+    });
+
+    map.forEach((group) => {
+      group.regHours = Number(group.regHours.toFixed(2));
+      group.otHours = Number(group.otHours.toFixed(2));
+      group.hourlyRate = group.rateCount > 0 ? Number((group.rateSum / group.rateCount).toFixed(2)) : null;
+      delete group.rateSum;
+      delete group.rateCount;
+    });
+
+    return map;
+  }
+
+  function compareEarningsGroups(csvRows, apiRows) {
+    const hoursTolerance = 0.01;
+    const rateTolerance = 0.01;
+    const csvMap = groupEarningsRowsForComparison(csvRows);
+    const apiMap = groupEarningsRowsForComparison(apiRows);
+    const allKeys = new Set([...csvMap.keys(), ...apiMap.keys()]);
+    const hourMismatches = [];
+    const missingInApi = [];
+    const missingInCsv = [];
+    const rateReview = [];
+    let csvRegTotal = 0;
+    let apiRegTotal = 0;
+    let csvOtTotal = 0;
+    let apiOtTotal = 0;
+
+    csvMap.forEach((row) => {
+      csvRegTotal += row.regHours;
+      csvOtTotal += row.otHours;
+    });
+    apiMap.forEach((row) => {
+      apiRegTotal += row.regHours;
+      apiOtTotal += row.otHours;
+    });
+
+    allKeys.forEach((key) => {
+      const csv = csvMap.get(key) || null;
+      const api = apiMap.get(key) || null;
+      if (!api && csv) {
+        missingInApi.push(csv);
+        return;
+      }
+      if (!csv && api) {
+        missingInCsv.push(api);
+        return;
+      }
+      if (!csv || !api) return;
+
+      const regVariance = Number((api.regHours - csv.regHours).toFixed(2));
+      const otVariance = Number((api.otHours - csv.otHours).toFixed(2));
+      if (Math.abs(regVariance) > hoursTolerance || Math.abs(otVariance) > hoursTolerance) {
+        hourMismatches.push({
+          employee: api.employee || csv.employee || "",
+          employeeId: api.employeeId || csv.employeeId || "",
+          jobTitle: api.jobTitle || csv.jobTitle || "",
+          jobCode: api.jobCode || csv.jobCode || "",
+          csvReg: csv.regHours,
+          apiReg: api.regHours,
+          regVariance,
+          csvOt: csv.otHours,
+          apiOt: api.otHours,
+          otVariance,
+        });
+      }
+
+      const csvRate = csv.hourlyRate;
+      const apiRate = api.hourlyRate;
+      const hasCsvRate = Number.isFinite(csvRate);
+      const hasApiRate = Number.isFinite(apiRate);
+      const rateVariance = hasCsvRate && hasApiRate ? Number((apiRate - csvRate).toFixed(2)) : null;
+      const rateMismatch =
+        (hasCsvRate && hasApiRate && Math.abs(rateVariance) > rateTolerance) ||
+        (hasCsvRate !== hasApiRate);
+
+      if (rateMismatch) {
+        rateReview.push({
+          employee: api.employee || csv.employee || "",
+          employeeId: api.employeeId || csv.employeeId || "",
+          jobTitle: api.jobTitle || csv.jobTitle || "",
+          jobCode: api.jobCode || csv.jobCode || "",
+          csvRate: hasCsvRate ? csvRate : null,
+          apiRate: hasApiRate ? apiRate : null,
+          rateVariance,
+        });
+      }
+    });
+
+    const csvGroupCount = csvMap.size;
+    const apiGroupCount = apiMap.size;
+    const rowVariance = apiGroupCount - csvGroupCount;
+    const regVariance = Number((apiRegTotal - csvRegTotal).toFixed(2));
+    const otVariance = Number((apiOtTotal - csvOtTotal).toFixed(2));
+
+    return {
+      hoursTolerance,
+      rateTolerance,
+      summary: {
+        csvGroupCount,
+        apiGroupCount,
+        rowVariance,
+        csvRegTotal: Number(csvRegTotal.toFixed(2)),
+        apiRegTotal: Number(apiRegTotal.toFixed(2)),
+        regVariance,
+        csvOtTotal: Number(csvOtTotal.toFixed(2)),
+        apiOtTotal: Number(apiOtTotal.toFixed(2)),
+        otVariance,
+        rateMismatchCount: rateReview.length,
+      },
+      hourMismatches,
+      missingInApi,
+      missingInCsv,
+      rateReview,
+    };
+  }
+
+  function renderComparisonTile(title, statusLabel, styleClass, lines) {
+    return `
+      <div class="comparisonTile ${escapeAttr(styleClass)}">
+        <div class="comparisonTileTitle">${escapeHtml(title)}</div>
+        <div class="comparisonTileStatus">${escapeHtml(statusLabel)}</div>
+        ${lines.map((line) => `<div class="comparisonTileLine">${line}</div>`).join("")}
+      </div>
+    `;
+  }
+
+  function renderComparisonSectionTable(title, columns, rows) {
+    const head = columns.map((column) => `<th>${escapeHtml(column.header)}</th>`).join("");
+    const body = Array.isArray(rows) && rows.length
+      ? rows
+          .map((row) => {
+            const cells = columns
+                .map((column) => {
+                const raw = row[column.key];
+                const rendered =
+                  column.numeric && raw !== null && raw !== undefined && String(raw).trim() !== ""
+                    ? formatComparisonNumber(raw)
+                    : column.numeric
+                    ? ""
+                    : String(raw || "");
+                const align = column.align || "center";
+                return `<td style="text-align:${align};">${escapeHtml(rendered)}</td>`;
+              })
+              .join("");
+            return `<tr>${cells}</tr>`;
+          })
+          .join("")
+      : `<tr><td colspan="${columns.length}" class="muted">No exceptions found.</td></tr>`;
+
+    return `
+      <div class="sectionTitle">${escapeHtml(title)}</div>
+      <div class="tableScroll">
+        <table class="comparisonExceptionsTable">
+          <thead><tr>${head}</tr></thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
   function renderToastOriginalTab() {
     const content = document.getElementById("content");
     const locationName = document.getElementById("locationSelect").value;
@@ -2557,12 +2821,14 @@
       return;
     }
     const selectedPeriod = getSelectedToastOriginalPeriod();
-    const comparison = state.toastOriginalComparison;
     const csvRows = extractToastOriginalCsvRows(state.toastOriginalCsvBaseline);
     const apiRows = Array.isArray(state.toastOriginalData?.rows) ? state.toastOriginalData.rows : [];
-    const summaryHtml = getComparisonSummaryHtml(comparison);
-    const statusHtml = renderComparisonStatusAndMetrics(comparison, csvRows.length, apiRows.length);
-    const canRenderDepartmentAudit = csvRows.length > 0 && apiRows.length > 0;
+    const comparison = compareEarningsGroups(csvRows, apiRows);
+    const s = comparison.summary;
+    const rowCountMatches = s.rowVariance === 0;
+    const regMatches = Math.abs(s.regVariance) <= comparison.hoursTolerance;
+    const otMatches = Math.abs(s.otVariance) <= comparison.hoursTolerance;
+    const rateMatches = s.rateMismatchCount === 0;
 
     content.innerHTML = `
       <div class="stack">
@@ -2573,13 +2839,84 @@
             <div><span class="muted">Location:</span> ${escapeHtml(locationName)}</div>
             <div><span class="muted">Selected pay period:</span> ${escapeHtml(selectedPeriod?.label || "Not selected")}</div>
           </div>
-          <div style="margin-top:12px;">${statusHtml}</div>
-          <div style="margin-top:12px;">${summaryHtml}</div>
-          ${
-            canRenderDepartmentAudit
-              ? `<div style="margin-top:12px;">${renderDepartmentAuditTable(apiRows, csvRows)}</div>`
-              : `<div class="muted" style="margin-top:12px;">Load Step 2 API rows and upload a Step 1 CSV baseline to view the employee + department hours audit table.</div>`
-          }
+          <div class="comparisonTilesGrid" style="margin-top:12px;">
+            ${renderComparisonTile("Row Count", rowCountMatches ? "MATCH" : "DO NOT MATCH", rowCountMatches ? "positive" : "negative", [
+              `CSV: ${escapeHtml(String(s.csvGroupCount))}`,
+              `API: ${escapeHtml(String(s.apiGroupCount))}`,
+              `Variance: ${escapeHtml(String(s.rowVariance))}`,
+            ])}
+            ${renderComparisonTile("Regular Hours", regMatches ? "MATCH" : "DO NOT MATCH", regMatches ? "positive" : "negative", [
+              `CSV: ${escapeHtml(formatComparisonNumber(s.csvRegTotal))}`,
+              `API: ${escapeHtml(formatComparisonNumber(s.apiRegTotal))}`,
+              `Variance: ${escapeHtml(formatComparisonNumber(s.regVariance))}`,
+            ])}
+            ${renderComparisonTile("OT Hours", otMatches ? "MATCH" : "DO NOT MATCH", otMatches ? "positive" : "negative", [
+              `CSV: ${escapeHtml(formatComparisonNumber(s.csvOtTotal))}`,
+              `API: ${escapeHtml(formatComparisonNumber(s.apiOtTotal))}`,
+              `Variance: ${escapeHtml(formatComparisonNumber(s.otVariance))}`,
+            ])}
+            ${renderComparisonTile("Rate Review", rateMatches ? "MATCH" : "REVIEW", rateMatches ? "positive" : "caution", [
+              `Mismatches: ${escapeHtml(String(s.rateMismatchCount))}`,
+            ])}
+          </div>
+
+          <div style="margin-top:14px;">
+            ${renderComparisonSectionTable(
+              "Hour Mismatches",
+              [
+                { header: "Employee", key: "employee", align: "left" },
+                { header: "Employee ID", key: "employeeId" },
+                { header: "Job Title", key: "jobTitle" },
+                { header: "Job Code", key: "jobCode" },
+                { header: "CSV Reg", key: "csvReg", numeric: true },
+                { header: "API Reg", key: "apiReg", numeric: true },
+                { header: "Reg Variance", key: "regVariance", numeric: true },
+                { header: "CSV OT", key: "csvOt", numeric: true },
+                { header: "API OT", key: "apiOt", numeric: true },
+                { header: "OT Variance", key: "otVariance", numeric: true },
+              ],
+              comparison.hourMismatches
+            )}
+            ${renderComparisonSectionTable(
+              "Missing in API",
+              [
+                { header: "Employee", key: "employee", align: "left" },
+                { header: "Employee ID", key: "employeeId" },
+                { header: "Job Title", key: "jobTitle" },
+                { header: "Job Code", key: "jobCode" },
+                { header: "CSV Rate", key: "hourlyRate", numeric: true },
+                { header: "CSV Reg", key: "regHours", numeric: true },
+                { header: "CSV OT", key: "otHours", numeric: true },
+              ],
+              comparison.missingInApi
+            )}
+            ${renderComparisonSectionTable(
+              "Missing in CSV",
+              [
+                { header: "Employee", key: "employee", align: "left" },
+                { header: "Employee ID", key: "employeeId" },
+                { header: "Job Title", key: "jobTitle" },
+                { header: "Job Code", key: "jobCode" },
+                { header: "API Rate", key: "hourlyRate", numeric: true },
+                { header: "API Reg", key: "regHours", numeric: true },
+                { header: "API OT", key: "otHours", numeric: true },
+              ],
+              comparison.missingInCsv
+            )}
+            ${renderComparisonSectionTable(
+              "Rate Review",
+              [
+                { header: "Employee", key: "employee", align: "left" },
+                { header: "Employee ID", key: "employeeId" },
+                { header: "Job Title", key: "jobTitle" },
+                { header: "Job Code", key: "jobCode" },
+                { header: "CSV Rate", key: "csvRate", numeric: true },
+                { header: "API Rate", key: "apiRate", numeric: true },
+                { header: "Rate Variance", key: "rateVariance", numeric: true },
+              ],
+              comparison.rateReview
+            )}
+          </div>
         </div>
       </div>
     `;
