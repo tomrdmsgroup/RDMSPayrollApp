@@ -252,6 +252,9 @@
         font-size: 15px;
         font-weight: 700;
       }
+      .sectionTitle.info {
+        color: #1d4ed8;
+      }
       .sectionHelp {
         margin: 0 0 10px;
         color: var(--muted);
@@ -2407,6 +2410,7 @@
     return {
       employee: getFieldValue(["Employee", "employee", "employee_name", "name"]),
       employeeId: getFieldValue(["Employee ID", "employee_id", "employeeId"]),
+      employeeGuid: getFieldValue(["Toast Employee GUID", "toast_employee_guid", "employee_guid", "employeeGuid"]),
       jobTitle: getFieldValue(["Job Title", "job_title", "jobTitle", "department"]),
       jobCode: getFieldValue(["Job Code", "job_code", "jobCode"]),
       hourlyRate: formatToTwoDecimalsIfNumeric(getFieldValue(["Hourly Rate", "hourly_rate", "hourlyRate", "rate"])),
@@ -2463,6 +2467,25 @@
     return String(value || "").trim().toLowerCase();
   }
 
+  function normalizeNameForComparison(value) {
+    return String(value || "")
+      .toLowerCase()
+      .trim()
+      .replace(/[^\w\s]/g, " ")
+      .replace(/\s+/g, " ");
+  }
+
+  function buildNameVariants(value) {
+    const normalized = normalizeNameForComparison(value);
+    if (!normalized) return [];
+    const parts = normalized.split(" ").filter(Boolean);
+    if (!parts.length) return [];
+    const base = parts.join(" ");
+    if (parts.length === 1) return [base];
+    const flipped = [parts[parts.length - 1], ...parts.slice(0, -1)].join(" ");
+    return Array.from(new Set([base, flipped]));
+  }
+
   function sanitizeComparableValue(value) {
     const raw = String(value || "").trim();
     if (!raw) return "";
@@ -2497,16 +2520,23 @@
 
   function buildExcludedMatchers(excludedRows) {
     const active = (Array.isArray(excludedRows) ? excludedRows : []).filter((row) => row && row.active !== false);
+    const byGuid = new Map();
     const byEmployeeId = new Map();
     const byName = new Map();
     active.forEach((row) => {
       const reason = [row.reason, row.notes].filter(Boolean).join(" / ").trim() || "Excluded";
-      const employeeIdKey = normalizeComparisonKeyPart(row.toast_employee_id || row.employee_id || row.employeeId || "");
-      const nameKey = normalizeComparisonKeyPart(row.employee_name || row.employeeName || "");
+      const guidKey = normalizeComparisonKeyPart(
+        row.toast_employee_guid || row.toastEmployeeGuid || row.employee_guid || row.employeeGuid || ""
+      );
+      const employeeIdKey = normalizeComparisonKeyPart(row.employee_id || row.employeeId || "");
+      const nameVariants = buildNameVariants(row.employee_name || row.employeeName || "");
+      if (guidKey && !byGuid.has(guidKey)) byGuid.set(guidKey, reason);
       if (employeeIdKey && !byEmployeeId.has(employeeIdKey)) byEmployeeId.set(employeeIdKey, reason);
-      if (nameKey && !byName.has(nameKey)) byName.set(nameKey, reason);
+      nameVariants.forEach((nameKey) => {
+        if (nameKey && !byName.has(nameKey)) byName.set(nameKey, reason);
+      });
     });
-    return { byEmployeeId, byName };
+    return { byGuid, byEmployeeId, byName };
   }
 
   function mergeExcludedDisplayRows(rows) {
@@ -2629,11 +2659,16 @@
     const classifyRows = (rows, sourceLabel, issueBucket, validBucket) => {
       const normalizedRows = (Array.isArray(rows) ? rows : []).map(normalizeEarningsRow);
       normalizedRows.forEach((row) => {
+        const rawEmployeeGuid = String(row.employeeGuid || "").trim();
         const rawEmployeeId = String(row.employeeId || "").trim();
         const employeeName = String(row.employee || "").trim();
+        const excludedReasonByName = buildNameVariants(employeeName)
+          .map((nameVariant) => excludedMatchers.byName.get(nameVariant) || "")
+          .find(Boolean);
         const excludedReason =
+          excludedMatchers.byGuid.get(normalizeComparisonKeyPart(rawEmployeeGuid)) ||
           excludedMatchers.byEmployeeId.get(normalizeComparisonKeyPart(rawEmployeeId)) ||
-          excludedMatchers.byName.get(normalizeComparisonKeyPart(employeeName)) ||
+          excludedReasonByName ||
           "";
         if (excludedReason) {
           excludedFromComparisonRaw.push({
@@ -3071,7 +3106,7 @@
                 { header: "Exclusion Reason", key: "exclusionReason", align: "left" },
               ],
               comparison.excludedFromComparison,
-              { hideWhenEmpty: true }
+              { hideWhenEmpty: true, tone: "info" }
             )}
             ${renderComparisonSectionTable(
               "CSV Key Issues",
@@ -3118,7 +3153,7 @@
                 { header: "OT Variance", key: "otVariance", numeric: true },
               ],
               comparison.hourMismatches,
-              { compactEmptyMessage: true }
+              { hideWhenEmpty: true }
             )}
             ${renderComparisonSectionTable(
               "Missing in API",
@@ -3132,7 +3167,7 @@
                 { header: "CSV OT", key: "otHours", numeric: true },
               ],
               comparison.missingInApi,
-              { compactEmptyMessage: true }
+              { hideWhenEmpty: true }
             )}
             ${renderComparisonSectionTable(
               "Missing in CSV",
@@ -3146,7 +3181,7 @@
                 { header: "API OT", key: "otHours", numeric: true },
               ],
               comparison.missingInCsv,
-              { compactEmptyMessage: true }
+              { hideWhenEmpty: true }
             )}
             ${renderComparisonSectionTable(
               "Rate Review",
@@ -3160,7 +3195,7 @@
                 { header: "Rate Variance", key: "rateVariance", numeric: true },
               ],
               comparison.rateReview,
-              { compactEmptyMessage: true }
+              { hideWhenEmpty: true }
             )}
           </div>
         </div>
