@@ -576,7 +576,7 @@
     { key: "dashboardMain", label: "Payroll Dashboard", tabs: [] },
     { key: "setup", label: "Setup", tabs: ["excluded", "confirmations", "communicationSetup"] },
     { key: "payrollValidation", label: "Payroll Validation", tabs: ["rules", "outcome", "clientValidationConfig"] },
-    { key: "earningsAuditMain", label: "Earnings Audit", tabs: ["toastOriginal", "earningsAudit"] },
+    { key: "earningsAuditMain", label: "Earnings Audit", tabs: ["toastOriginal", "earningsAudit", "earningsComparison"] },
     { key: "tipsAudit", label: "Tips Audit", tabs: ["tipImport"] },
     { key: "reportsMain", label: "Reports", tabs: ["payrollExport", "reports"] },
   ];
@@ -627,13 +627,19 @@
     toastOriginal: {
       label: "Step 1: POS Import",
       main: "earningsAuditMain",
-      subtitle: "Confirm pay period and upload optional Toast Payroll Export CSV baseline.",
+      subtitle: "Confirm pay period, upload POS payroll CSV, and review normalized uploaded rows.",
       existing: true,
     },
     earningsAudit: {
       label: "Step 2: Earnings Audit",
       main: "earningsAuditMain",
-      subtitle: "Load original Toast rows and review API vs CSV audit results.",
+      subtitle: "Load and review Original Toast pay period rows from API.",
+      existing: true,
+    },
+    earningsComparison: {
+      label: "Step 3: Earnings Comparison",
+      main: "earningsAuditMain",
+      subtitle: "Coming soon. This page will compare Step 1 uploads to Step 2 API rows.",
       existing: true,
     },
     tipImport: {
@@ -735,6 +741,15 @@
         return;
       }
       renderEarningsAuditTab();
+      return;
+    }
+
+    if (nextTab === "earningsComparison") {
+      if (!state.toastOriginalSelector) {
+        loadToastOriginalSelectorForSelected();
+        return;
+      }
+      renderEarningsComparisonTab();
       return;
     }
 
@@ -1643,6 +1658,7 @@
 
   function renderActiveToastAuditPage() {
     if (state.tab === "earningsAudit") renderEarningsAuditTab();
+    else if (state.tab === "earningsComparison") renderEarningsComparisonTab();
     else renderToastOriginalTab();
   }
 
@@ -1882,33 +1898,24 @@
 
   function buildUploadReviewSummary(baseline) {
     if (!baseline) return null;
-    const summary = baseline.upload_review_summary && typeof baseline.upload_review_summary === "object" ? baseline.upload_review_summary : null;
-    if (summary) {
-      return {
-        rows: Math.max(0, Math.trunc(toSafeNumber(summary.rows))),
-        uniqueEmployees: Math.max(0, Math.trunc(toSafeNumber(summary.unique_employees))),
-        regularHours: toSafeNumber(summary.regular_hours),
-        overtimeHours: toSafeNumber(summary.ot_hours),
-      };
-    }
-
     const normalizedRows = extractToastOriginalCsvRows(baseline);
-    const uniqueToastEmployeeIds = new Set();
+    const summary = baseline.upload_review_summary && typeof baseline.upload_review_summary === "object" ? baseline.upload_review_summary : null;
+    const uniqueEmployeeIds = new Set();
     let regularHours = 0;
     let overtimeHours = 0;
 
     normalizedRows.forEach((row) => {
-      const employeeGuid = String(row?.toast_employee_id || "").trim();
-      if (employeeGuid) uniqueToastEmployeeIds.add(employeeGuid);
-      regularHours += toSafeNumber(row?.regular_hours);
-      overtimeHours += toSafeNumber(row?.overtime_hours);
+      const employeeId = String(row?.["Employee ID"] || row?.employee_id || "").trim();
+      if (employeeId) uniqueEmployeeIds.add(employeeId);
+      regularHours += toSafeNumber(row?.["Regular Hours"] ?? row?.regular_hours);
+      overtimeHours += toSafeNumber(row?.["Overtime Hours"] ?? row?.overtime_hours);
     });
 
     return {
-      rows: normalizedRows.length,
-      uniqueEmployees: uniqueToastEmployeeIds.size,
-      regularHours,
-      overtimeHours,
+      rows: summary ? Math.max(0, Math.trunc(toSafeNumber(summary.rows))) : normalizedRows.length,
+      uniqueEmployees: uniqueEmployeeIds.size,
+      regularHours: normalizedRows.length ? regularHours : toSafeNumber(summary?.regular_hours),
+      overtimeHours: normalizedRows.length ? overtimeHours : toSafeNumber(summary?.ot_hours),
     };
   }
 
@@ -2274,6 +2281,40 @@
     `;
   }
 
+  function normalizeEarningsRow(rawRow) {
+    const row = rawRow && typeof rawRow === "object" ? rawRow : {};
+    return {
+      Employee: row["Employee"] ?? row.employee_name ?? "",
+      "Employee ID": row["Employee ID"] ?? row.employee_id ?? "",
+      "Job Title": row["Job Title"] ?? row["Department"] ?? row.job_title ?? row.department ?? "",
+      "Job Code": row["Job Code"] ?? row.job_code ?? "",
+      "Hourly Rate": row["Hourly Rate"] ?? row.hourly_rate ?? "",
+      "Reg Hours": row["Regular Hours"] ?? row.regular_hours ?? "",
+      "OT Hours": row["Overtime Hours"] ?? row.overtime_hours ?? "",
+    };
+  }
+
+  function renderEarningsRowsTable(rows, emptyLabel) {
+    const normalizedRows = (Array.isArray(rows) ? rows : []).map(normalizeEarningsRow);
+    const columns = ["Employee", "Employee ID", "Job Title", "Job Code", "Hourly Rate", "Reg Hours", "OT Hours"];
+    const head = columns.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
+    const body = normalizedRows.length
+      ? normalizedRows
+          .map((row) => {
+            const cells = columns
+              .map((col) => {
+                const align = col === "Employee" ? "left" : "center";
+                const value = row[col] === null || row[col] === undefined ? "" : String(row[col]);
+                return `<td style="text-align:${align};">${escapeHtml(value)}</td>`;
+              })
+              .join("");
+            return `<tr>${cells}</tr>`;
+          })
+          .join("")
+      : `<tr><td colspan="${columns.length}" class="muted">${escapeHtml(emptyLabel)}</td></tr>`;
+    return `<div class="tableScroll"><table class="toastOriginalRowsTable"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  }
+
   function renderToastOriginalTab() {
     const content = document.getElementById("content");
     const locationName = document.getElementById("locationSelect").value;
@@ -2293,7 +2334,7 @@
       state.toastOriginalSelectionBucket === "prior"
         ? `prior:${String(state.toastOriginalSelectionPriorRecordId || "")}`
         : state.toastOriginalSelectionBucket || "";
-    const selectedPeriod = getSelectedToastOriginalPeriod();
+    const uploadedRows = extractToastOriginalCsvRows(state.toastOriginalCsvBaseline);
 
     content.innerHTML = `
       <div class="stack">
@@ -2312,15 +2353,15 @@
             </label>
           </div>
 
-          <div class="sectionTitle">Optional Audit Baseline: Upload Toast Payroll Export CSV</div>
-          <p class="sectionHelp">Staff can upload the actual exported file for this selected pay period. Stored for audit trail and compared against API-derived rows.</p>
+          <div class="sectionTitle">POS payroll CSV upload</div>
+          <p class="sectionHelp">Upload the POS payroll export CSV for the selected pay period.</p>
           <div class="row" style="margin-top:8px;align-items:flex-end;">
             <label style="min-width:320px;flex:1;">
               <div class="muted" style="margin-bottom:6px;">Toast Payroll Export CSV file</div>
               <input id="toastOriginalCsvFile" type="file" class="input" accept=".csv,text/csv" />
             </label>
             <button class="btn" id="uploadToastOriginalCsvBtn" type="button" ${state.toastOriginalCsvUploadBusy ? "disabled" : ""}>
-              ${state.toastOriginalCsvUploadBusy ? "Uploading..." : "Upload CSV Baseline"}
+              ${state.toastOriginalCsvUploadBusy ? "Uploading..." : "Upload CSV"}
             </button>
             <button class="btn" id="clearToastOriginalCsvBtn" type="button" ${
               state.toastOriginalCsvClearBusy || !state.toastOriginalCsvBaseline ? "disabled" : ""
@@ -2339,6 +2380,9 @@
               : ""
           }
           ${renderUploadReviewSection(state.toastOriginalCsvBaseline)}
+          <div class="sectionTitle">Normalized uploaded CSV rows</div>
+          <p class="sectionHelp">Read-only normalized view of the uploaded CSV file.</p>
+          ${renderEarningsRowsTable(uploadedRows, "Upload a CSV file to view normalized rows.")}
         </div>
       </div>
     `;
@@ -2386,14 +2430,7 @@
         : state.toastOriginalSelectionBucket || "";
     const selectedPeriod = getSelectedToastOriginalPeriod();
     const data = state.toastOriginalData;
-    const columns = Array.isArray(data?.columns) ? data.columns : [];
     const rows = Array.isArray(data?.rows) ? data.rows : [];
-    const comparison = state.toastOriginalComparison;
-    const csvRows = extractToastOriginalCsvRows(state.toastOriginalCsvBaseline);
-    const tableRender = renderToastOriginalTable(columns, rows);
-    const stableIdentityText = rows.length
-      ? `<div class="muted" style="margin-top:8px;">Stable identity column shown: <b style="color:var(--text)">Employee ID</b> (sourced from <b style="color:var(--text)">Employee ID</b>).</div>`
-      : "";
 
     content.innerHTML = `
       <div class="stack">
@@ -2415,33 +2452,18 @@
               ${state.toastOriginalLoading ? "Loading..." : "Load Original Toast Data"}
             </button>
           </div>
-          ${state.toastOriginalCsvBaseline ? "" : "<div class='muted' style='margin-top:10px;'>No uploaded CSV baseline found for this pay period. Use Step 1: POS Import to upload one.</div>"}
           ${state.toastOriginalLoadError ? `<div class="muted" style="margin-top:10px;">Load failed: ${escapeHtml(state.toastOriginalLoadError)}</div>` : ""}
         </div>
 
         <div class="panel toastOriginalDataPanel">
-          <div class="sectionTitle" style="margin-top:0;">Original Toast Pay Period Rows</div>
+          <div class="sectionTitle" style="margin-top:0;">Original Toast Pay Period Rows from API</div>
           <div class="row" style="gap:16px;">
             <div><span class="muted">Location:</span> ${escapeHtml(locationName)}</div>
             <div><span class="muted">Selected pay period:</span> ${escapeHtml(selectedPeriod?.label || "Not selected")}</div>
             <div><span class="muted">Rows:</span> ${escapeHtml(String(rows.length))}</div>
           </div>
-          <div class="sectionHelp" style="margin-top:8px;">Raw/original Toast row payload rendered directly as a table for auditing.</div>
-
-          ${renderComparisonStatusAndMetrics(
-            comparison,
-            state.toastOriginalCsvBaselineRowCount ||
-              (Array.isArray(state.toastOriginalCsvBaseline?.normalized_rows) ? state.toastOriginalCsvBaseline.normalized_rows.length : 0),
-            rows.length
-          )}
-          ${stableIdentityText}
-          ${tableRender.html}
-          ${
-            state.toastOriginalCsvBaseline
-              ? renderDepartmentAuditTable(rows, csvRows)
-              : "<div class='sectionTitle'>Outcome Audit: Employee + Department Hours</div><div class='muted'>Upload a CSV baseline to compare employee + department hour totals.</div>"
-          }
-          ${comparison && Array.isArray(comparison.column_mismatches) ? renderColumnMismatchesTable(comparison.column_mismatches) : ""}
+          <div class="sectionHelp" style="margin-top:8px;">POS/API pull rows for the selected pay period.</div>
+          ${renderEarningsRowsTable(rows, "No rows returned for this pay period.")}
         </div>
       </div>
     `;
@@ -2463,6 +2485,28 @@
 
     const loadBtn = document.getElementById("loadToastOriginalBtn");
     if (loadBtn) loadBtn.addEventListener("click", loadToastOriginalData);
+  }
+
+  function renderEarningsComparisonTab() {
+    const content = document.getElementById("content");
+    const locationName = document.getElementById("locationSelect").value;
+    if (!locationName) {
+      content.innerHTML = "<div class='loading'>Select a location to use Earnings Comparison.</div>";
+      return;
+    }
+    const selectedPeriod = getSelectedToastOriginalPeriod();
+    content.innerHTML = `
+      <div class="stack">
+        <div class="panel">
+          <div class="sectionTitle" style="margin-top:0;">Step 3: Earnings Comparison</div>
+          <div class="muted" style="margin-top:8px;">Coming soon. This page will compare the Step 1 uploaded POS payroll file against the Step 2 POS/API pull and show exceptions.</div>
+          <div class="row" style="gap:16px;margin-top:12px;">
+            <div><span class="muted">Location:</span> ${escapeHtml(locationName)}</div>
+            <div><span class="muted">Selected pay period:</span> ${escapeHtml(selectedPeriod?.label || "Not selected")}</div>
+          </div>
+        </div>
+      </div>
+    `;
   }
 
   async function loadToastOriginalSelectorForSelected() {
@@ -2734,7 +2778,7 @@
     else if (tab === "rules") await loadRulesForSelected();
     else if (tab === "excluded") await loadExcludedForSelected();
     else if (tab === "outcome") await loadOutcomeSelectorForSelected();
-    else if (tab === "toastOriginal" || tab === "earningsAudit") await loadToastOriginalSelectorForSelected();
+    else if (tab === "toastOriginal" || tab === "earningsAudit" || tab === "earningsComparison") await loadToastOriginalSelectorForSelected();
   });
 
   document.getElementById("mainTabs").addEventListener("click", (event) => {
