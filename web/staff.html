@@ -1875,6 +1875,70 @@
     return [];
   }
 
+  function toSafeNumber(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function buildUploadReviewSummary(baseline) {
+    if (!baseline) return null;
+    const summary = baseline.upload_review_summary && typeof baseline.upload_review_summary === "object" ? baseline.upload_review_summary : null;
+    if (summary) {
+      return {
+        rows: Math.max(0, Math.trunc(toSafeNumber(summary.rows))),
+        uniqueEmployees: Math.max(0, Math.trunc(toSafeNumber(summary.unique_employees))),
+        regularHours: toSafeNumber(summary.regular_hours),
+        overtimeHours: toSafeNumber(summary.ot_hours),
+      };
+    }
+
+    const normalizedRows = extractToastOriginalCsvRows(baseline);
+    const uniqueToastEmployeeIds = new Set();
+    let regularHours = 0;
+    let overtimeHours = 0;
+
+    normalizedRows.forEach((row) => {
+      const employeeGuid = String(row?.toast_employee_id || "").trim();
+      if (employeeGuid) uniqueToastEmployeeIds.add(employeeGuid);
+      regularHours += toSafeNumber(row?.regular_hours);
+      overtimeHours += toSafeNumber(row?.overtime_hours);
+    });
+
+    return {
+      rows: normalizedRows.length,
+      uniqueEmployees: uniqueToastEmployeeIds.size,
+      regularHours,
+      overtimeHours,
+    };
+  }
+
+  function renderUploadReviewSection(baseline) {
+    const summary = buildUploadReviewSummary(baseline);
+    if (!summary) {
+      return `
+        <div class="statusCard review" style="margin-top:12px;">
+          <div class="statusCardTitle">Upload Review</div>
+          <div class="statusCardValue">PENDING</div>
+          <div class="muted" style="margin-top:4px;">No CSV uploaded for this pay period yet.</div>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="statusCard matched" style="margin-top:12px;">
+        <div class="statusCardTitle">Upload Review</div>
+        <div class="statusCardValue">READY</div>
+        <div class="muted" style="margin-top:4px;">CSV uploaded for selected pay period.</div>
+      </div>
+      <div class="summaryGrid" style="margin-top:10px;">
+        <div class="summaryMetric"><div class="summaryMetricLabel">Rows</div><div class="summaryMetricValue">${escapeHtml(String(summary.rows))}</div></div>
+        <div class="summaryMetric"><div class="summaryMetricLabel">Unique Employees</div><div class="summaryMetricValue">${escapeHtml(String(summary.uniqueEmployees))}</div></div>
+        <div class="summaryMetric"><div class="summaryMetricLabel">Regular Hours</div><div class="summaryMetricValue">${escapeHtml(summary.regularHours.toFixed(2))}</div></div>
+        <div class="summaryMetric"><div class="summaryMetricLabel">OT Hours</div><div class="summaryMetricValue">${escapeHtml(summary.overtimeHours.toFixed(2))}</div></div>
+      </div>
+    `;
+  }
+
   function renderComparisonStatusAndMetrics(comparison, fallbackCsvRowCount, fallbackApiRowCount) {
     const status = getToastComparisonStatus(comparison, fallbackCsvRowCount);
     const s = comparison && comparison.summary ? comparison.summary : null;
@@ -2274,6 +2338,7 @@
                 </div>`
               : ""
           }
+          ${renderUploadReviewSection(state.toastOriginalCsvBaseline)}
         </div>
       </div>
     `;
