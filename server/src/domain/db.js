@@ -83,11 +83,19 @@ async function initDb() {
       active BOOLEAN NOT NULL,
       internal_notification BOOLEAN NOT NULL,
       asana_task_mode TEXT NOT NULL CHECK (asana_task_mode IN ('SUMMARY','PER_FINDING')),
+      client_active BOOLEAN,
+      client_include_to_email BOOLEAN,
       params JSONB,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW(),
       PRIMARY KEY (client_location_id, rule_id)
     );
+
+    ALTER TABLE ops_rule_configs
+      ADD COLUMN IF NOT EXISTS client_active BOOLEAN;
+
+    ALTER TABLE ops_rule_configs
+      ADD COLUMN IF NOT EXISTS client_include_to_email BOOLEAN;
 
     CREATE INDEX IF NOT EXISTS idx_ops_rule_configs_location
       ON ops_rule_configs (client_location_id);
