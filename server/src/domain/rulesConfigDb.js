@@ -8,12 +8,14 @@ const DEFAULTS = {
   active: true,
   internal_notification: false,
   asana_task_mode: 'SUMMARY', // SUMMARY | PER_FINDING
+  client_active: null,
+  client_include_to_email: null,
   params: null,
 };
 
 async function getRuleConfigsForLocation(clientLocationId) {
   const { rows } = await db.query(
-    `SELECT rule_id, active, internal_notification, asana_task_mode, params
+    `SELECT rule_id, active, internal_notification, asana_task_mode, client_active, client_include_to_email, params
      FROM ops_rule_configs
      WHERE client_location_id = $1`,
     [clientLocationId]
@@ -59,7 +61,44 @@ async function upsertRuleConfig(clientLocationId, ruleId, config) {
   );
 }
 
+async function upsertClientRuleConfig(clientLocationId, ruleId, config) {
+  const clientActive = config.client_active;
+  const clientIncludeToEmail = config.client_include_to_email;
+  const params = config.params ?? null;
+
+  await db.query(
+    `INSERT INTO ops_rule_configs (
+        client_location_id,
+        rule_id,
+        active,
+        internal_notification,
+        asana_task_mode,
+        client_active,
+        client_include_to_email,
+        params,
+        updated_at
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+     ON CONFLICT (client_location_id, rule_id)
+     DO UPDATE SET
+       client_active = EXCLUDED.client_active,
+       client_include_to_email = EXCLUDED.client_include_to_email,
+       params = EXCLUDED.params,
+       updated_at = NOW()`,
+    [
+      clientLocationId,
+      ruleId,
+      DEFAULTS.active,
+      DEFAULTS.internal_notification,
+      DEFAULTS.asana_task_mode,
+      clientActive,
+      clientIncludeToEmail,
+      params,
+    ]
+  );
+}
+
 module.exports = {
   getRuleConfigsForLocation,
   upsertRuleConfig,
+  upsertClientRuleConfig,
 };

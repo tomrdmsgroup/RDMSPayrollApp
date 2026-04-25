@@ -39,7 +39,7 @@ const {
 } = require('../domain/toastPayrollBaselineService');
 
 const { rulesCatalog } = require('../domain/rulesCatalog');
-const { getRuleConfigsForLocation, upsertRuleConfig } = require('../domain/rulesConfigDb');
+const { getRuleConfigsForLocation, upsertRuleConfig, upsertClientRuleConfig } = require('../domain/rulesConfigDb');
 
 const {
   listExcludedStaffByLocation,
@@ -852,6 +852,76 @@ function router(req, res) {
             active,
             internal_notification: internalNotification,
             asana_task_mode: asanaTaskMode,
+            params,
+          });
+        }
+
+        return json(res, 200, { ok: true });
+      } catch (e) {
+        return handleError(res, e);
+      }
+    })();
+    return;
+  }
+
+  // Tab 2b: Client validation rules configuration (per location)
+  if (url.pathname === '/staff/client-rules' && req.method === 'GET') {
+    (async () => {
+      const user = await requireStaff(req, res);
+      if (!user) return;
+      try {
+        const locationName = url.searchParams.get('locationName');
+        if (!locationName) return json(res, 400, { error: 'locationName_required' });
+
+        const { byRuleId, defaults } = await getRuleConfigsForLocation(locationName);
+
+        const rules = rulesCatalog.map((rule) => {
+          const cfg = byRuleId[rule.rule_id] || {};
+          const internalActive = typeof cfg.active === 'boolean' ? cfg.active : defaults.active;
+          return {
+            rule_id: rule.rule_id,
+            rule_name: rule.rule_name,
+            definition: rule.definition,
+            rationale: rule.rationale,
+            params_required: !!rule.params_required,
+            params_hint: rule.params_hint || null,
+            params: cfg.params ?? defaults.params,
+            client_active: typeof cfg.client_active === 'boolean' ? cfg.client_active : internalActive,
+            client_include_to_email:
+              typeof cfg.client_include_to_email === 'boolean' ? cfg.client_include_to_email : true,
+          };
+        });
+
+        return json(res, 200, { rules });
+      } catch (e) {
+        return handleError(res, e);
+      }
+    })();
+    return;
+  }
+
+  if (url.pathname === '/staff/client-rules' && req.method === 'PUT') {
+    (async () => {
+      const user = await requireStaff(req, res);
+      if (!user) return;
+      try {
+        const locationName = url.searchParams.get('locationName');
+        if (!locationName) return json(res, 400, { error: 'locationName_required' });
+
+        const body = await parseBody(req);
+        const incoming = Array.isArray(body.rules) ? body.rules : [];
+
+        for (const row of incoming) {
+          const ruleId = row && row.rule_id ? String(row.rule_id) : null;
+          if (!ruleId) continue;
+
+          const clientActive = String(row.client_active).toUpperCase() === 'YES';
+          const clientIncludeToEmail = String(row.client_include_to_email).toUpperCase() === 'YES';
+          const params = row.params === undefined ? null : row.params;
+
+          await upsertClientRuleConfig(locationName, ruleId, {
+            client_active: clientActive,
+            client_include_to_email: clientIncludeToEmail,
             params,
           });
         }

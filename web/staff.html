@@ -609,6 +609,8 @@
     recap: null,
     rules: null,
     rulesLocationName: null,
+    clientRules: null,
+    clientRulesLocationName: null,
     excluded: [],
     excludedLocationName: null,
     employeeSearchResults: [],
@@ -696,8 +698,8 @@
     clientValidationConfig: {
       label: "Client Validation Config",
       main: "payrollValidation",
-      subtitle: "Coming soon.",
-      existing: false,
+      subtitle: "Control which validation rules are included in client-facing payroll validation emails.",
+      existing: true,
     },
     toastOriginal: {
       label: "Step 1: POS Import",
@@ -808,6 +810,11 @@
 
     if (nextTab === "outcome") {
       loadOutcomeSelectorForSelected();
+      return;
+    }
+
+    if (nextTab === "clientValidationConfig") {
+      loadClientRulesForSelected();
       return;
     }
 
@@ -1274,6 +1281,214 @@
     try {
       const q = encodeURIComponent(state.rulesLocationName);
       const { resp, body } = await apiPut(`/staff/rules?locationName=${q}`, { rules });
+      if (!resp.ok) {
+        alert(`Save failed: ${body.error || "unknown_error"}`);
+        return;
+      }
+      btn.textContent = "Saved";
+      setTimeout(() => {
+        btn.textContent = original;
+        btn.disabled = false;
+      }, 800);
+    } catch (e) {
+      alert(`Save failed: ${e.message || e}`);
+    } finally {
+      if (btn.textContent !== "Saved") {
+        btn.textContent = original;
+        btn.disabled = false;
+      }
+    }
+  }
+
+  async function loadClientRulesForSelected() {
+    const content = document.getElementById("content");
+    const sel = document.getElementById("locationSelect");
+    const name = sel.value;
+
+    state.clientRules = null;
+    state.clientRulesLocationName = name || null;
+
+    if (!name) {
+      content.innerHTML = "<div class='loading'>Select a location to load rules.</div>";
+      return;
+    }
+
+    content.innerHTML = "<div class='loading'>Loading rules...</div>";
+
+    const q = encodeURIComponent(name);
+    const { resp, body } = await apiGet(`/staff/client-rules?locationName=${q}`);
+    if (!resp.ok) {
+      content.innerHTML = `<div class="muted">Rules error: ${body.error || "unknown_error"}</div>`;
+      return;
+    }
+
+    state.clientRules = Array.isArray(body.rules) ? body.rules : [];
+    renderClientRules();
+  }
+
+  function renderClientRules() {
+    const content = document.getElementById("content");
+
+    if (!state.clientRulesLocationName) {
+      content.innerHTML = "<div class='loading'>Select a location to load rules.</div>";
+      return;
+    }
+
+    if (!state.clientRules) {
+      content.innerHTML = "<div class='loading'>Loading rules...</div>";
+      return;
+    }
+
+    const header = `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px;">
+        <div class="muted">Location: <b style="color:var(--text)">${escapeHtml(state.clientRulesLocationName)}</b></div>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <button class="btn primary" id="saveAllClientRulesBtn" type="button">Save all</button>
+          <button class="btn" id="reloadClientRulesBtn" type="button">Reload</button>
+        </div>
+      </div>
+      <div class="helperPanel">
+        <p class="helperPanelTitle">Column quick guide</p>
+        <ul class="helperList">
+          <li><b>Active:</b> rule runs during client validation</li>
+          <li><b>Include to Email:</b> includes the finding in the client validation email body</li>
+        </ul>
+      </div>
+    `;
+
+    const tableHead = `
+      <table>
+        <thead>
+          <tr>
+            <th style="width:140px;">Rule ID</th>
+            <th style="width:220px;">Rule Name</th>
+            <th style="width:170px;">Threshold / Setting</th>
+            <th>What it checks</th>
+            <th style="width:140px;">Active</th>
+            <th style="width:210px;">Include to Email</th>
+            <th style="width:120px;">Save</th>
+          </tr>
+        </thead>
+        <tbody>
+    `;
+
+    const rows = state.clientRules
+      .map((r) => {
+        const rid = escapeHtml(r.rule_id || "");
+        const rname = escapeHtml(r.rule_name || "");
+        const defRaw = String(r.definition || "");
+        const def = escapeHtml(defRaw);
+        const paramsRequired = !!r.params_required;
+        const paramsHint = escapeHtml(r.params_hint || "");
+        const paramsVal = r.params === null || r.params === undefined ? "" : String(r.params);
+        const paramsCell = paramsRequired
+          ? `<input class="input" data-field="params" placeholder="${paramsHint || "Enter value"}" value="${escapeAttr(paramsVal)}" />`
+          : `<span class="muted">No setting needed</span>`;
+
+        const clientActive = normalizeYesNo(!!r.client_active);
+        const includeToEmail = normalizeYesNo(!!r.client_include_to_email);
+
+        return `
+          <tr data-rule-id="${rid}">
+            <td><span class="mono">${rid}</span></td>
+            <td>${rname}</td>
+            <td>${paramsCell}</td>
+            <td>
+              <div class="defTip" data-full="${escapeAttr(defRaw)}">
+                <div class="defClamp">${def}</div>
+              </div>
+            </td>
+            <td>${yesNoSelect(clientActive, "client_active")}</td>
+            <td>${yesNoSelect(includeToEmail, "client_include_to_email")}</td>
+            <td><button class="btn" data-action="save-client-row" type="button">Save</button></td>
+          </tr>
+        `;
+      })
+      .join("");
+
+    const tableFoot = `
+        </tbody>
+      </table>
+      <div class="muted" style="margin-top:10px;">
+        Defaults: Active matches Internal Active (or YES if missing), Include to Email YES.
+      </div>
+    `;
+
+    content.innerHTML = header + tableHead + rows + tableFoot;
+
+    document.getElementById("saveAllClientRulesBtn").addEventListener("click", saveAllClientRules);
+    document.getElementById("reloadClientRulesBtn").addEventListener("click", () => loadClientRulesForSelected());
+
+    content.querySelectorAll("button[data-action='save-client-row']").forEach((btn) => {
+      btn.addEventListener("click", async (e) => {
+        const tr = e.target.closest("tr");
+        if (!tr) return;
+        await saveClientRuleRow(tr);
+      });
+    });
+  }
+
+  function collectClientRowPayload(tr) {
+    const ruleId = tr.getAttribute("data-rule-id");
+    const getSelectVal = (field) => {
+      const sel = tr.querySelector(`select[data-field='${field}']`);
+      return sel ? sel.value : "NO";
+    };
+
+    const paramsInput = tr.querySelector("input[data-field='params']");
+    const params = paramsInput ? paramsInput.value.trim() : null;
+
+    return {
+      rule_id: ruleId,
+      client_active: getSelectVal("client_active"),
+      client_include_to_email: getSelectVal("client_include_to_email"),
+      params: params === "" ? null : params,
+    };
+  }
+
+  async function saveClientRuleRow(tr) {
+    const btn = tr.querySelector("button[data-action='save-client-row']");
+    const original = btn.textContent;
+    btn.textContent = "Saving...";
+    btn.disabled = true;
+
+    try {
+      const payload = collectClientRowPayload(tr);
+      const q = encodeURIComponent(state.clientRulesLocationName);
+      const { resp, body } = await apiPut(`/staff/client-rules?locationName=${q}`, { rules: [payload] });
+      if (!resp.ok) {
+        alert(`Save failed: ${body.error || "unknown_error"}`);
+        return;
+      }
+      btn.textContent = "Saved";
+      setTimeout(() => {
+        btn.textContent = original;
+        btn.disabled = false;
+      }, 600);
+    } catch (e) {
+      alert(`Save failed: ${e.message || e}`);
+    } finally {
+      if (btn.textContent !== "Saved") {
+        btn.textContent = original;
+        btn.disabled = false;
+      }
+    }
+  }
+
+  async function saveAllClientRules() {
+    if (!state.clientRulesLocationName) return;
+    const content = document.getElementById("content");
+    const rows = Array.from(content.querySelectorAll("tr[data-rule-id]"));
+    const rules = rows.map(collectClientRowPayload);
+
+    const btn = document.getElementById("saveAllClientRulesBtn");
+    const original = btn.textContent;
+    btn.textContent = "Saving...";
+    btn.disabled = true;
+
+    try {
+      const q = encodeURIComponent(state.clientRulesLocationName);
+      const { resp, body } = await apiPut(`/staff/client-rules?locationName=${q}`, { rules });
       if (!resp.ok) {
         alert(`Save failed: ${body.error || "unknown_error"}`);
         return;
@@ -3618,6 +3833,9 @@
     const tab = state.tab;
     state.recap = null;
     state.rules = null;
+    state.rulesLocationName = null;
+    state.clientRules = null;
+    state.clientRulesLocationName = null;
     state.outcomeSelector = null;
     state.outcomeResult = null;
     state.toastOriginalSelector = null;
@@ -3636,6 +3854,7 @@
 
     if (tab === "confirmations") await loadRecapForSelected();
     else if (tab === "rules") await loadRulesForSelected();
+    else if (tab === "clientValidationConfig") await loadClientRulesForSelected();
     else if (tab === "excluded") await loadExcludedForSelected();
     else if (tab === "outcome") await loadOutcomeSelectorForSelected();
     else if (tab === "toastOriginal" || tab === "earningsAudit" || tab === "earningsComparison" || tab === "earningsWipExport")
