@@ -646,6 +646,10 @@
     toastOriginalLastUploadResponse: null,
     toastOriginalLastApiLoadResponse: null,
     earningsWipOverrideConfirmed: false,
+    dashboardRows: null,
+    dashboardLoading: false,
+    dashboardError: "",
+    dashboardLastRefreshedAt: null,
   };
   let excludedSearchDebounceTimer = null;
 
@@ -662,8 +666,8 @@
     dashboard: {
       label: "Payroll Dashboard",
       main: "dashboardMain",
-      subtitle: "Coming soon.",
-      existing: false,
+      subtitle: "Active payrolls from pay period end date through submit date.",
+      existing: true,
     },
     excluded: {
       label: "Employee Exemptions",
@@ -795,6 +799,11 @@
 
     if (nextTab === "confirmations") {
       renderConfirmations();
+      return;
+    }
+
+    if (nextTab === "dashboard") {
+      loadPayrollDashboard();
       return;
     }
 
@@ -1071,6 +1080,114 @@
         Goal: help payroll staff quickly understand what is set up, what is missing, and where to fix it.
       </div>
     `;
+  }
+
+  function formatLocalRefreshTimestamp(iso) {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "—";
+    return d.toLocaleString();
+  }
+
+  function dashDate(v) {
+    return v ? escapeHtml(String(v)) : "—";
+  }
+
+  function renderPayrollDashboard() {
+    const content = document.getElementById("content");
+    const rows = Array.isArray(state.dashboardRows) ? state.dashboardRows : [];
+
+    if (state.dashboardLoading && !state.dashboardRows) {
+      content.innerHTML = "<div class='loading'>Loading payroll dashboard...</div>";
+      return;
+    }
+
+    if (state.dashboardError && !state.dashboardRows) {
+      content.innerHTML = `<div class="muted">Payroll dashboard error: ${escapeHtml(
+        state.dashboardError
+      )}</div>`;
+      return;
+    }
+
+    const tableRows = rows.length
+      ? rows
+          .map(
+            (row) => `
+          <tr>
+            <td>${escapeHtml(row.client_name || "")}</td>
+            <td>${escapeHtml(row.payroll_calendar || "")}</td>
+            <td>${escapeHtml(row.pr_lead || "")}</td>
+            <td>${dashDate(row.payroll_start_date)}</td>
+            <td>${dashDate(row.payroll_end_date)}</td>
+            <td>${dashDate(row.validation_date)}</td>
+            <td>${dashDate(row.submit_date)}</td>
+            <td>${escapeHtml(row.validated_by_client || "No")}</td>
+          </tr>
+        `
+          )
+          .join("")
+      : `<tr><td colspan="8" class="muted">No active payrolls found for today.</td></tr>`;
+
+    content.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap;">
+        <button class="btn primary" id="refreshDashboardBtn" type="button" ${state.dashboardLoading ? "disabled" : ""}>
+          ${state.dashboardLoading ? "Refreshing..." : "Refresh Payroll Dashboard"}
+        </button>
+        <div class="muted">Last refreshed: ${escapeHtml(formatLocalRefreshTimestamp(state.dashboardLastRefreshedAt))}</div>
+      </div>
+      ${state.dashboardError ? `<div class="muted" style="margin-bottom:10px;">Payroll dashboard error: ${escapeHtml(state.dashboardError)}</div>` : ""}
+      <table>
+        <thead>
+          <tr>
+            <th>Client Name</th>
+            <th>Payroll Calendar</th>
+            <th>PR Lead</th>
+            <th>Payroll Start Date</th>
+            <th>Payroll End Date</th>
+            <th>Validation Date</th>
+            <th>Submit Date</th>
+            <th>Validated by Client</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${tableRows}
+        </tbody>
+      </table>
+    `;
+
+    const refreshBtn = document.getElementById("refreshDashboardBtn");
+    if (refreshBtn) refreshBtn.addEventListener("click", () => loadPayrollDashboard({ forceRefresh: true }));
+  }
+
+  async function loadPayrollDashboard({ forceRefresh = false } = {}) {
+    if (!forceRefresh && Array.isArray(state.dashboardRows)) {
+      renderPayrollDashboard();
+      return;
+    }
+
+    state.dashboardLoading = true;
+    state.dashboardError = "";
+    renderPayrollDashboard();
+
+    try {
+      const { resp, body } = await apiGet("/staff/payroll-dashboard-active");
+      if (!resp.ok) {
+        state.dashboardError = body.error || "unknown_error";
+        state.dashboardRows = null;
+        state.dashboardLastRefreshedAt = null;
+        return;
+      }
+
+      state.dashboardRows = Array.isArray(body.rows) ? body.rows : [];
+      state.dashboardLastRefreshedAt = body.refreshed_at || new Date().toISOString();
+    } catch (err) {
+      state.dashboardError = (err && err.message) || "unknown_error";
+      state.dashboardRows = null;
+      state.dashboardLastRefreshedAt = null;
+    } finally {
+      state.dashboardLoading = false;
+      renderPayrollDashboard();
+    }
   }
 
   function yesNoSelect(value, id) {
@@ -3851,8 +3968,13 @@
     state.toastOriginalLastUploadResponse = null;
     state.toastOriginalLastApiLoadResponse = null;
     state.earningsWipOverrideConfirmed = false;
+    state.dashboardRows = null;
+    state.dashboardLoading = false;
+    state.dashboardError = "";
+    state.dashboardLastRefreshedAt = null;
 
-    if (tab === "confirmations") await loadRecapForSelected();
+    if (tab === "dashboard") await loadPayrollDashboard();
+    else if (tab === "confirmations") await loadRecapForSelected();
     else if (tab === "rules") await loadRulesForSelected();
     else if (tab === "clientValidationConfig") await loadClientRulesForSelected();
     else if (tab === "excluded") await loadExcludedForSelected();

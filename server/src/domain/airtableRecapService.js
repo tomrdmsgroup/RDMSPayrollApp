@@ -412,8 +412,183 @@ async function getPayPeriodSelectorForLocationName(locationName) {
   };
 }
 
+function normalizeScalarOrArray(value) {
+  if (value === null || value === undefined) return [];
+  if (Array.isArray(value)) {
+    return value
+      .map((v) => (v === null || v === undefined ? '' : String(v).trim()))
+      .filter(Boolean);
+  }
+  const trimmed = String(value).trim();
+  return trimmed ? [trimmed] : [];
+}
+
+function isReadableLeadValue(value) {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return false;
+  return !/^rec[a-zA-Z0-9]{14}$/.test(trimmed);
+}
+
+function resolvePrLeadDisplay(vitals) {
+  const candidateFields = [
+    'PR Lead',
+    'PR Lead Name',
+    'PR Lead Names',
+    'PR Lead (from PR Lead)',
+    'PR Lead Lookup',
+  ];
+
+  for (const fieldName of candidateFields) {
+    const values = normalizeScalarOrArray(vitals[fieldName]).filter(isReadableLeadValue);
+    if (values.length) return values.join(', ');
+  }
+
+  const fallbackFields = ['PR Lead Email Lookup', 'PR Lead Email'];
+  for (const fieldName of fallbackFields) {
+    const values = normalizeScalarOrArray(vitals[fieldName]);
+    if (values.length) return values.join(', ');
+  }
+
+  return '';
+}
+
+function getTodayYmdForTimeZone(timeZone) {
+  const tz = String(timeZone || '').trim();
+  if (!tz) return toYmd(new Date().toISOString());
+
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(new Date());
+
+    const get = (type) => parts.find((p) => p.type === type)?.value;
+    const year = get('year');
+    const month = get('month');
+    const day = get('day');
+    if (!year || !month || !day) return toYmd(new Date().toISOString());
+    return `${year}-${month}-${day}`;
+  } catch (_) {
+    return toYmd(new Date().toISOString());
+  }
+}
+
+function sortDashboardRows(rows) {
+  return rows.sort((a, b) => {
+    const submitCompare = String(a.submit_date || '').localeCompare(String(b.submit_date || ''));
+    if (submitCompare !== 0) return submitCompare;
+
+    const validationCompare = String(a.validation_date || '').localeCompare(String(b.validation_date || ''));
+    if (validationCompare !== 0) return validationCompare;
+
+    return String(a.client_name || '').localeCompare(String(b.client_name || ''));
+  });
+}
+
+async function getActivePayrollDashboardRows() {
+  const vitalsTable = requireEnv('AIRTABLE_VITALS_TABLE');
+  const locationField = requireEnv('AIRTABLE_VITALS_LOCATION_FIELD');
+  const payrollDetailsTable = requireEnv('AIRTABLE_PAYROLL_CALENDAR_DETAILS_TABLE');
+
+  const vitalsRecords = await airtableListAll({
+    table: vitalsTable,
+    fields: [
+      locationField,
+      'Payroll Calendar (from PR Calendar)',
+      'Payroll Calendar',
+      'PR Calendar Name',
+      'PR Lead',
+      'PR Lead Name',
+      'PR Lead Names',
+      'PR Lead (from PR Lead)',
+      'PR Lead Lookup',
+      'PR Lead Email Lookup',
+      'PR Lead Email',
+      'Time Zone',
+      'PR Validation APP Active?',
+    ],
+  });
+
+  const clientConfigs = vitalsRecords
+    .map((record) => {
+      const fields = record.fields || {};
+      const clientName = (fields[locationField] || '').toString().trim();
+      const calendarName =
+        fields['Payroll Calendar (from PR Calendar)'] || fields['Payroll Calendar'] || fields['PR Calendar Name'] || null;
+      return {
+        client_name: clientName,
+        payroll_calendar: calendarName ? String(calendarName).trim() : '',
+        pr_lead: resolvePrLeadDisplay(fields),
+        time_zone: (fields['Time Zone'] || '').toString().trim(),
+        app_active: fields['PR Validation APP Active?'] === true,
+      };
+    })
+    .filter((row) => row.client_name && row.payroll_calendar && row.app_active);
+
+  if (!clientConfigs.length) {
+    return {
+      refreshed_at: new Date().toISOString(),
+      rows: [],
+    };
+  }
+
+  const detailRecords = await airtableListAll({
+    table: payrollDetailsTable,
+    fields: [
+      'PR Calendar Name - Master',
+      'PR Period Start Date',
+      'PR Period End Date',
+      'PR Period Validation Date',
+      'PR Period Submit Date',
+    ],
+  });
+
+  const detailsByCalendar = new Map();
+  for (const rec of detailRecords) {
+    const fields = rec.fields || {};
+    const key = (fields['PR Calendar Name - Master'] || '').toString().trim();
+    if (!key) continue;
+    if (!detailsByCalendar.has(key)) detailsByCalendar.set(key, []);
+    detailsByCalendar.get(key).push(fields);
+  }
+
+  const rows = [];
+  for (const client of clientConfigs) {
+    const calendarRows = detailsByCalendar.get(client.payroll_calendar) || [];
+    const todayYmd = getTodayYmdForTimeZone(client.time_zone);
+
+    for (const fields of calendarRows) {
+      const startDate = toYmd(fields['PR Period Start Date']);
+      const endDate = toYmd(fields['PR Period End Date']);
+      const validationDate = toYmd(fields['PR Period Validation Date']);
+      const submitDate = toYmd(fields['PR Period Submit Date']);
+      if (!endDate || !submitDate) continue;
+      if (!(endDate <= todayYmd && todayYmd <= submitDate)) continue;
+
+      rows.push({
+        client_name: client.client_name,
+        payroll_calendar: client.payroll_calendar,
+        pr_lead: client.pr_lead || '',
+        payroll_start_date: startDate,
+        payroll_end_date: endDate,
+        validation_date: validationDate,
+        submit_date: submitDate,
+        validated_by_client: 'No',
+      });
+    }
+  }
+
+  return {
+    refreshed_at: new Date().toISOString(),
+    rows: sortDashboardRows(rows),
+  };
+}
+
 module.exports = {
   listLocationNames,
   getRecapForLocationName,
   getPayPeriodSelectorForLocationName,
+  getActivePayrollDashboardRows,
 };

@@ -24,6 +24,7 @@ const {
   listLocationNames,
   getRecapForLocationName,
   getPayPeriodSelectorForLocationName,
+  getActivePayrollDashboardRows,
 } = require('../domain/airtableRecapService');
 const { searchToastEmployeesForLocation } = require('../domain/toastBarrioProofService');
 const { fetchOriginalToastPayPeriodData } = require('../domain/toastOriginalPayPeriodService');
@@ -354,6 +355,20 @@ function router(req, res) {
         if (!locationName) return json(res, 400, { error: 'locationName_required' });
         const selector = await getPayPeriodSelectorForLocationName(locationName);
         return json(res, 200, { selector });
+      } catch (e) {
+        return handleError(res, e);
+      }
+    })();
+    return;
+  }
+
+  if (url.pathname === '/staff/payroll-dashboard-active' && req.method === 'GET') {
+    (async () => {
+      const user = await requireStaff(req, res);
+      if (!user) return;
+      try {
+        const dashboard = await getActivePayrollDashboardRows();
+        return json(res, 200, dashboard);
       } catch (e) {
         return handleError(res, e);
       }
