@@ -650,6 +650,7 @@
 
   const state = {
     tab: "dashboard",
+    currentUserEmail: "",
     locations: [],
     recap: null,
     rules: null,
@@ -699,6 +700,12 @@
     dashboardLoading: false,
     dashboardError: "",
     dashboardLastRefreshedAt: null,
+    recapReportSelector: null,
+    recapReportSelectionBucket: "",
+    recapReportSelectionPriorRecordId: "",
+    recapReportRules: null,
+    recapReportLoading: false,
+    recapReportError: "",
   };
   let excludedSearchDebounceTimer = null;
 
@@ -708,7 +715,7 @@
     { key: "payrollValidation", label: "Payroll Validation", tabs: ["rules", "outcome", "clientValidationConfig"] },
     { key: "earningsAuditMain", label: "Earnings Audit", tabs: ["toastOriginal", "earningsAudit", "earningsComparison", "earningsWipExport"] },
     { key: "tipsAudit", label: "Tips Audit", tabs: ["tipImport"] },
-    { key: "reportsMain", label: "Reports", tabs: ["payrollExport", "reports"] },
+    { key: "reportsMain", label: "Reports", tabs: ["payrollRecapReport", "payrollExport", "reports"] },
   ];
 
   const TAB_META = {
@@ -783,6 +790,12 @@
       main: "tipsAudit",
       subtitle: "Coming soon.",
       existing: false,
+    },
+    payrollRecapReport: {
+      label: "Payroll Recap Report",
+      main: "reportsMain",
+      subtitle: "Generate copyable payroll recap notes for the payroll preview email.",
+      existing: true,
     },
     payrollExport: {
       label: "Step 4: Payroll Export",
@@ -913,6 +926,11 @@
       return;
     }
 
+    if (nextTab === "payrollRecapReport") {
+      loadPayrollRecapReportForSelected();
+      return;
+    }
+
     renderComingSoonPage(meta.label);
   }
 
@@ -961,6 +979,7 @@
       window.location.href = "/auth/google";
       return;
     }
+    state.currentUserEmail = body.user.email || "";
     document.getElementById("userLabel").textContent = `${body.user.email} (${body.user.role})`;
   }
 
@@ -2195,7 +2214,48 @@
     return null;
   }
 
+  function recapReportSelectedPeriod() {
+    const selector = state.recapReportSelector || {};
+    if (state.recapReportSelectionBucket === "current") return selector.current_pay_period || null;
+    if (state.recapReportSelectionBucket === "next") return selector.next_pay_period || null;
+    if (state.recapReportSelectionBucket === "prior") {
+      const list = Array.isArray(selector.prior_pay_periods) ? selector.prior_pay_periods : [];
+      return list.find((p) => String(p.record_id) === String(state.recapReportSelectionPriorRecordId)) || null;
+    }
+    return null;
+  }
+
   function buildOutcomePeriodOptions(selector) {
+    const options = [];
+    if (selector?.next_pay_period) {
+      options.push({
+        bucket: "next",
+        recordId: "",
+        value: "next",
+        label: `${fmtDateRange(selector.next_pay_period.start_date, selector.next_pay_period.end_date)}    Next Pay Period`,
+      });
+    }
+    if (selector?.current_pay_period) {
+      options.push({
+        bucket: "current",
+        recordId: "",
+        value: "current",
+        label: `${fmtDateRange(selector.current_pay_period.start_date, selector.current_pay_period.end_date)}    Current Pay Period`,
+      });
+    }
+    const prior = Array.isArray(selector?.prior_pay_periods) ? selector.prior_pay_periods : [];
+    prior.forEach((p) => {
+      options.push({
+        bucket: "prior",
+        recordId: String(p.record_id || ""),
+        value: `prior:${String(p.record_id || "")}`,
+        label: fmtDateRange(p.start_date, p.end_date),
+      });
+    });
+    return options;
+  }
+
+  function buildRecapReportPeriodOptions(selector) {
     const options = [];
     if (selector?.next_pay_period) {
       options.push({
@@ -2252,6 +2312,279 @@
 
     state.outcomeSelectionBucket = preferred.bucket;
     state.outcomeSelectionPriorRecordId = preferred.recordId;
+  }
+
+  function ensureRecapReportSelection(selector) {
+    const options = buildRecapReportPeriodOptions(selector);
+    if (!options.length) {
+      state.recapReportSelectionBucket = "";
+      state.recapReportSelectionPriorRecordId = "";
+      return;
+    }
+
+    const selectedValue =
+      state.recapReportSelectionBucket === "prior"
+        ? `prior:${String(state.recapReportSelectionPriorRecordId || "")}`
+        : state.recapReportSelectionBucket || "";
+    const existing = options.find((opt) => opt.value === selectedValue);
+    if (existing) {
+      state.recapReportSelectionBucket = existing.bucket;
+      state.recapReportSelectionPriorRecordId = existing.recordId;
+      return;
+    }
+
+    const defaultBucket = selector?.default_selection?.bucket || "";
+    const defaultRecordId = String(selector?.default_selection?.record_id || selector?.default_selection?.prior_record_id || "");
+    const defaultValue = defaultBucket === "prior" ? `prior:${defaultRecordId}` : defaultBucket;
+    const preferred = options.find((opt) => opt.value === defaultValue) || options[0];
+    state.recapReportSelectionBucket = preferred.bucket;
+    state.recapReportSelectionPriorRecordId = preferred.recordId;
+  }
+
+  function findOutcomePeriodRange(outcome) {
+    const selected = outcome?.validation_context?.selected_period || {};
+    const start = selected.period_start || selected.start_date || null;
+    const end = selected.period_end || selected.end_date || null;
+    if (!start || !end) return null;
+    return { start, end };
+  }
+
+  function buildPayrollRecapText({ locationName, selectedPeriod, includedRules, outcome }) {
+    const lines = [];
+    const start = selectedPeriod?.start_date || "";
+    const end = selectedPeriod?.end_date || "";
+    lines.push(`Payroll recap for ${locationName || "Selected location"}`);
+    lines.push(`Pay period: ${start && end ? `${start} to ${end}` : "Not selected"}`);
+    lines.push("Client validation status: Not verified by client");
+    lines.push("");
+    lines.push("Validation recap:");
+
+    if (!selectedPeriod) {
+      lines.push("Select a pay period before generating the payroll recap report.");
+      return { text: lines.join("\n"), mappingError: false };
+    }
+
+    if (!outcome) {
+      lines.push("Internal validation has not been run for this pay period yet.");
+      return { text: lines.join("\n"), mappingError: false };
+    }
+
+    const outcomeRange = findOutcomePeriodRange(outcome);
+    if (!outcomeRange || outcomeRange.start !== start || outcomeRange.end !== end) {
+      lines.push("Internal validation has not been run for this pay period yet.");
+      return { text: lines.join("\n"), mappingError: false };
+    }
+
+    const findings = Array.isArray(outcome.findings) ? outcome.findings : [];
+    const includedRuleIds = new Set(includedRules.map((rule) => String(rule.rule_id || "").trim()).filter(Boolean));
+    const findingsWithRuleIds = findings.filter((finding) => String(finding?.rule_id || "").trim());
+    const includedFindings = findingsWithRuleIds.filter((finding) => includedRuleIds.has(String(finding.rule_id || "").trim()));
+    const mappingError = findings.length > 0 && findingsWithRuleIds.length === 0;
+    if (mappingError) {
+      lines.push("Preview recap findings cannot be generated until validation results are available with rule IDs.");
+      return { text: lines.join("\n"), mappingError: true };
+    }
+
+    if (!includedFindings.length) {
+      lines.push("No preview recap validation items were noted for this pay period.");
+      return { text: lines.join("\n"), mappingError: false };
+    }
+
+    includedFindings.forEach((finding) => {
+      const rule = finding.rule_name || finding.rule_id || "Validation rule";
+      const detail = finding.detail || finding.message || "Review internal validation report for details.";
+      lines.push(`- ${rule}: ${detail}`);
+    });
+
+    return { text: lines.join("\n"), mappingError: false };
+  }
+
+  function renderPayrollRecapReportTab() {
+    const content = document.getElementById("content");
+    const locationName = document.getElementById("locationSelect").value;
+    if (!locationName) {
+      content.innerHTML = "<div class='loading'>Select a location to open Payroll Recap Report.</div>";
+      return;
+    }
+
+    if (state.recapReportLoading) {
+      content.innerHTML = "<div class='loading'>Loading payroll recap report...</div>";
+      return;
+    }
+
+    if (!state.recapReportSelector) {
+      content.innerHTML = "<div class='loading'>Loading pay period selector...</div>";
+      return;
+    }
+
+    const selector = state.recapReportSelector;
+    ensureRecapReportSelection(selector);
+    const selectedPeriod = recapReportSelectedPeriod();
+    const selectedRange = fmtDateRange(selectedPeriod?.start_date, selectedPeriod?.end_date);
+    const generatedAt = new Date().toLocaleString();
+    const includedRules = (Array.isArray(state.recapReportRules) ? state.recapReportRules : []).filter(
+      (rule) => !!rule?.include_in_preview_recap_report
+    );
+    const recapResult = buildPayrollRecapText({
+      locationName,
+      selectedPeriod,
+      includedRules,
+      outcome: state.outcomeResult?.outcome || null,
+    });
+
+    const includedRulesHtml = includedRules.length
+      ? `
+      <div class="sectionTitle">Included Rules</div>
+      <ul>
+        ${includedRules
+          .map(
+            (rule) =>
+              `<li>${escapeHtml(rule.rule_name || rule.rule_id || "Rule")} — Included in Preview Recap Report: YES</li>`
+          )
+          .join("")}
+      </ul>
+    `
+      : "";
+
+    const options = buildRecapReportPeriodOptions(selector);
+
+    content.innerHTML = `
+      <div class="stack">
+        <div class="panel">
+          <div class="sectionTitle" style="margin-top:0;">Report Header</div>
+          ${state.recapReportError ? `<div class="muted" style="margin-bottom:10px;">${escapeHtml(state.recapReportError)}</div>` : ""}
+          <div class="summaryGrid">
+            <div class="summaryMetric"><div class="summaryMetricLabel">Location</div><div class="summaryMetricValue">${escapeHtml(locationName)}</div></div>
+            <div class="summaryMetric"><div class="summaryMetricLabel">Pay Period</div><div class="summaryMetricValue">${escapeHtml(selectedRange || "Select a pay period before generating the payroll recap report.")}</div></div>
+            <div class="summaryMetric"><div class="summaryMetricLabel">Payroll Company</div><div class="summaryMetricValue">${escapeHtml(state.recap?.payroll_company || "Not available")}</div></div>
+            <div class="summaryMetric"><div class="summaryMetricLabel">Client Validation Status</div><div class="summaryMetricValue">Not verified by client</div></div>
+            <div class="summaryMetric"><div class="summaryMetricLabel">Generated By</div><div class="summaryMetricValue">${escapeHtml(state.currentUserEmail || "Unknown user")}</div></div>
+            <div class="summaryMetric"><div class="summaryMetricLabel">Generated At</div><div class="summaryMetricValue">${escapeHtml(generatedAt)}</div></div>
+          </div>
+          ${
+            options.length
+              ? `
+          <label style="display:block;margin-top:12px;">
+            <div class="muted" style="margin-bottom:6px;">Pay Period</div>
+            <select id="recapReportPayPeriodSelect" style="width:min(620px,100%);">
+              ${options
+                .map((opt) => {
+                  const selectedValue =
+                    state.recapReportSelectionBucket === "prior"
+                      ? `prior:${String(state.recapReportSelectionPriorRecordId || "")}`
+                      : state.recapReportSelectionBucket;
+                  return `<option value="${escapeAttr(opt.value)}" ${selectedValue === opt.value ? "selected" : ""}>${escapeHtml(
+                    opt.label
+                  )}</option>`;
+                })
+                .join("")}
+            </select>
+          </label>`
+              : `<div class="muted" style="margin-top:12px;">Select a pay period before generating the payroll recap report.</div>`
+          }
+        </div>
+
+        <div class="panel">
+          <div class="sectionTitle" style="margin-top:0;">Preview Recap Notes</div>
+          <textarea id="payrollRecapText" class="input" style="min-height:240px;resize:vertical;font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;">${escapeHtml(
+            recapResult.text
+          )}</textarea>
+          <div class="row" style="margin-top:12px;">
+            <button class="btn primary" id="copyRecapTextBtn" type="button">Copy Recap Text</button>
+          </div>
+          ${recapResult.mappingError ? `<div class="muted" style="margin-top:8px;">Preview recap findings cannot be generated until validation results are available with rule IDs.</div>` : ""}
+          ${includedRulesHtml}
+        </div>
+      </div>
+    `;
+
+    const payPeriodSelect = document.getElementById("recapReportPayPeriodSelect");
+    if (payPeriodSelect) {
+      payPeriodSelect.addEventListener("change", () => {
+        const val = String(payPeriodSelect.value || "");
+        if (val.startsWith("prior:")) {
+          state.recapReportSelectionBucket = "prior";
+          state.recapReportSelectionPriorRecordId = val.slice(6);
+        } else {
+          state.recapReportSelectionBucket = val;
+          state.recapReportSelectionPriorRecordId = "";
+        }
+        renderPayrollRecapReportTab();
+      });
+    }
+
+    const copyBtn = document.getElementById("copyRecapTextBtn");
+    const recapTextArea = document.getElementById("payrollRecapText");
+    if (copyBtn && recapTextArea) {
+      copyBtn.addEventListener("click", async () => {
+        const text = recapTextArea.value || "";
+        try {
+          await navigator.clipboard.writeText(text);
+          copyBtn.textContent = "Copied";
+          setTimeout(() => {
+            copyBtn.textContent = "Copy Recap Text";
+          }, 1000);
+        } catch (err) {
+          recapTextArea.focus();
+          recapTextArea.select();
+          document.execCommand("copy");
+          copyBtn.textContent = "Copied";
+          setTimeout(() => {
+            copyBtn.textContent = "Copy Recap Text";
+          }, 1000);
+        }
+      });
+    }
+  }
+
+  async function loadPayrollRecapReportForSelected() {
+    const content = document.getElementById("content");
+    const locationName = document.getElementById("locationSelect").value;
+
+    state.recapReportSelector = null;
+    state.recapReportRules = null;
+    state.recapReportLoading = false;
+    state.recapReportError = "";
+    state.recapReportSelectionBucket = "";
+    state.recapReportSelectionPriorRecordId = "";
+
+    if (!locationName) {
+      content.innerHTML = "<div class='loading'>Select a location to open Payroll Recap Report.</div>";
+      return;
+    }
+
+    state.recapReportLoading = true;
+    renderPayrollRecapReportTab();
+
+    const q = encodeURIComponent(locationName);
+    try {
+      const [selectorRes, recapRes, rulesRes] = await Promise.all([
+        apiGet(`/staff/pay-period-selector?locationName=${q}`),
+        apiGet(`/staff/recap?locationName=${q}`),
+        apiGet(`/staff/rules?locationName=${q}`),
+      ]);
+
+      if (selectorRes.resp.ok) state.recapReportSelector = selectorRes.body.selector || {};
+      else state.recapReportError = `Pay period selector error: ${selectorRes.body.error || "unknown_error"}`;
+
+      if (recapRes.resp.ok) state.recap = recapRes.body.recap || null;
+      else if (!state.recapReportError) state.recapReportError = `Recap error: ${recapRes.body.error || "unknown_error"}`;
+
+      if (rulesRes.resp.ok) state.recapReportRules = Array.isArray(rulesRes.body.rules) ? rulesRes.body.rules : [];
+      else if (!state.recapReportError) state.recapReportError = `Rules error: ${rulesRes.body.error || "unknown_error"}`;
+    } catch (err) {
+      state.recapReportError = (err && err.message) || "load_failed";
+      state.recapReportSelector = { current_pay_period: null, next_pay_period: null, prior_pay_periods: [] };
+      state.recapReportRules = [];
+    } finally {
+      if (!state.recapReportSelector) {
+        state.recapReportSelector = { current_pay_period: null, next_pay_period: null, prior_pay_periods: [] };
+      }
+      if (!Array.isArray(state.recapReportRules)) state.recapReportRules = [];
+      state.recapReportLoading = false;
+      ensureRecapReportSelection(state.recapReportSelector);
+      renderPayrollRecapReportTab();
+    }
   }
 
   function buildToastOriginalPeriodOptions(selector) {
@@ -4213,6 +4546,12 @@
     state.dashboardLoading = false;
     state.dashboardError = "";
     state.dashboardLastRefreshedAt = null;
+    state.recapReportSelector = null;
+    state.recapReportSelectionBucket = "";
+    state.recapReportSelectionPriorRecordId = "";
+    state.recapReportRules = null;
+    state.recapReportLoading = false;
+    state.recapReportError = "";
 
     if (tab === "dashboard") await loadPayrollDashboard();
     else if (tab === "confirmations") await loadRecapForSelected();
@@ -4221,6 +4560,7 @@
     else if (tab === "communicationSetup") await loadCommunicationSetupForSelected();
     else if (tab === "excluded") await loadExcludedForSelected();
     else if (tab === "outcome") await loadOutcomeSelectorForSelected();
+    else if (tab === "payrollRecapReport") await loadPayrollRecapReportForSelected();
     else if (tab === "toastOriginal" || tab === "earningsAudit" || tab === "earningsComparison" || tab === "earningsWipExport")
       await loadToastOriginalSelectorForSelected();
   });
