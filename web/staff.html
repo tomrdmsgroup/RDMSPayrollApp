@@ -108,6 +108,12 @@
         gap: 8px;
         flex-wrap: wrap;
       }
+      .tabs.submenu {
+        margin-top: 8px;
+      }
+      .tabs.submenu.hidden {
+        display: none;
+      }
       .tab {
         border: 1px solid var(--border);
         background: #f9fafb;
@@ -461,20 +467,14 @@
     </div>
   </div>
 
-  <div class="tabs" id="tabs">
-    <div class="tab active" data-tab="confirmations">Client Info Confirmations</div>
-    <div class="tab" data-tab="rules">Payroll Validation Rules</div>
-    <div class="tab" data-tab="outcome">Pay Period Validation Outcome</div>
-    <div class="tab" data-tab="toastOriginal">Toast Pay Period Data - Original</div>
-    <div class="tab" data-tab="excluded">Excluded Staff</div>
-    <div class="tab" data-tab="reports">RDMS Manual Reporting</div>
-  </div>
+  <div class="tabs" id="mainTabs"></div>
+  <div class="tabs submenu" id="subTabs"></div>
 
   <div class="page" id="page">
     <div class="pagetitle">
       <div>
-        <h1 id="pageTitle">Client Info Confirmations</h1>
-        <p class="sub" id="pageSub">Pick a location to see every required field in one place.</p>
+        <h1 id="pageTitle">Payroll Dashboard</h1>
+        <p class="sub" id="pageSub">Coming soon.</p>
       </div>
     </div>
 
@@ -501,7 +501,7 @@
   }
 
   const state = {
-    tab: "confirmations",
+    tab: "dashboard",
     locations: [],
     recap: null,
     rules: null,
@@ -540,59 +540,164 @@
     toastOriginalLastApiLoadResponse: null,
   };
 
+  const NAV_CONFIG = [
+    { key: "dashboardMain", label: "Payroll Dashboard", tabs: [] },
+    { key: "setup", label: "Setup", tabs: ["excluded", "confirmations", "communicationSetup"] },
+    { key: "payrollValidation", label: "Payroll Validation", tabs: ["rules", "outcome", "clientValidationConfig"] },
+    { key: "earningsAuditMain", label: "Earnings Audit", tabs: ["toastOriginal", "earningsAudit"] },
+    { key: "tipsAudit", label: "Tips Audit", tabs: ["tipImport"] },
+    { key: "reportsMain", label: "Reports", tabs: ["payrollExport", "reports"] },
+  ];
+
+  const TAB_META = {
+    dashboard: {
+      label: "Payroll Dashboard",
+      main: "dashboardMain",
+      subtitle: "Coming soon.",
+      existing: false,
+    },
+    excluded: {
+      label: "Employee Exemptions",
+      main: "setup",
+      subtitle: "Manage a short list of staff to skip or handle differently in payroll validation.",
+      existing: true,
+    },
+    confirmations: {
+      label: "Airtable Setup Audit",
+      main: "setup",
+      subtitle: "Pick a location to see every required field in one place.",
+      existing: true,
+    },
+    communicationSetup: {
+      label: "Communication Setup",
+      main: "setup",
+      subtitle: "Coming soon.",
+      existing: false,
+    },
+    rules: {
+      label: "Internal Validation Config",
+      main: "payrollValidation",
+      subtitle: "Control which payroll validation rules are live for this location.",
+      existing: true,
+    },
+    outcome: {
+      label: "Internal Validation Report",
+      main: "payrollValidation",
+      subtitle: "Run payroll validation for a selected pay period and review the outcome.",
+      existing: true,
+    },
+    clientValidationConfig: {
+      label: "Client Validation Config",
+      main: "payrollValidation",
+      subtitle: "Coming soon.",
+      existing: false,
+    },
+    toastOriginal: {
+      label: "Step 1: POS Import",
+      main: "earningsAuditMain",
+      subtitle: "Audit API-derived original rows and optional uploaded Toast Payroll Export CSV baseline.",
+      existing: true,
+    },
+    earningsAudit: {
+      label: "Step 2: Earnings Audit",
+      main: "earningsAuditMain",
+      subtitle: "Coming soon.",
+      existing: false,
+    },
+    tipImport: {
+      label: "Step 3: Tip Import",
+      main: "tipsAudit",
+      subtitle: "Coming soon.",
+      existing: false,
+    },
+    payrollExport: {
+      label: "Step 4: Payroll Export",
+      main: "reportsMain",
+      subtitle: "Coming soon.",
+      existing: false,
+    },
+    reports: {
+      label: "RDMS Payroll Reports",
+      main: "reportsMain",
+      subtitle: "Coming soon.",
+      existing: true,
+    },
+  };
+
+  function renderMainTabs(activeMain) {
+    const mainTabsEl = document.getElementById("mainTabs");
+    mainTabsEl.innerHTML = NAV_CONFIG.map((item) => {
+      const active = item.key === activeMain ? " active" : "";
+      return `<div class="tab${active}" data-main="${escapeAttr(item.key)}">${escapeHtml(item.label)}</div>`;
+    }).join("");
+  }
+
+  function renderSubTabs(activeMain, activeTab) {
+    const subTabsEl = document.getElementById("subTabs");
+    const section = NAV_CONFIG.find((item) => item.key === activeMain);
+    const tabs = (section && section.tabs) || [];
+
+    if (!tabs.length) {
+      subTabsEl.innerHTML = "";
+      subTabsEl.classList.add("hidden");
+      return;
+    }
+
+    subTabsEl.classList.remove("hidden");
+    subTabsEl.innerHTML = tabs
+      .map((tabKey) => {
+        const active = tabKey === activeTab ? " active" : "";
+        const meta = TAB_META[tabKey];
+        return `<div class="tab${active}" data-tab="${escapeAttr(tabKey)}">${escapeHtml(meta.label)}</div>`;
+      })
+      .join("");
+  }
+
+  function renderComingSoonPage(label) {
+    document.getElementById("pageSub").textContent = "Coming soon.";
+    document.getElementById("content").innerHTML = `<div><div class="sectionTitle">${escapeHtml(
+      label
+    )}</div><div class="muted">Coming soon.</div></div>`;
+  }
+
   function setActiveTab(tab) {
-    state.tab = tab;
-    document.querySelectorAll(".tab").forEach((el) => {
-      el.classList.toggle("active", el.dataset.tab === tab);
-    });
+    const meta = TAB_META[tab] || TAB_META.dashboard;
+    const nextTab = TAB_META[tab] ? tab : "dashboard";
+    state.tab = nextTab;
 
-    const titleMap = {
-      confirmations: "Client Info Confirmations",
-      rules: "Payroll Validation Rules",
-      outcome: "Pay Period Validation Outcome",
-      toastOriginal: "Toast Pay Period Data - Original",
-      excluded: "Excluded Staff",
-      reports: "RDMS Manual Reporting",
-    };
+    renderMainTabs(meta.main);
+    renderSubTabs(meta.main, nextTab);
 
-    document.getElementById("pageTitle").textContent = titleMap[tab] || "RDMS Payroll Validation";
+    document.getElementById("pageTitle").textContent = meta.label;
     document.getElementById("lateNotice").style.display = "none";
+    document.getElementById("pageSub").textContent = meta.subtitle;
 
-    if (tab === "confirmations") {
-      document.getElementById("pageSub").textContent = "Pick a location to see every required field in one place.";
+    if (nextTab === "confirmations") {
       renderConfirmations();
       return;
     }
 
-    if (tab === "rules") {
-      document.getElementById("pageSub").textContent = "Control which payroll validation rules are live for this location.";
+    if (nextTab === "rules") {
       loadRulesForSelected();
       return;
     }
 
-    if (tab === "excluded") {
-      document.getElementById("pageSub").textContent =
-        "Manage a short list of staff to skip or handle differently in payroll validation.";
+    if (nextTab === "excluded") {
       loadExcludedForSelected();
       return;
     }
 
-    if (tab === "outcome") {
-      document.getElementById("pageSub").textContent =
-        "Run payroll validation for a selected pay period and review the outcome.";
+    if (nextTab === "outcome") {
       loadOutcomeSelectorForSelected();
       return;
     }
 
-    if (tab === "toastOriginal") {
-      document.getElementById("pageSub").textContent =
-        "Audit API-derived original rows and optional uploaded Toast Payroll Export CSV baseline.";
+    if (nextTab === "toastOriginal") {
       loadToastOriginalSelectorForSelected();
       return;
     }
 
-    document.getElementById("pageSub").textContent = "Coming soon.";
-    document.getElementById("content").innerHTML = "<div class='muted'>Coming soon.</div>";
+    renderComingSoonPage(meta.label);
   }
 
   async function apiGet(p) {
@@ -2430,8 +2535,20 @@
     else if (tab === "toastOriginal") await loadToastOriginalSelectorForSelected();
   });
 
-  document.querySelectorAll(".tab").forEach((el) => {
-    el.addEventListener("click", () => setActiveTab(el.dataset.tab));
+  document.getElementById("mainTabs").addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-main]");
+    if (!btn) return;
+    const mainKey = btn.dataset.main;
+    const section = NAV_CONFIG.find((item) => item.key === mainKey);
+    if (!section) return;
+    const nextTab = section.tabs[0] || "dashboard";
+    setActiveTab(nextTab);
+  });
+
+  document.getElementById("subTabs").addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-tab]");
+    if (!btn) return;
+    setActiveTab(btn.dataset.tab);
   });
 
   document.getElementById("logoutBtn").addEventListener("click", async () => {
@@ -2442,7 +2559,7 @@
   (async function init() {
     await ensureLoggedIn();
     await loadLocations();
-    renderConfirmations();
+    setActiveTab("dashboard");
   })();
 </script>
 ```
