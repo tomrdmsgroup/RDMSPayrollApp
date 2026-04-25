@@ -25,7 +25,7 @@ const {
   getRecapForLocationName,
   getPayPeriodSelectorForLocationName,
 } = require('../domain/airtableRecapService');
-const { runBarrioToastProof, searchToastEmployeesForLocation } = require('../domain/toastBarrioProofService');
+const { searchToastEmployeesForLocation } = require('../domain/toastBarrioProofService');
 const { fetchOriginalToastPayPeriodData } = require('../domain/toastOriginalPayPeriodService');
 const {
   parseCsv,
@@ -640,23 +640,6 @@ function router(req, res) {
 
         const latestRun = await getRunById(run.id);
         return json(res, 200, { ok: true, run: latestRun, outcome: savedOutcome });
-      } catch (e) {
-        return handleError(res, e);
-      }
-    })();
-    return;
-  }
-
-  if (url.pathname === '/staff/toast-test' && req.method === 'GET') {
-    (async () => {
-      const user = await requireStaff(req, res);
-      if (!user) return;
-      try {
-        const locationName = url.searchParams.get('locationName');
-        if (!locationName) return json(res, 400, { error: 'locationName_required' });
-
-        const toastTest = await runBarrioToastProof(locationName);
-        return json(res, 200, { toastTest });
       } catch (e) {
         return handleError(res, e);
       }

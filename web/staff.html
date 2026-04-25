@@ -613,14 +613,14 @@
     toastOriginal: {
       label: "Step 1: POS Import",
       main: "earningsAuditMain",
-      subtitle: "Audit API-derived original rows and optional uploaded Toast Payroll Export CSV baseline.",
+      subtitle: "Confirm pay period and upload optional Toast Payroll Export CSV baseline.",
       existing: true,
     },
     earningsAudit: {
       label: "Step 2: Earnings Audit",
       main: "earningsAuditMain",
-      subtitle: "Coming soon.",
-      existing: false,
+      subtitle: "Load original Toast rows and review API vs CSV audit results.",
+      existing: true,
     },
     tipImport: {
       label: "Step 3: Tip Import",
@@ -712,6 +712,15 @@
 
     if (nextTab === "toastOriginal") {
       loadToastOriginalSelectorForSelected();
+      return;
+    }
+
+    if (nextTab === "earningsAudit") {
+      if (!state.toastOriginalSelector) {
+        loadToastOriginalSelectorForSelected();
+        return;
+      }
+      renderEarningsAuditTab();
       return;
     }
 
@@ -1535,34 +1544,72 @@
     state.outcomeSelectionPriorRecordId = preferred.recordId;
   }
 
+  function buildToastOriginalPeriodOptions(selector) {
+    const options = [];
+    if (selector?.next_pay_period) {
+      options.push({
+        bucket: "next",
+        recordId: "",
+        value: "next",
+        label: `${fmtDateRange(selector.next_pay_period.start_date, selector.next_pay_period.end_date)}    Next Pay Period`,
+      });
+    }
+    if (selector?.current_pay_period) {
+      options.push({
+        bucket: "current",
+        recordId: "",
+        value: "current",
+        label: `${fmtDateRange(selector.current_pay_period.start_date, selector.current_pay_period.end_date)}    Current Pay Period`,
+      });
+    }
+    const prior = Array.isArray(selector?.prior_pay_periods) ? selector.prior_pay_periods : [];
+    prior.forEach((p) => {
+      options.push({
+        bucket: "prior",
+        recordId: String(p.record_id || ""),
+        value: `prior:${String(p.record_id || "")}`,
+        label: fmtDateRange(p.start_date, p.end_date),
+      });
+    });
+    return options;
+  }
+
+  function ensureToastOriginalSelection(selector) {
+    const options = buildToastOriginalPeriodOptions(selector);
+    if (!options.length) {
+      state.toastOriginalSelectionBucket = "";
+      state.toastOriginalSelectionPriorRecordId = "";
+      return;
+    }
+
+    const selectedValue =
+      state.toastOriginalSelectionBucket === "prior"
+        ? `prior:${String(state.toastOriginalSelectionPriorRecordId || "")}`
+        : state.toastOriginalSelectionBucket || "";
+
+    const existing = options.find((opt) => opt.value === selectedValue);
+    if (existing) {
+      state.toastOriginalSelectionBucket = existing.bucket;
+      state.toastOriginalSelectionPriorRecordId = existing.recordId;
+      return;
+    }
+
+    const defaultBucket = selector?.default_selection?.bucket || "";
+    const defaultRecordId = String(selector?.default_selection?.record_id || selector?.default_selection?.prior_record_id || "");
+    const defaultValue = defaultBucket === "prior" ? `prior:${defaultRecordId}` : defaultBucket;
+    const preferred = options.find((opt) => opt.value === defaultValue) || options[0];
+    state.toastOriginalSelectionBucket = preferred.bucket;
+    state.toastOriginalSelectionPriorRecordId = preferred.recordId;
+  }
+
   function getSelectedToastOriginalPeriod() {
     const selector = state.toastOriginalSelector || {};
-    const list = Array.isArray(selector.prior_pay_periods) ? selector.prior_pay_periods : [];
-
-    const priorSelect = document.getElementById("toastOriginalPriorSelect");
-    const priorRecordId = priorSelect ? String(priorSelect.value || "") : "";
-
     let selected = null;
-    let source = "unknown";
-
-    if (priorRecordId) {
-      state.toastOriginalSelectionBucket = "prior";
-      state.toastOriginalSelectionPriorRecordId = priorRecordId;
-      selected = list.find((p) => String(p.record_id) === priorRecordId) || null;
-      source = "prior";
-    } else {
-      const checkedBucket = document.querySelector("input[name='toastOriginalBucket']:checked");
-      const bucket = checkedBucket?.value || state.toastOriginalSelectionBucket || "current";
-
-      if (bucket === "current") {
-        selected = selector.current_pay_period || null;
-      } else if (bucket === "next") {
-        selected = selector.next_pay_period || null;
-      } else if (bucket === "prior") {
-        const savedPriorRecordId = String(state.toastOriginalSelectionPriorRecordId || "");
-        selected = list.find((p) => String(p.record_id) === savedPriorRecordId) || null;
-      }
-      source = bucket;
+    if (state.toastOriginalSelectionBucket === "current") selected = selector.current_pay_period || null;
+    else if (state.toastOriginalSelectionBucket === "next") selected = selector.next_pay_period || null;
+    else if (state.toastOriginalSelectionBucket === "prior") {
+      const list = Array.isArray(selector.prior_pay_periods) ? selector.prior_pay_periods : [];
+      selected = list.find((p) => String(p.record_id) === String(state.toastOriginalSelectionPriorRecordId || "")) || null;
     }
 
     if (!selected) return null;
@@ -1574,10 +1621,15 @@
       period_end: endDate,
       start_date: startDate,
       end_date: endDate,
-      source,
+      source: state.toastOriginalSelectionBucket || "unknown",
       label: fmtDateRange(startDate, endDate),
       period: selected,
     };
+  }
+
+  function renderActiveToastAuditPage() {
+    if (state.tab === "earningsAudit") renderEarningsAuditTab();
+    else renderToastOriginalTab();
   }
 
   function renderOutcomeTab() {
@@ -2151,74 +2203,29 @@
     }
 
     const selector = state.toastOriginalSelector;
-    const current = selector.current_pay_period;
-    const next = selector.next_pay_period;
-    const prior = Array.isArray(selector.prior_pay_periods) ? selector.prior_pay_periods : [];
+    ensureToastOriginalSelection(selector);
+    const periodOptions = buildToastOriginalPeriodOptions(selector);
+    const selectedValue =
+      state.toastOriginalSelectionBucket === "prior"
+        ? `prior:${String(state.toastOriginalSelectionPriorRecordId || "")}`
+        : state.toastOriginalSelectionBucket || "";
     const selectedPeriod = getSelectedToastOriginalPeriod();
-    const priorOptions = ["<option value=''>Select a prior pay period...</option>"]
-      .concat(
-        prior.map(
-          (p) =>
-            `<option value="${escapeAttr(p.record_id)}" ${
-              String(state.toastOriginalSelectionPriorRecordId) === String(p.record_id) ? "selected" : ""
-            }>${escapeHtml(fmtDateRange(p.start_date, p.end_date))}</option>`
-        )
-      )
-      .join("");
-
-    const data = state.toastOriginalData;
-    const columns = Array.isArray(data?.columns) ? data.columns : [];
-    const rows = Array.isArray(data?.rows) ? data.rows : [];
-    const comparison = state.toastOriginalComparison;
-    const csvRows = extractToastOriginalCsvRows(state.toastOriginalCsvBaseline);
-    const debugUploadPayload = state.toastOriginalLastUploadPayload || {};
-    const debugApiPayload = state.toastOriginalLastApiLoadPayload || {};
-    const debugUploadResponse = state.toastOriginalLastUploadResponse || {};
-    const debugApiResponse = state.toastOriginalLastApiLoadResponse || {};
-
-    let stableIdentityText = "";
-    if (rows.length) {
-      stableIdentityText = `<div class="muted" style="margin-top:8px;">Stable identity column shown: <b style="color:var(--text)">Employee ID</b> (sourced from <b style="color:var(--text)">Employee ID</b>).</div>`;
-    }
-
-    const tableRender = renderToastOriginalTable(columns, rows);
 
     content.innerHTML = `
       <div class="stack">
         <div class="panel toastOriginalControlsPanel">
-          <div class="sectionTitle" style="margin-top:0;">View Control</div>
-          <div class="row" style="gap:8px;">
-            <button class="btn primary" type="button">See Original</button>
-            <button class="btn" type="button" disabled title="Coming later">See RDMS Format (Coming Soon)</button>
-          </div>
-
-          <div class="sectionTitle">Pay Period to Load</div>
-          <div class="gridTwo">
-            <label class="miniCard">
-              <div><input type="radio" name="toastOriginalBucket" value="current" ${
-                state.toastOriginalSelectionBucket === "current" ? "checked" : ""
-              } /> Current Pay Period</div>
-              <div class="muted">${escapeHtml(fmtDateRange(current?.start_date, current?.end_date) || "Not available")}</div>
-            </label>
-            <label class="miniCard">
-              <div><input type="radio" name="toastOriginalBucket" value="next" ${
-                state.toastOriginalSelectionBucket === "next" ? "checked" : ""
-              } /> Next Pay Period</div>
-              <div class="muted">${escapeHtml(fmtDateRange(next?.start_date, next?.end_date) || "Not available")}</div>
-            </label>
-          </div>
-
+          <div class="sectionTitle" style="margin-top:0;">Pay Period to Upload</div>
           <div class="row" style="margin-top:10px;">
-            <label style="min-width:260px;flex:1;">
-              <div class="muted" style="margin-bottom:6px;">Prior Pay Period</div>
-              <select id="toastOriginalPriorSelect">${priorOptions}</select>
+            <label style="min-width:320px;flex:1;">
+              <select id="toastOriginalPeriodSelect">
+                ${periodOptions
+                  .map(
+                    (opt) =>
+                      `<option value="${escapeAttr(opt.value)}" ${opt.value === selectedValue ? "selected" : ""}>${escapeHtml(opt.label)}</option>`
+                  )
+                  .join("")}
+              </select>
             </label>
-            <button class="btn primary" id="loadToastOriginalBtn" type="button" ${state.toastOriginalLoading ? "disabled" : ""}>
-              ${state.toastOriginalLoading ? "Loading..." : "Load Original Toast Data"}
-            </button>
-            <button class="btn" id="loadToastOriginalDebugBtn" type="button" ${state.toastOriginalDebugLoading ? "disabled" : ""}>
-              ${state.toastOriginalDebugLoading ? "Loading Debug..." : "Load Barrio Debug Payload"}
-            </button>
           </div>
 
           <div class="sectionTitle">Optional Audit Baseline: Upload Toast Payroll Export CSV</div>
@@ -2247,6 +2254,82 @@
                 </div>`
               : ""
           }
+        </div>
+      </div>
+    `;
+
+    const periodSelect = document.getElementById("toastOriginalPeriodSelect");
+    if (periodSelect) {
+      periodSelect.addEventListener("change", async () => {
+        const value = String(periodSelect.value || "");
+        if (value.startsWith("prior:")) {
+          state.toastOriginalSelectionBucket = "prior";
+          state.toastOriginalSelectionPriorRecordId = value.split(":").slice(1).join(":");
+        } else {
+          state.toastOriginalSelectionBucket = value;
+          state.toastOriginalSelectionPriorRecordId = "";
+        }
+        await loadToastOriginalCsvBaselineMeta();
+      });
+    }
+
+    const uploadBtn = document.getElementById("uploadToastOriginalCsvBtn");
+    if (uploadBtn) uploadBtn.addEventListener("click", uploadToastOriginalCsvBaseline);
+
+    const clearBtn = document.getElementById("clearToastOriginalCsvBtn");
+    if (clearBtn) clearBtn.addEventListener("click", clearToastOriginalCsvBaseline);
+  }
+
+  function renderEarningsAuditTab() {
+    const content = document.getElementById("content");
+    const locationName = document.getElementById("locationSelect").value;
+    if (!locationName) {
+      content.innerHTML = "<div class='loading'>Select a location to use Earnings Audit.</div>";
+      return;
+    }
+    if (!state.toastOriginalSelector) {
+      content.innerHTML = "<div class='loading'>Loading pay period selector...</div>";
+      return;
+    }
+
+    const selector = state.toastOriginalSelector;
+    ensureToastOriginalSelection(selector);
+    const periodOptions = buildToastOriginalPeriodOptions(selector);
+    const selectedValue =
+      state.toastOriginalSelectionBucket === "prior"
+        ? `prior:${String(state.toastOriginalSelectionPriorRecordId || "")}`
+        : state.toastOriginalSelectionBucket || "";
+    const selectedPeriod = getSelectedToastOriginalPeriod();
+    const data = state.toastOriginalData;
+    const columns = Array.isArray(data?.columns) ? data.columns : [];
+    const rows = Array.isArray(data?.rows) ? data.rows : [];
+    const comparison = state.toastOriginalComparison;
+    const csvRows = extractToastOriginalCsvRows(state.toastOriginalCsvBaseline);
+    const tableRender = renderToastOriginalTable(columns, rows);
+    const stableIdentityText = rows.length
+      ? `<div class="muted" style="margin-top:8px;">Stable identity column shown: <b style="color:var(--text)">Employee ID</b> (sourced from <b style="color:var(--text)">Employee ID</b>).</div>`
+      : "";
+
+    content.innerHTML = `
+      <div class="stack">
+        <div class="panel toastOriginalControlsPanel">
+          <div class="sectionTitle" style="margin-top:0;">Pay Period to Audit</div>
+          <div class="row" style="margin-top:10px;">
+            <label style="min-width:320px;flex:1;">
+              <select id="toastOriginalAuditPeriodSelect">
+                ${periodOptions
+                  .map(
+                    (opt) =>
+                      `<option value="${escapeAttr(opt.value)}" ${opt.value === selectedValue ? "selected" : ""}>${escapeHtml(opt.label)}</option>`
+                  )
+                  .join("")}
+              </select>
+            </label>
+            <button class="btn primary" id="loadToastOriginalBtn" type="button" ${state.toastOriginalLoading ? "disabled" : ""}>
+              ${state.toastOriginalLoading ? "Loading..." : "Load Original Toast Data"}
+            </button>
+          </div>
+          ${state.toastOriginalCsvBaseline ? "" : "<div class='muted' style='margin-top:10px;'>No uploaded CSV baseline found for this pay period. Use Step 1: POS Import to upload one.</div>"}
           ${state.toastOriginalLoadError ? `<div class="muted" style="margin-top:10px;">Load failed: ${escapeHtml(state.toastOriginalLoadError)}</div>` : ""}
         </div>
 
@@ -2254,9 +2337,7 @@
           <div class="sectionTitle" style="margin-top:0;">Original Toast Pay Period Rows</div>
           <div class="row" style="gap:16px;">
             <div><span class="muted">Location:</span> ${escapeHtml(locationName)}</div>
-            <div><span class="muted">Selected pay period:</span> ${escapeHtml(
-              selectedPeriod?.label || "Not selected"
-            )}</div>
+            <div><span class="muted">Selected pay period:</span> ${escapeHtml(selectedPeriod?.label || "Not selected")}</div>
             <div><span class="muted">Rows:</span> ${escapeHtml(String(rows.length))}</div>
           </div>
           <div class="sectionHelp" style="margin-top:8px;">Raw/original Toast row payload rendered directly as a table for auditing.</div>
@@ -2269,94 +2350,33 @@
           )}
           ${stableIdentityText}
           ${tableRender.html}
-
           ${
             state.toastOriginalCsvBaseline
               ? renderDepartmentAuditTable(rows, csvRows)
               : "<div class='sectionTitle'>Outcome Audit: Employee + Department Hours</div><div class='muted'>Upload a CSV baseline to compare employee + department hour totals.</div>"
           }
-
-          ${
-            comparison && Array.isArray(comparison.column_mismatches)
-              ? renderColumnMismatchesTable(comparison.column_mismatches)
-              : ""
-          }
-
-          ${
-            state.toastOriginalDebugData
-              ? `
-              <details class="debugSection">
-                <summary>Debug payload</summary>
-                <div class="debugSectionBody">
-                  <pre style="white-space:pre-wrap;word-break:break-word;">${escapeHtml(JSON.stringify(state.toastOriginalDebugData, null, 2))}</pre>
-                </div>
-              </details>
-            `
-              : ""
-          }
-
-          <div class="sectionTitle">Temporary Debug Panel (Toast Original)</div>
-          <div class="miniCard">
-            <div><span class="muted">selected location_name:</span> ${escapeHtml(String(locationName || ""))}</div>
-            <div><span class="muted">selected period_start:</span> ${escapeHtml(String(selectedPeriod?.period_start || ""))}</div>
-            <div><span class="muted">selected period_end:</span> ${escapeHtml(String(selectedPeriod?.period_end || ""))}</div>
-            <div style="margin-top:8px;"><span class="muted">upload payload keys present:</span>
-              location_name=${debugUploadPayload.location_name ? "yes" : "no"},
-              period_start=${debugUploadPayload.period_start ? "yes" : "no"},
-              period_end=${debugUploadPayload.period_end ? "yes" : "no"},
-              raw_csv_length=${escapeHtml(String(debugUploadPayload.raw_csv_length || 0))},
-              file_name=${debugUploadPayload.file_name ? "yes" : "no"}
-            </div>
-            <div><span class="muted">API load payload keys present:</span>
-              location_name=${debugApiPayload.location_name ? "yes" : "no"},
-              period_start=${debugApiPayload.period_start ? "yes" : "no"},
-              period_end=${debugApiPayload.period_end ? "yes" : "no"}
-            </div>
-            <div style="margin-top:8px;"><span class="muted">last upload response:</span>
-              status=${escapeHtml(String(debugUploadResponse.status || ""))},
-              error=${escapeHtml(String(debugUploadResponse.error || ""))}
-            </div>
-            <div><span class="muted">last API load response:</span>
-              status=${escapeHtml(String(debugApiResponse.status || ""))},
-              error=${escapeHtml(String(debugApiResponse.error || ""))}
-            </div>
-          </div>
+          ${comparison && Array.isArray(comparison.column_mismatches) ? renderColumnMismatchesTable(comparison.column_mismatches) : ""}
         </div>
       </div>
     `;
 
-    content.querySelectorAll("input[name='toastOriginalBucket']").forEach((el) => {
-      el.addEventListener("change", () => {
-        state.toastOriginalSelectionBucket = el.value;
-        state.toastOriginalSelectionPriorRecordId = "";
-        const priorSelectEl = document.getElementById("toastOriginalPriorSelect");
-        if (priorSelectEl) priorSelectEl.value = "";
-        renderToastOriginalTab();
-      });
-    });
-
-    const priorSelect = document.getElementById("toastOriginalPriorSelect");
-    if (priorSelect) {
-      priorSelect.addEventListener("change", () => {
-        if (priorSelect.value) {
+    const periodSelect = document.getElementById("toastOriginalAuditPeriodSelect");
+    if (periodSelect) {
+      periodSelect.addEventListener("change", async () => {
+        const value = String(periodSelect.value || "");
+        if (value.startsWith("prior:")) {
           state.toastOriginalSelectionBucket = "prior";
-          state.toastOriginalSelectionPriorRecordId = priorSelect.value;
+          state.toastOriginalSelectionPriorRecordId = value.split(":").slice(1).join(":");
+        } else {
+          state.toastOriginalSelectionBucket = value;
+          state.toastOriginalSelectionPriorRecordId = "";
         }
-        renderToastOriginalTab();
+        await loadToastOriginalCsvBaselineMeta();
       });
     }
 
     const loadBtn = document.getElementById("loadToastOriginalBtn");
-    if (loadBtn) loadBtn.addEventListener("click", () => loadToastOriginalData(false));
-
-    const debugBtn = document.getElementById("loadToastOriginalDebugBtn");
-    if (debugBtn) debugBtn.addEventListener("click", () => loadToastOriginalData(true));
-
-    const uploadBtn = document.getElementById("uploadToastOriginalCsvBtn");
-    if (uploadBtn) uploadBtn.addEventListener("click", uploadToastOriginalCsvBaseline);
-
-    const clearBtn = document.getElementById("clearToastOriginalCsvBtn");
-    if (clearBtn) clearBtn.addEventListener("click", clearToastOriginalCsvBaseline);
+    if (loadBtn) loadBtn.addEventListener("click", loadToastOriginalData);
   }
 
   async function loadToastOriginalSelectorForSelected() {
@@ -2376,7 +2396,7 @@
     state.toastOriginalLastApiLoadPayload = null;
     state.toastOriginalLastUploadResponse = null;
     state.toastOriginalLastApiLoadResponse = null;
-    renderToastOriginalTab();
+    renderActiveToastAuditPage();
 
     const name = document.getElementById("locationSelect").value;
     if (!name) return;
@@ -2386,7 +2406,7 @@
     if (!resp.ok) {
       state.toastOriginalLoadError = body.error || "selector_load_failed";
       state.toastOriginalSelector = { current_pay_period: null, next_pay_period: null, prior_pay_periods: [] };
-      renderToastOriginalTab();
+      renderActiveToastAuditPage();
       return;
     }
 
@@ -2395,7 +2415,7 @@
     state.toastOriginalSelectionBucket = selector.default_selection?.bucket || "current";
 
     await loadToastOriginalCsvBaselineMeta();
-    renderToastOriginalTab();
+    renderActiveToastAuditPage();
   }
 
   async function loadToastOriginalCsvBaselineMeta() {
@@ -2432,10 +2452,10 @@
       : null;
     state.toastOriginalComparison = body.comparison || null;
     state.toastOriginalCsvBaselineRowCount = (baselineRows.length ? baselineRows : fallbackBodyRows).length;
-    renderToastOriginalTab();
+    renderActiveToastAuditPage();
   }
 
-  async function loadToastOriginalData(includeDebug) {
+  async function loadToastOriginalData() {
     const selected = getSelectedToastOriginalPeriod();
     const locationName = document.getElementById("locationSelect").value;
     if (!locationName) {
@@ -2445,20 +2465,18 @@
     if (!selected) {
       alert("Select a pay period before continuing.");
       state.toastOriginalLoadError = "no_selected_pay_period";
-      renderToastOriginalTab();
+      renderActiveToastAuditPage();
       return;
     }
 
     state.toastOriginalLoadError = "";
-    if (includeDebug) state.toastOriginalDebugLoading = true;
-    else state.toastOriginalLoading = true;
+    state.toastOriginalLoading = true;
     state.toastOriginalLastApiLoadPayload = {
       location_name: locationName,
       period_start: selected.period_start,
       period_end: selected.period_end,
-      debug_toast_mapping: !!includeDebug,
     };
-    renderToastOriginalTab();
+    renderActiveToastAuditPage();
 
     try {
       const { resp, body } = await apiPost("/staff/toast-original-pay-period", state.toastOriginalLastApiLoadPayload);
@@ -2468,14 +2486,12 @@
         state.toastOriginalLoadError = body.error || "toast_original_load_failed";
         state.toastOriginalData = null;
         state.toastOriginalComparison = body?.comparison || null;
-        if (includeDebug) state.toastOriginalDebugData = body || null;
-        renderToastOriginalTab();
+        renderActiveToastAuditPage();
         return;
       }
 
       state.toastOriginalData = body?.data || null;
       state.toastOriginalComparison = body?.comparison || null;
-      state.toastOriginalDebugData = includeDebug ? body?.debug || body : null;
       if (Array.isArray(body?.comparison?.uploaded_csv_rows)) {
         state.toastOriginalCsvBaselineRowCount = body.comparison.uploaded_csv_rows.length;
       }
@@ -2487,8 +2503,7 @@
       state.toastOriginalLastApiLoadResponse = { status: "network_error", error: state.toastOriginalLoadError };
     } finally {
       state.toastOriginalLoading = false;
-      state.toastOriginalDebugLoading = false;
-      renderToastOriginalTab();
+      renderActiveToastAuditPage();
     }
   }
 
@@ -2513,7 +2528,7 @@
     state.toastOriginalCsvUploadBusy = true;
     state.toastOriginalCsvUploadError = "";
     state.toastOriginalCsvClearError = "";
-    renderToastOriginalTab();
+    renderActiveToastAuditPage();
 
     try {
       const file = fileInput.files[0];
@@ -2536,7 +2551,7 @@
 
       if (!resp.ok) {
         state.toastOriginalCsvUploadError = body.error || "csv_upload_failed";
-        renderToastOriginalTab();
+        renderActiveToastAuditPage();
         return;
       }
 
@@ -2553,13 +2568,13 @@
         state.toastOriginalComparison = body.comparison;
       }
       fileInput.value = "";
-      renderToastOriginalTab();
+      renderActiveToastAuditPage();
     } catch (err) {
       state.toastOriginalCsvUploadError = (err && err.message) || "csv_upload_failed";
       state.toastOriginalLastUploadResponse = { status: "network_error", error: state.toastOriginalCsvUploadError };
     } finally {
       state.toastOriginalCsvUploadBusy = false;
-      renderToastOriginalTab();
+      renderActiveToastAuditPage();
     }
   }
 
@@ -2582,7 +2597,7 @@
 
     state.toastOriginalCsvClearBusy = true;
     state.toastOriginalCsvClearError = "";
-    renderToastOriginalTab();
+    renderActiveToastAuditPage();
 
     try {
       const { resp, body } = await apiDelete("/staff/toast-original-pay-period/baseline", {
@@ -2592,7 +2607,7 @@
       });
       if (!resp.ok) {
         state.toastOriginalCsvClearError = body.error || "csv_clear_failed";
-        renderToastOriginalTab();
+        renderActiveToastAuditPage();
         return;
       }
 
@@ -2601,12 +2616,12 @@
       state.toastOriginalCsvBaselineRowCount = 0;
       state.toastOriginalLastUploadResponse = null;
       state.toastOriginalCsvUploadError = "";
-      renderToastOriginalTab();
+      renderActiveToastAuditPage();
     } catch (err) {
       state.toastOriginalCsvClearError = (err && err.message) || "csv_clear_failed";
     } finally {
       state.toastOriginalCsvClearBusy = false;
-      renderToastOriginalTab();
+      renderActiveToastAuditPage();
     }
   }
 
@@ -2633,7 +2648,7 @@
     else if (tab === "rules") await loadRulesForSelected();
     else if (tab === "excluded") await loadExcludedForSelected();
     else if (tab === "outcome") await loadOutcomeSelectorForSelected();
-    else if (tab === "toastOriginal") await loadToastOriginalSelectorForSelected();
+    else if (tab === "toastOriginal" || tab === "earningsAudit") await loadToastOriginalSelectorForSelected();
   });
 
   document.getElementById("mainTabs").addEventListener("click", (event) => {
