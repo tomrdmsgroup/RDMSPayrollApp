@@ -1305,6 +1305,23 @@
     renderExcludedTab();
   }
 
+  async function loadExcludedSnapshotForLocation(locationName) {
+    if (!locationName) {
+      state.excluded = [];
+      state.excludedLocationName = null;
+      return;
+    }
+    const q = encodeURIComponent(locationName);
+    const { resp, body } = await apiGet(`/staff/excluded?locationName=${q}`);
+    if (!resp.ok) {
+      state.excluded = [];
+      state.excludedLocationName = locationName;
+      return;
+    }
+    state.excluded = Array.isArray(body.excluded) ? body.excluded : [];
+    state.excludedLocationName = locationName;
+  }
+
   function renderExcludedRows() {
     if (!state.excluded.length) {
       return `<div class="muted">No one is excluded yet for this location.</div>`;
@@ -2446,6 +2463,114 @@
     return String(value || "").trim().toLowerCase();
   }
 
+  function sanitizeComparableValue(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    const lowered = raw.toLowerCase();
+    if (["null", "undefined"].includes(lowered)) return "";
+    return raw;
+  }
+
+  function sanitizeEmployeeIdForComparison(value) {
+    const raw = sanitizeComparableValue(value);
+    if (!raw) return { value: "", issue: "Missing Employee ID" };
+    const lowered = raw.toLowerCase();
+    if (lowered === "missing employee id") return { value: "", issue: "Missing Employee ID" };
+    if (["delete", "deleted", "n/a", "na"].includes(lowered)) return { value: "", issue: "Invalid Employee ID" };
+    return { value: raw, issue: "" };
+  }
+
+  function sanitizeJobCodeForComparison(value) {
+    const raw = sanitizeComparableValue(value);
+    if (!raw) return { value: "", issue: "Missing Job Code" };
+    const lowered = raw.toLowerCase();
+    if (lowered === "missing job code") return { value: "", issue: "Missing Job Code" };
+    return { value: raw, issue: "" };
+  }
+
+  function buildIssueLabel(employeeIdIssue, jobCodeIssue) {
+    const parts = [];
+    if (employeeIdIssue) parts.push(employeeIdIssue);
+    if (jobCodeIssue) parts.push(jobCodeIssue);
+    return parts.join(" and ");
+  }
+
+  function buildExcludedMatchers(excludedRows) {
+    const active = (Array.isArray(excludedRows) ? excludedRows : []).filter((row) => row && row.active !== false);
+    const byEmployeeId = new Map();
+    const byName = new Map();
+    active.forEach((row) => {
+      const reason = [row.reason, row.notes].filter(Boolean).join(" / ").trim() || "Excluded";
+      const employeeIdKey = normalizeComparisonKeyPart(row.toast_employee_id || row.employee_id || row.employeeId || "");
+      const nameKey = normalizeComparisonKeyPart(row.employee_name || row.employeeName || "");
+      if (employeeIdKey && !byEmployeeId.has(employeeIdKey)) byEmployeeId.set(employeeIdKey, reason);
+      if (nameKey && !byName.has(nameKey)) byName.set(nameKey, reason);
+    });
+    return { byEmployeeId, byName };
+  }
+
+  function mergeExcludedDisplayRows(rows) {
+    const merged = new Map();
+    (Array.isArray(rows) ? rows : []).forEach((row) => {
+      const key = [
+        normalizeComparisonKeyPart(row.employeeId || ""),
+        normalizeComparisonKeyPart(row.jobCode || ""),
+        normalizeComparisonKeyPart(row.employee || ""),
+        normalizeComparisonKeyPart(row.jobTitle || ""),
+        normalizeComparisonKeyPart(row.exclusionReason || ""),
+      ].join("|||");
+      if (!merged.has(key)) {
+        merged.set(key, {
+          employee: row.employee || "",
+          employeeId: row.employeeId || "",
+          jobTitle: row.jobTitle || "",
+          jobCode: row.jobCode || "",
+          csvRegHours: null,
+          csvOtHours: null,
+          apiRegHours: null,
+          apiOtHours: null,
+          exclusionReason: row.exclusionReason || "Excluded",
+        });
+      }
+      const target = merged.get(key);
+      if (row.source === "CSV") {
+        target.csvRegHours = row.regHours;
+        target.csvOtHours = row.otHours;
+      } else if (row.source === "API") {
+        target.apiRegHours = row.regHours;
+        target.apiOtHours = row.otHours;
+      }
+    });
+
+    return Array.from(merged.values()).map((row) => {
+      const hasCsv = row.csvRegHours !== null || row.csvOtHours !== null;
+      const hasApi = row.apiRegHours !== null || row.apiOtHours !== null;
+      const source = hasCsv && hasApi ? "CSV + API" : hasCsv ? "CSV" : "API";
+      const regHours =
+        hasCsv && hasApi
+          ? `CSV ${formatComparisonNumber(row.csvRegHours)} | API ${formatComparisonNumber(row.apiRegHours)}`
+          : hasCsv
+          ? formatComparisonNumber(row.csvRegHours)
+          : formatComparisonNumber(row.apiRegHours);
+      const otHours =
+        hasCsv && hasApi
+          ? `CSV ${formatComparisonNumber(row.csvOtHours)} | API ${formatComparisonNumber(row.apiOtHours)}`
+          : hasCsv
+          ? formatComparisonNumber(row.csvOtHours)
+          : formatComparisonNumber(row.apiOtHours);
+      return {
+        employee: row.employee,
+        employeeId: row.employeeId,
+        jobTitle: row.jobTitle,
+        jobCode: row.jobCode,
+        source,
+        regHours,
+        otHours,
+        exclusionReason: row.exclusionReason,
+      };
+    });
+  }
+
   function groupEarningsRowsForComparison(rows) {
     const map = new Map();
     const normalizedRows = (Array.isArray(rows) ? rows : []).map(normalizeEarningsRow);
@@ -2491,11 +2616,69 @@
     return map;
   }
 
-  function compareEarningsGroups(csvRows, apiRows) {
+  function compareEarningsGroups(csvRows, apiRows, excludedRows) {
     const hoursTolerance = 0.01;
     const rateTolerance = 0.01;
-    const csvMap = groupEarningsRowsForComparison(csvRows);
-    const apiMap = groupEarningsRowsForComparison(apiRows);
+    const excludedMatchers = buildExcludedMatchers(excludedRows);
+    const excludedFromComparisonRaw = [];
+    const csvKeyIssues = [];
+    const apiKeyIssues = [];
+    const validCsvRows = [];
+    const validApiRows = [];
+
+    const classifyRows = (rows, sourceLabel, issueBucket, validBucket) => {
+      const normalizedRows = (Array.isArray(rows) ? rows : []).map(normalizeEarningsRow);
+      normalizedRows.forEach((row) => {
+        const rawEmployeeId = String(row.employeeId || "").trim();
+        const employeeName = String(row.employee || "").trim();
+        const excludedReason =
+          excludedMatchers.byEmployeeId.get(normalizeComparisonKeyPart(rawEmployeeId)) ||
+          excludedMatchers.byName.get(normalizeComparisonKeyPart(employeeName)) ||
+          "";
+        if (excludedReason) {
+          excludedFromComparisonRaw.push({
+            employee: employeeName,
+            employeeId: rawEmployeeId,
+            jobTitle: String(row.jobTitle || "").trim(),
+            jobCode: String(row.jobCode || "").trim(),
+            source: sourceLabel,
+            regHours: toNumericComparisonValue(row.regHours),
+            otHours: toNumericComparisonValue(row.otHours),
+            exclusionReason: excludedReason,
+          });
+          return;
+        }
+
+        const employeeIdResult = sanitizeEmployeeIdForComparison(row.employeeId);
+        const jobCodeResult = sanitizeJobCodeForComparison(row.jobCode);
+        const issue = buildIssueLabel(employeeIdResult.issue, jobCodeResult.issue);
+        if (issue) {
+          issueBucket.push({
+            employee: employeeName,
+            employeeId: rawEmployeeId,
+            jobTitle: String(row.jobTitle || "").trim(),
+            jobCode: String(row.jobCode || "").trim(),
+            hourlyRate: toNumericComparisonValue(row.hourlyRate),
+            regHours: toNumericComparisonValue(row.regHours),
+            otHours: toNumericComparisonValue(row.otHours),
+            issue,
+          });
+          return;
+        }
+
+        validBucket.push({
+          ...row,
+          employeeId: employeeIdResult.value,
+          jobCode: jobCodeResult.value,
+        });
+      });
+    };
+
+    classifyRows(csvRows, "CSV", csvKeyIssues, validCsvRows);
+    classifyRows(apiRows, "API", apiKeyIssues, validApiRows);
+
+    const csvMap = groupEarningsRowsForComparison(validCsvRows);
+    const apiMap = groupEarningsRowsForComparison(validApiRows);
     const allKeys = new Set([...csvMap.keys(), ...apiMap.keys()]);
     const hourMismatches = [];
     const missingInApi = [];
@@ -2588,6 +2771,9 @@
         otVariance,
         rateMismatchCount: rateReview.length,
       },
+      excludedFromComparison: mergeExcludedDisplayRows(excludedFromComparisonRaw),
+      csvKeyIssues,
+      apiKeyIssues,
       hourMismatches,
       missingInApi,
       missingInCsv,
@@ -2605,10 +2791,13 @@
     `;
   }
 
-  function renderComparisonSectionTable(title, columns, rows) {
+  function renderComparisonSectionTable(title, columns, rows, opts = {}) {
+    const { hideWhenEmpty = false, compactEmptyMessage = false, tone = "" } = opts;
+    const safeRows = Array.isArray(rows) ? rows : [];
+    if (hideWhenEmpty && !safeRows.length) return "";
     const head = columns.map((column) => `<th>${escapeHtml(column.header)}</th>`).join("");
-    const body = Array.isArray(rows) && rows.length
-      ? rows
+    const body = safeRows.length
+      ? safeRows
           .map((row) => {
             const cells = columns
                 .map((column) => {
@@ -2626,10 +2815,17 @@
             return `<tr>${cells}</tr>`;
           })
           .join("")
-      : `<tr><td colspan="${columns.length}" class="muted">No exceptions found.</td></tr>`;
+      : "";
+
+    if (!safeRows.length && compactEmptyMessage) {
+      return `
+        <div class="sectionTitle">${escapeHtml(title)}</div>
+        <div class="muted" style="margin:4px 0 12px;">No exceptions found.</div>
+      `;
+    }
 
     return `
-      <div class="sectionTitle">${escapeHtml(title)}</div>
+      <div class="sectionTitle ${tone ? escapeAttr(tone) : ""}">${escapeHtml(title)}</div>
       <div class="tableScroll">
         <table class="comparisonExceptionsTable">
           <thead><tr>${head}</tr></thead>
@@ -2823,7 +3019,7 @@
     const selectedPeriod = getSelectedToastOriginalPeriod();
     const csvRows = extractToastOriginalCsvRows(state.toastOriginalCsvBaseline);
     const apiRows = Array.isArray(state.toastOriginalData?.rows) ? state.toastOriginalData.rows : [];
-    const comparison = compareEarningsGroups(csvRows, apiRows);
+    const comparison = compareEarningsGroups(csvRows, apiRows, state.excluded);
     const s = comparison.summary;
     const rowCountMatches = s.rowVariance === 0;
     const regMatches = Math.abs(s.regVariance) <= comparison.hoursTolerance;
@@ -2859,8 +3055,54 @@
               `Mismatches: ${escapeHtml(String(s.rateMismatchCount))}`,
             ])}
           </div>
+          <div class="muted" style="margin-top:8px;">Excluded employees and key issue rows are listed separately and not included in match totals.</div>
 
           <div style="margin-top:14px;">
+            ${renderComparisonSectionTable(
+              "Excluded From Comparison",
+              [
+                { header: "Employee", key: "employee", align: "left" },
+                { header: "Employee ID", key: "employeeId" },
+                { header: "Job Title", key: "jobTitle" },
+                { header: "Job Code", key: "jobCode" },
+                { header: "Source", key: "source" },
+                { header: "Reg Hours", key: "regHours" },
+                { header: "OT Hours", key: "otHours" },
+                { header: "Exclusion Reason", key: "exclusionReason", align: "left" },
+              ],
+              comparison.excludedFromComparison,
+              { hideWhenEmpty: true }
+            )}
+            ${renderComparisonSectionTable(
+              "CSV Key Issues",
+              [
+                { header: "Employee", key: "employee", align: "left" },
+                { header: "Employee ID", key: "employeeId" },
+                { header: "Job Title", key: "jobTitle" },
+                { header: "Job Code", key: "jobCode" },
+                { header: "CSV Rate", key: "hourlyRate", numeric: true },
+                { header: "CSV Reg", key: "regHours", numeric: true },
+                { header: "CSV OT", key: "otHours", numeric: true },
+                { header: "Issue", key: "issue", align: "left" },
+              ],
+              comparison.csvKeyIssues,
+              { hideWhenEmpty: true }
+            )}
+            ${renderComparisonSectionTable(
+              "API Key Issues",
+              [
+                { header: "Employee", key: "employee", align: "left" },
+                { header: "Employee ID", key: "employeeId" },
+                { header: "Job Title", key: "jobTitle" },
+                { header: "Job Code", key: "jobCode" },
+                { header: "API Rate", key: "hourlyRate", numeric: true },
+                { header: "API Reg", key: "regHours", numeric: true },
+                { header: "API OT", key: "otHours", numeric: true },
+                { header: "Issue", key: "issue", align: "left" },
+              ],
+              comparison.apiKeyIssues,
+              { hideWhenEmpty: true }
+            )}
             ${renderComparisonSectionTable(
               "Hour Mismatches",
               [
@@ -2875,7 +3117,8 @@
                 { header: "API OT", key: "apiOt", numeric: true },
                 { header: "OT Variance", key: "otVariance", numeric: true },
               ],
-              comparison.hourMismatches
+              comparison.hourMismatches,
+              { compactEmptyMessage: true }
             )}
             ${renderComparisonSectionTable(
               "Missing in API",
@@ -2888,7 +3131,8 @@
                 { header: "CSV Reg", key: "regHours", numeric: true },
                 { header: "CSV OT", key: "otHours", numeric: true },
               ],
-              comparison.missingInApi
+              comparison.missingInApi,
+              { compactEmptyMessage: true }
             )}
             ${renderComparisonSectionTable(
               "Missing in CSV",
@@ -2901,7 +3145,8 @@
                 { header: "API Reg", key: "regHours", numeric: true },
                 { header: "API OT", key: "otHours", numeric: true },
               ],
-              comparison.missingInCsv
+              comparison.missingInCsv,
+              { compactEmptyMessage: true }
             )}
             ${renderComparisonSectionTable(
               "Rate Review",
@@ -2914,7 +3159,8 @@
                 { header: "API Rate", key: "apiRate", numeric: true },
                 { header: "Rate Variance", key: "rateVariance", numeric: true },
               ],
-              comparison.rateReview
+              comparison.rateReview,
+              { compactEmptyMessage: true }
             )}
           </div>
         </div>
@@ -2943,6 +3189,7 @@
 
     const name = document.getElementById("locationSelect").value;
     if (!name) return;
+    await loadExcludedSnapshotForLocation(name);
 
     const q = encodeURIComponent(name);
     const { resp, body } = await apiGet(`/staff/pay-period-selector?locationName=${q}`);
