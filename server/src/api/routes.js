@@ -834,6 +834,10 @@ function router(req, res) {
             internal_notification:
               typeof cfg.internal_notification === 'boolean' ? cfg.internal_notification : defaults.internal_notification,
             asana_task_mode: cfg.asana_task_mode || defaults.asana_task_mode,
+            include_in_preview_recap_report:
+              typeof cfg.include_in_preview_recap_report === 'boolean'
+                ? cfg.include_in_preview_recap_report
+                : defaults.include_in_preview_recap_report,
             params: cfg.params ?? defaults.params,
           };
         });
@@ -864,6 +868,7 @@ function router(req, res) {
           const active = String(row.active).toUpperCase() === 'YES';
           const internalNotification = String(row.internal_notification).toUpperCase() === 'YES';
           const oneTaskPer = String(row.one_task_per_finding).toUpperCase() === 'YES';
+          const includeInPreviewRecapReport = String(row.include_in_preview_recap_report).toUpperCase() === 'YES';
           const asanaTaskMode = oneTaskPer ? 'PER_FINDING' : 'SUMMARY';
 
           const params = row.params === undefined ? null : row.params;
@@ -872,6 +877,7 @@ function router(req, res) {
             active,
             internal_notification: internalNotification,
             asana_task_mode: asanaTaskMode,
+            include_in_preview_recap_report: includeInPreviewRecapReport,
             params,
           });
         }

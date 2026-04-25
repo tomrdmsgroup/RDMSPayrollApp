@@ -235,6 +235,28 @@
         color: var(--text);
         outline: none;
       }
+      .yesNoControl {
+        width: 84px;
+        min-width: 84px;
+        padding: 6px 8px;
+      }
+      .thWrap {
+        white-space: normal;
+        line-height: 1.2;
+      }
+      .thYesNo {
+        text-align: center;
+      }
+      .tdYesNo {
+        text-align: center;
+      }
+      .saveCol {
+        text-align: center;
+      }
+      .saveBtnCompact {
+        padding: 8px 10px;
+        min-width: 68px;
+      }
       .late {
         margin-top: 12px;
         padding: 12px 14px;
@@ -1202,7 +1224,7 @@
   function yesNoSelect(value, id) {
     const v = (value || "NO").toUpperCase() === "YES" ? "YES" : "NO";
     return `
-      <select data-field="${id}">
+      <select class="yesNoControl" data-field="${id}">
         <option value="YES" ${v === "YES" ? "selected" : ""}>YES</option>
         <option value="NO" ${v === "NO" ? "selected" : ""}>NO</option>
       </select>
@@ -1266,11 +1288,13 @@
           <li><b>Active:</b> rule runs during payroll validation</li>
           <li><b>Create Asana Task:</b> creates an Asana task when the rule is triggered</li>
           <li><b>Create One Task Per Finding:</b> creates a separate task for each finding instead of grouping them</li>
+          <li><b>Include in Preview Recap Report:</b> makes this rule available for the payroll preview recap report</li>
         </ul>
       </div>
     `;
 
     const tableHead = `
+      <div class="tableScroll">
       <table>
         <thead>
           <tr>
@@ -1278,10 +1302,11 @@
             <th style="width:220px;">Rule Name</th>
             <th style="width:170px;">Threshold / Setting</th>
             <th>What it checks</th>
-            <th style="width:140px;">Active</th>
-            <th style="width:210px;">Create Asana Task</th>
-            <th style="width:230px;">Create One Task Per Finding</th>
-            <th style="width:120px;">Save</th>
+            <th class="thWrap thYesNo" style="width:98px;">Active</th>
+            <th class="thWrap thYesNo" style="width:120px;">Create Asana Task</th>
+            <th class="thWrap thYesNo" style="width:148px;">Create One Task Per Finding</th>
+            <th class="thWrap thYesNo" style="width:168px;">Include in Preview<br/>Recap Report</th>
+            <th class="thWrap saveCol" style="width:86px;">Save</th>
           </tr>
         </thead>
         <tbody>
@@ -1314,10 +1339,11 @@
                 <div class="defClamp">${def}</div>
               </div>
             </td>
-            <td>${yesNoSelect(active, "active")}</td>
-            <td>${yesNoSelect(internal, "internal_notification")}</td>
-            <td>${yesNoSelect(oneTask, "one_task_per_finding")}</td>
-            <td><button class="btn" data-action="save-row" type="button">Save</button></td>
+            <td class="tdYesNo">${yesNoSelect(active, "active")}</td>
+            <td class="tdYesNo">${yesNoSelect(internal, "internal_notification")}</td>
+            <td class="tdYesNo">${yesNoSelect(oneTask, "one_task_per_finding")}</td>
+            <td class="tdYesNo">${yesNoSelect(normalizeYesNo(!!r.include_in_preview_recap_report), "include_in_preview_recap_report")}</td>
+            <td class="saveCol"><button class="btn saveBtnCompact" data-action="save-row" type="button">Save</button></td>
           </tr>
         `;
       })
@@ -1326,8 +1352,9 @@
     const tableFoot = `
         </tbody>
       </table>
+      </div>
       <div class="muted" style="margin-top:10px;">
-        Defaults: Active YES, Internal Notification NO, One Task Per Finding NO.
+        Defaults: Active YES, Internal Notification NO, One Task Per Finding NO, Include in Preview Recap Report NO.
       </div>
     `;
 
@@ -1360,6 +1387,7 @@
       active: getSelectVal("active"),
       internal_notification: getSelectVal("internal_notification"),
       one_task_per_finding: getSelectVal("one_task_per_finding"),
+      include_in_preview_recap_report: getSelectVal("include_in_preview_recap_report"),
       params: params === "" ? null : params,
     };
   }

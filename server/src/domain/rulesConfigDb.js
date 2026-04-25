@@ -8,6 +8,7 @@ const DEFAULTS = {
   active: true,
   internal_notification: false,
   asana_task_mode: 'SUMMARY', // SUMMARY | PER_FINDING
+  include_in_preview_recap_report: false,
   client_active: null,
   client_include_to_email: null,
   params: null,
@@ -15,7 +16,7 @@ const DEFAULTS = {
 
 async function getRuleConfigsForLocation(clientLocationId) {
   const { rows } = await db.query(
-    `SELECT rule_id, active, internal_notification, asana_task_mode, client_active, client_include_to_email, params
+    `SELECT rule_id, active, internal_notification, asana_task_mode, include_in_preview_recap_report, client_active, client_include_to_email, params
      FROM ops_rule_configs
      WHERE client_location_id = $1`,
     [clientLocationId]
@@ -31,6 +32,7 @@ async function upsertRuleConfig(clientLocationId, ruleId, config) {
   const active = config.active;
   const internalNotification = config.internal_notification;
   const asanaTaskMode = config.asana_task_mode || DEFAULTS.asana_task_mode;
+  const includeInPreviewRecapReport = config.include_in_preview_recap_report;
   const params = config.params ?? null;
 
   await db.query(
@@ -40,14 +42,16 @@ async function upsertRuleConfig(clientLocationId, ruleId, config) {
         active,
         internal_notification,
         asana_task_mode,
+        include_in_preview_recap_report,
         params,
         updated_at
-     ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
      ON CONFLICT (client_location_id, rule_id)
      DO UPDATE SET
        active = EXCLUDED.active,
        internal_notification = EXCLUDED.internal_notification,
        asana_task_mode = EXCLUDED.asana_task_mode,
+       include_in_preview_recap_report = EXCLUDED.include_in_preview_recap_report,
        params = EXCLUDED.params,
        updated_at = NOW()`,
     [
@@ -56,6 +60,7 @@ async function upsertRuleConfig(clientLocationId, ruleId, config) {
       active,
       internalNotification,
       asanaTaskMode,
+      includeInPreviewRecapReport,
       params,
     ]
   );
