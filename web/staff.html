@@ -102,6 +102,14 @@
       .btn.primary:hover {
         background: #1f2937;
       }
+      .btn.danger {
+        background: #dc2626;
+        border-color: #dc2626;
+        color: #ffffff;
+      }
+      .btn.danger:hover {
+        background: #b91c1c;
+      }
       .tabs {
         margin-top: 14px;
         display: flex;
@@ -366,6 +374,17 @@
       }
       .toastOriginalControlsPanel {
         overflow-x: hidden;
+      }
+      .auditLightBlueField {
+        background-color: #eaf4ff;
+        border-color: #8bb8e8;
+        color: #111111;
+      }
+      .auditUploadFieldWrap {
+        border: 1px solid #8bb8e8;
+        border-radius: 10px;
+        background-color: #eaf4ff;
+        padding: 10px;
       }
       .statusCard {
         border: 1px solid var(--border);
@@ -2383,7 +2402,7 @@
           <div class="sectionTitle" style="margin-top:0;">Pay Period to Upload</div>
           <div class="row" style="margin-top:10px;">
             <label style="min-width:320px;flex:1;">
-              <select id="toastOriginalPeriodSelect">
+              <select id="toastOriginalPeriodSelect" class="auditLightBlueField">
                 ${periodOptions
                   .map(
                     (opt) =>
@@ -2398,16 +2417,18 @@
           <p class="sectionHelp">Upload the POS payroll export CSV for the selected pay period.</p>
           <div class="row" style="margin-top:8px;align-items:flex-end;">
             <label style="min-width:320px;flex:1;">
-              <div class="muted" style="margin-bottom:6px;">Toast Payroll Export CSV file</div>
-              <input id="toastOriginalCsvFile" type="file" class="input" accept=".csv,text/csv" />
+              <div class="auditUploadFieldWrap">
+                <div class="muted" style="margin-bottom:6px;">Toast Payroll Export CSV file</div>
+                <input id="toastOriginalCsvFile" type="file" class="input auditLightBlueField" accept=".csv,text/csv" />
+              </div>
             </label>
-            <button class="btn" id="uploadToastOriginalCsvBtn" type="button" ${state.toastOriginalCsvUploadBusy ? "disabled" : ""}>
+            <button class="btn primary" id="uploadToastOriginalCsvBtn" type="button" ${state.toastOriginalCsvUploadBusy ? "disabled" : ""}>
               ${state.toastOriginalCsvUploadBusy ? "Uploading..." : "Upload CSV"}
             </button>
-            <button class="btn" id="clearToastOriginalCsvBtn" type="button" ${
+            <button class="btn danger" id="clearToastOriginalCsvBtn" type="button" ${
               state.toastOriginalCsvClearBusy || !state.toastOriginalCsvBaseline ? "disabled" : ""
             }>
-              ${state.toastOriginalCsvClearBusy ? "Clearing..." : "Clear CSV Baseline"}
+              ${state.toastOriginalCsvClearBusy ? "Clearing..." : "Clear CSV File"}
             </button>
           </div>
           ${state.toastOriginalCsvUploadError ? `<div class="muted" style="margin-top:8px;">Upload failed: ${escapeHtml(state.toastOriginalCsvUploadError)}</div>` : ""}
@@ -2480,7 +2501,7 @@
           <div class="sourceNote" style="margin-top:2px;"><em>From Step 1: POS Import</em></div>
           <div class="row" style="margin-top:10px;">
             <label style="min-width:320px;flex:1;">
-              <select id="toastOriginalAuditPeriodSelect">
+              <select id="toastOriginalAuditPeriodSelect" class="auditLightBlueField">
                 ${periodOptions
                   .map(
                     (opt) =>
