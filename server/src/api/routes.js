@@ -25,6 +25,7 @@ const {
   getRecapForLocationName,
   getPayPeriodSelectorForLocationName,
   getActivePayrollDashboardRows,
+  getCommunicationRecipientsForLocationName,
 } = require('../domain/airtableRecapService');
 const { searchToastEmployeesForLocation } = require('../domain/toastBarrioProofService');
 const { fetchOriginalToastPayPeriodData } = require('../domain/toastOriginalPayPeriodService');
@@ -41,6 +42,10 @@ const {
 
 const { rulesCatalog } = require('../domain/rulesCatalog');
 const { getRuleConfigsForLocation, upsertRuleConfig, upsertClientRuleConfig } = require('../domain/rulesConfigDb');
+const {
+  listCommunicationRecipientSettings,
+  upsertCommunicationRecipientSetting,
+} = require('../domain/communicationSetupDb');
 
 const {
   listExcludedStaffByLocation,
@@ -943,6 +948,71 @@ function router(req, res) {
 
         return json(res, 200, { ok: true });
       } catch (e) {
+        return handleError(res, e);
+      }
+    })();
+    return;
+  }
+
+  if (url.pathname === '/staff/communication-setup' && req.method === 'GET') {
+    (async () => {
+      const user = await requireStaff(req, res);
+      if (!user) return;
+      try {
+        const locationName = String(url.searchParams.get('locationName') || '').trim();
+        if (!locationName) return json(res, 400, { error: 'locationName_required' });
+
+        const source = await getCommunicationRecipientsForLocationName(locationName);
+        const persistedByEmail = await listCommunicationRecipientSettings(locationName);
+
+        const rows = (Array.isArray(source.recipients) ? source.recipients : []).map((email) => {
+          const normalizedEmail = String(email || '').trim().toLowerCase();
+          const saved = persistedByEmail[normalizedEmail] || null;
+          return {
+            email,
+            send_validation_email: saved ? saved.send_validation_email === true : true,
+            updated_at: saved ? saved.updated_at : null,
+            updated_by: saved ? saved.updated_by : null,
+          };
+        });
+
+        return json(res, 200, { location_name: locationName, recipients: rows });
+      } catch (e) {
+        return handleError(res, e);
+      }
+    })();
+    return;
+  }
+
+  if (url.pathname === '/staff/communication-setup' && req.method === 'PUT') {
+    (async () => {
+      const user = await requireStaff(req, res);
+      if (!user) return;
+      try {
+        const locationName = String(url.searchParams.get('locationName') || '').trim();
+        if (!locationName) return json(res, 400, { error: 'locationName_required' });
+
+        const body = await parseBody(req);
+        const email = String(body.email || '').trim();
+        const rawValue = body.send_validation_email;
+        const normalizedValue =
+          typeof rawValue === 'boolean'
+            ? rawValue
+            : String(rawValue || '').trim().toUpperCase() === 'YES';
+
+        const saved = await upsertCommunicationRecipientSetting({
+          locationName,
+          email,
+          sendValidationEmail: normalizedValue,
+          updatedBy: user.email,
+        });
+
+        return json(res, 200, { recipient: saved });
+      } catch (e) {
+        const msg = String(e.message || '');
+        if (msg === 'location_name_required' || msg === 'email_required') {
+          return json(res, 400, { error: msg });
+        }
         return handleError(res, e);
       }
     })();

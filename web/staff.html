@@ -611,6 +611,10 @@
     rulesLocationName: null,
     clientRules: null,
     clientRulesLocationName: null,
+    communicationRecipients: null,
+    communicationLocationName: null,
+    communicationRowEdits: {},
+    communicationRowMessages: {},
     excluded: [],
     excludedLocationName: null,
     employeeSearchResults: [],
@@ -684,8 +688,8 @@
     communicationSetup: {
       label: "Communication Setup",
       main: "setup",
-      subtitle: "Coming soon.",
-      existing: false,
+      subtitle: "Choose which preview contacts should receive client validation emails.",
+      existing: true,
     },
     rules: {
       label: "Internal Validation Config",
@@ -814,6 +818,11 @@
 
     if (nextTab === "excluded") {
       loadExcludedForSelected();
+      return;
+    }
+
+    if (nextTab === "communicationSetup") {
+      loadCommunicationSetupForSelected();
       return;
     }
 
@@ -1622,6 +1631,183 @@
         btn.textContent = original;
         btn.disabled = false;
       }
+    }
+  }
+
+  async function loadCommunicationSetupForSelected() {
+    const content = document.getElementById("content");
+    const name = document.getElementById("locationSelect").value;
+
+    state.communicationRecipients = null;
+    state.communicationLocationName = name || null;
+    state.communicationRowEdits = {};
+    state.communicationRowMessages = {};
+
+    if (!name) {
+      content.innerHTML = "<div class='loading'>Select a location to load communication setup.</div>";
+      return;
+    }
+
+    content.innerHTML = "<div class='loading'>Loading communication setup...</div>";
+    const q = encodeURIComponent(name);
+    const { resp, body } = await apiGet(`/staff/communication-setup?locationName=${q}`);
+    if (!resp.ok) {
+      content.innerHTML = `<div class="muted">Communication setup error: ${escapeHtml(body.error || "unknown_error")}</div>`;
+      return;
+    }
+
+    state.communicationRecipients = Array.isArray(body.recipients) ? body.recipients : [];
+    renderCommunicationSetup();
+  }
+
+  function getCommunicationRowSelectValue(email, savedBool) {
+    const normalized = String(email || "").trim().toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(state.communicationRowEdits, normalized)) {
+      return state.communicationRowEdits[normalized] ? "YES" : "NO";
+    }
+    return savedBool === false ? "NO" : "YES";
+  }
+
+  function renderCommunicationSetup() {
+    const content = document.getElementById("content");
+
+    if (!state.communicationLocationName) {
+      content.innerHTML = "<div class='loading'>Select a location to load communication setup.</div>";
+      return;
+    }
+
+    if (!state.communicationRecipients) {
+      content.innerHTML = "<div class='loading'>Loading communication setup...</div>";
+      return;
+    }
+
+    const rows = state.communicationRecipients;
+    const empty = rows.length === 0;
+
+    const tableHtml = empty
+      ? `<div class="muted">No payroll preview email recipients found in Airtable for this location.</div>`
+      : `
+      <table>
+        <thead>
+          <tr>
+            <th>Email</th>
+            <th style="width:220px;">Send Validation Email</th>
+            <th style="width:220px;">Save</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows
+            .map((row) => {
+              const email = String(row.email || "").trim();
+              const normalized = email.toLowerCase();
+              const selectValue = getCommunicationRowSelectValue(email, row.send_validation_email);
+              const rowMessage = state.communicationRowMessages[normalized] || null;
+              return `
+                <tr data-comm-email="${escapeAttr(email)}">
+                  <td>${escapeHtml(email)}</td>
+                  <td>
+                    <select data-field="send_validation_email">
+                      <option value="YES" ${selectValue === "YES" ? "selected" : ""}>YES</option>
+                      <option value="NO" ${selectValue === "NO" ? "selected" : ""}>NO</option>
+                    </select>
+                  </td>
+                  <td>
+                    <button class="btn" data-action="save-communication-row" type="button">Save</button>
+                    ${
+                      rowMessage
+                        ? `<div class="muted" style="margin-top:6px;color:${
+                            rowMessage.type === "error" ? "#b91c1c" : "#065f46"
+                          }">${escapeHtml(rowMessage.text)}</div>`
+                        : ""
+                    }
+                  </td>
+                </tr>
+              `;
+            })
+            .join("")}
+        </tbody>
+      </table>
+    `;
+
+    content.innerHTML = `
+      <div class="sectionTitle">Validation Email Recipients</div>
+      <p class="sectionHelp">Recipients are pulled from Airtable Payroll Preview email fields. Choose which addresses should receive the future validation email.</p>
+      ${tableHtml}
+    `;
+
+    content.querySelectorAll("tr[data-comm-email] select[data-field='send_validation_email']").forEach((el) => {
+      el.addEventListener("change", (event) => {
+        const tr = event.target.closest("tr[data-comm-email]");
+        if (!tr) return;
+        const email = String(tr.getAttribute("data-comm-email") || "").trim().toLowerCase();
+        state.communicationRowEdits[email] = event.target.value === "YES";
+      });
+    });
+
+    content.querySelectorAll("button[data-action='save-communication-row']").forEach((btn) => {
+      btn.addEventListener("click", async (event) => {
+        const tr = event.target.closest("tr[data-comm-email]");
+        if (!tr) return;
+        await saveCommunicationRow(tr);
+      });
+    });
+  }
+
+  async function saveCommunicationRow(tr) {
+    const email = String(tr.getAttribute("data-comm-email") || "").trim();
+    if (!email || !state.communicationLocationName) return;
+
+    const select = tr.querySelector("select[data-field='send_validation_email']");
+    const btn = tr.querySelector("button[data-action='save-communication-row']");
+    const sendValidationEmail = select && select.value === "YES";
+    const originalText = btn.textContent;
+    btn.textContent = "Saving...";
+    btn.disabled = true;
+
+    try {
+      const q = encodeURIComponent(state.communicationLocationName);
+      const { resp, body } = await apiPut(`/staff/communication-setup?locationName=${q}`, {
+        email,
+        send_validation_email: sendValidationEmail,
+      });
+
+      const normalized = email.toLowerCase();
+      if (!resp.ok) {
+        state.communicationRowMessages[normalized] = {
+          type: "error",
+          text: `Save failed: ${body.error || "unknown_error"}`,
+        };
+        renderCommunicationSetup();
+        return;
+      }
+
+      const saved = body.recipient || {};
+      state.communicationRowEdits[normalized] = saved.send_validation_email === true;
+      state.communicationRecipients = state.communicationRecipients.map((row) => {
+        if (String(row.email || "").trim().toLowerCase() !== normalized) return row;
+        return {
+          ...row,
+          send_validation_email: saved.send_validation_email === true,
+          updated_at: saved.updated_at || row.updated_at || null,
+          updated_by: saved.updated_by || row.updated_by || null,
+        };
+      });
+      state.communicationRowMessages[normalized] = { type: "success", text: "Saved." };
+
+      // TODO: Future validation email send should send only to recipients where send_validation_email = true.
+      // TODO: If any recipient clicks Confirm Validation, the payroll dashboard should later mark payroll as validated.
+
+      renderCommunicationSetup();
+    } catch (e) {
+      const normalized = email.toLowerCase();
+      state.communicationRowMessages[normalized] = {
+        type: "error",
+        text: `Save failed: ${e.message || e}`,
+      };
+      renderCommunicationSetup();
+    } finally {
+      btn.textContent = originalText;
+      btn.disabled = false;
     }
   }
 
@@ -3953,6 +4139,10 @@
     state.rulesLocationName = null;
     state.clientRules = null;
     state.clientRulesLocationName = null;
+    state.communicationRecipients = null;
+    state.communicationLocationName = null;
+    state.communicationRowEdits = {};
+    state.communicationRowMessages = {};
     state.outcomeSelector = null;
     state.outcomeResult = null;
     state.toastOriginalSelector = null;
@@ -3977,6 +4167,7 @@
     else if (tab === "confirmations") await loadRecapForSelected();
     else if (tab === "rules") await loadRulesForSelected();
     else if (tab === "clientValidationConfig") await loadClientRulesForSelected();
+    else if (tab === "communicationSetup") await loadCommunicationSetupForSelected();
     else if (tab === "excluded") await loadExcludedForSelected();
     else if (tab === "outcome") await loadOutcomeSelectorForSelected();
     else if (tab === "toastOriginal" || tab === "earningsAudit" || tab === "earningsComparison" || tab === "earningsWipExport")

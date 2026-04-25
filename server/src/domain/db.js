@@ -100,6 +100,20 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_ops_rule_configs_location
       ON ops_rule_configs (client_location_id);
 
+    -- Communication setup: per-location recipient toggle for future client validation emails
+    CREATE TABLE IF NOT EXISTS ops_validation_email_recipients (
+      location_name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      send_validation_email BOOLEAN NOT NULL DEFAULT TRUE,
+      updated_by TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (location_name, email)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ops_validation_email_recipients_location
+      ON ops_validation_email_recipients (location_name);
+
     -- Excluded Staff (global ingress filter foundation)
     -- Additive only. No changes to existing tables or routes.
     CREATE TABLE IF NOT EXISTS excluded_staff (

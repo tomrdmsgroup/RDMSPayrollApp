@@ -247,6 +247,40 @@ function normalizePreviewRecipients(vitals) {
   return { emails, count, summary };
 }
 
+function extractUniqueEmailsFromPreviewFields(vitals) {
+  const previewFieldNames = [
+    'Payroll Preview 1 Email',
+    'Payroll Preview 2 Email',
+    'Payroll Preview 3 Email',
+    'Payroll Preview 4 Email',
+    'Payroll Preview 5 Email',
+  ];
+
+  const found = [];
+  const seen = new Set();
+  const emailRegex = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
+
+  previewFieldNames.forEach((fieldName) => {
+    const raw = vitals[fieldName];
+    const values = Array.isArray(raw) ? raw : [raw];
+
+    values.forEach((value) => {
+      const text = String(value || '');
+      const matches = text.match(emailRegex) || [];
+      matches.forEach((matchedEmail) => {
+        const trimmed = String(matchedEmail || '').trim();
+        if (!trimmed) return;
+        const normalized = trimmed.toLowerCase();
+        if (seen.has(normalized)) return;
+        seen.add(normalized);
+        found.push(trimmed);
+      });
+    });
+  });
+
+  return found;
+}
+
 async function listLocationNames() {
   const vitalsTable = requireEnv('AIRTABLE_VITALS_TABLE');
   const locationField = requireEnv('AIRTABLE_VITALS_LOCATION_FIELD');
@@ -571,9 +605,27 @@ async function getActivePayrollDashboardRows() {
   };
 }
 
+async function getCommunicationRecipientsForLocationName(locationName) {
+  const vitalsTable = requireEnv('AIRTABLE_VITALS_TABLE');
+  const locationField = requireEnv('AIRTABLE_VITALS_LOCATION_FIELD');
+  const name = String(locationName || '').trim();
+  if (!name) throw new Error('location_name_required');
+
+  const filterVitals = `{${locationField}}='${escapeAirtableString(name)}'`;
+  const vitalsRecords = await airtableListAll({ table: vitalsTable, filterByFormula: filterVitals });
+  if (!vitalsRecords.length) throw new Error('location_not_found');
+
+  const vitals = vitalsRecords[0].fields || {};
+  return {
+    location_name: name,
+    recipients: extractUniqueEmailsFromPreviewFields(vitals),
+  };
+}
+
 module.exports = {
   listLocationNames,
   getRecapForLocationName,
   getPayPeriodSelectorForLocationName,
   getActivePayrollDashboardRows,
+  getCommunicationRecipientsForLocationName,
 };
