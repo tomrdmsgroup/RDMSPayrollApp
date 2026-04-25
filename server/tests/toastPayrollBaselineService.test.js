@@ -70,6 +70,27 @@ function testCompareRowsDetectsMissingAndMismatches() {
   assert.equal(result.column_mismatches[0].diffs[0].field, 'total_pay');
 }
 
+function testNormalizeUploadedRowIncludesJobCodeAndHourlyRateFromCsv() {
+  const context = { location_name: 'Barrio', period_start: '2026-04-01', period_end: '2026-04-14' };
+  const normalized = normalizeUploadedRow(
+    {
+      Employee: 'Acosta, Luis Carlos',
+      'Employee ID': '148',
+      'Job Title': 'Busser',
+      'Job Code': 'BUS100',
+      'Hourly Rate': '28.669999999999998',
+      'Regular Hours': '10.5',
+      'Overtime Hours': '1.53',
+    },
+    context,
+  );
+
+  assert.equal(normalized.job_code, 'BUS100');
+  assert.equal(normalized.hourly_rate, 28.669999999999998);
+  assert.equal(normalized.regular_hours, 10.5);
+  assert.equal(normalized.overtime_hours, 1.53);
+}
+
 function testBuildStableKeyPrefersEmployeeIdOverToastGuid() {
   const row = {
     location_name: 'Barrio',
@@ -112,4 +133,5 @@ module.exports = {
   testCompareRowsDetectsMissingAndMismatches,
   testBuildStableKeyPrefersEmployeeIdOverToastGuid,
   testBuildStableKeyFallsBackToEmployeeNameBeforeToastGuid,
+  testNormalizeUploadedRowIncludesJobCodeAndHourlyRateFromCsv,
 };

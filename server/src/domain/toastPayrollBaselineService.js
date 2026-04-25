@@ -107,6 +107,8 @@ function normalizeUploadedRow(row, context) {
   ]);
   const employeeName = pickByAliases(row, ['employee', 'employee_name', 'team_member']);
   const jobTitle = pickByAliases(row, ['job_title', 'job', 'job_name']);
+  const jobCode = pickByAliases(row, ['job_code', 'jobcode', 'position_code']);
+  const hourlyRate = toNum(pickByAliases(row, ['hourly_rate', 'hourlyrate', 'rate']));
   const locationName = pickByAliases(row, ['location', 'location_name']) || context.location_name;
   const locationCode = pickByAliases(row, ['location_code', 'restaurant_guid', 'location_id']);
 
@@ -118,6 +120,8 @@ function normalizeUploadedRow(row, context) {
     employee_id: employeeId,
     employee_name: employeeName,
     job_title: jobTitle,
+    job_code: jobCode,
+    hourly_rate: hourlyRate,
     location: locationName,
     location_code: locationCode,
     regular_hours: toNum(pickByAliases(row, ['regular_hours', 'reg_hours'])),

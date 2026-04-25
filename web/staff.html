@@ -2281,22 +2281,30 @@
     `;
   }
 
-  function normalizeEarningsRow(rawRow) {
-    const row = rawRow && typeof rawRow === "object" ? rawRow : {};
-    const getFieldValue = (aliases) => {
+  function normalizeCsvHeaderKey(header) {
+    return String(header || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "");
+  }
+
+  function createStep1CsvFieldAccessor(row) {
+    const source = row && typeof row === "object" ? row : {};
+    const keyToValue = new Map();
+    Object.entries(source).forEach(([key, value]) => {
+      keyToValue.set(normalizeCsvHeaderKey(key), value);
+    });
+    return (aliases) => {
       for (const alias of aliases) {
-        if (Object.prototype.hasOwnProperty.call(row, alias)) return row[alias];
-      }
-      const normalizedAliasSet = new Set(
-        aliases.map((alias) => String(alias || "").toLowerCase().replace(/[^a-z0-9]/g, ""))
-      );
-      for (const [key, value] of Object.entries(row)) {
-        const normalizedKey = String(key || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-        if (normalizedAliasSet.has(normalizedKey)) return value;
+        if (Object.prototype.hasOwnProperty.call(source, alias)) return source[alias];
+        const normalizedAlias = normalizeCsvHeaderKey(alias);
+        if (keyToValue.has(normalizedAlias)) return keyToValue.get(normalizedAlias);
       }
       return "";
     };
-    const formatToTwoDecimalsIfNumeric = (value) => {
+  }
+
+  function formatToTwoDecimalsIfNumeric(value) {
       if (value === null || value === undefined) return "";
       const raw = String(value).trim();
       if (!raw) return "";
@@ -2304,29 +2312,40 @@
       const parsed = Number(numericCandidate);
       if (!Number.isFinite(parsed)) return raw;
       return parsed.toFixed(2);
-    };
+  }
+
+  function normalizeEarningsRow(rawRow) {
+    const getFieldValue = createStep1CsvFieldAccessor(rawRow);
     return {
-      Employee: getFieldValue(["Employee", "employee", "employee_name", "name"]),
-      "Employee ID": getFieldValue(["Employee ID", "employee_id", "employeeId"]),
-      "Job Title": getFieldValue(["Job Title", "job_title", "jobTitle"]),
-      "Job Code": getFieldValue(["Job Code", "job_code", "jobCode"]),
-      "Hourly Rate": formatToTwoDecimalsIfNumeric(getFieldValue(["Hourly Rate", "hourly_rate", "hourlyRate"])),
-      "Reg Hours": formatToTwoDecimalsIfNumeric(getFieldValue(["Regular Hours", "regular_hours", "regularHours"])),
-      "OT Hours": formatToTwoDecimalsIfNumeric(getFieldValue(["Overtime Hours", "overtime_hours", "overtimeHours"])),
+      employee: getFieldValue(["Employee", "employee", "employee_name", "name"]),
+      employeeId: getFieldValue(["Employee ID", "employee_id", "employeeId"]),
+      jobTitle: getFieldValue(["Job Title", "job_title", "jobTitle", "department"]),
+      jobCode: getFieldValue(["Job Code", "job_code", "jobCode"]),
+      hourlyRate: formatToTwoDecimalsIfNumeric(getFieldValue(["Hourly Rate", "hourly_rate", "hourlyRate", "rate"])),
+      regHours: formatToTwoDecimalsIfNumeric(getFieldValue(["Regular Hours", "regular_hours", "regularHours", "reg_hours"])),
+      otHours: formatToTwoDecimalsIfNumeric(getFieldValue(["Overtime Hours", "overtime_hours", "overtimeHours", "ot_hours"])),
     };
   }
 
   function renderEarningsRowsTable(rows, emptyLabel) {
     const normalizedRows = (Array.isArray(rows) ? rows : []).map(normalizeEarningsRow);
-    const columns = ["Employee", "Employee ID", "Job Title", "Job Code", "Hourly Rate", "Reg Hours", "OT Hours"];
-    const head = columns.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
+    const columns = [
+      { header: "Employee", key: "employee" },
+      { header: "Employee ID", key: "employeeId" },
+      { header: "Job Title", key: "jobTitle" },
+      { header: "Job Code", key: "jobCode" },
+      { header: "Hourly Rate", key: "hourlyRate" },
+      { header: "Reg Hours", key: "regHours" },
+      { header: "OT Hours", key: "otHours" },
+    ];
+    const head = columns.map((c) => `<th>${escapeHtml(c.header)}</th>`).join("");
     const body = normalizedRows.length
       ? normalizedRows
           .map((row) => {
             const cells = columns
               .map((col) => {
-                const align = col === "Employee" ? "left" : "center";
-                const value = row[col] === null || row[col] === undefined ? "" : String(row[col]);
+                const align = col.key === "employee" ? "left" : "center";
+                const value = row[col.key] === null || row[col.key] === undefined ? "" : String(row[col.key]);
                 return `<td style="text-align:${align};">${escapeHtml(value)}</td>`;
               })
               .join("");
