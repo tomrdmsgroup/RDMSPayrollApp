@@ -394,6 +394,29 @@
         border: none;
         border-radius: 0;
       }
+      .tableScroll table.internalValidationTable {
+        width: 100%;
+        min-width: 1200px;
+        table-layout: fixed;
+      }
+      .internalValidationTable .whatChecksCol {
+        width: 320px;
+        max-width: 360px;
+      }
+      .internalValidationTable .whatChecksCell {
+        text-align: left;
+        vertical-align: top;
+      }
+      .internalValidationTable .whatChecksCell .defClamp {
+        display: block;
+        -webkit-line-clamp: unset;
+        max-height: none;
+        overflow: visible;
+        line-height: 1.35;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        word-break: normal;
+      }
       .toastOriginalDataPanel {
         overflow-x: hidden;
       }
@@ -1295,17 +1318,17 @@
 
     const tableHead = `
       <div class="tableScroll">
-      <table>
+      <table class="internalValidationTable">
         <thead>
           <tr>
-            <th style="width:140px;">Rule ID</th>
-            <th style="width:220px;">Rule Name</th>
-            <th style="width:170px;">Threshold / Setting</th>
-            <th>What it checks</th>
-            <th class="thWrap thYesNo" style="width:98px;">Active</th>
-            <th class="thWrap thYesNo" style="width:120px;">Create Asana Task</th>
-            <th class="thWrap thYesNo" style="width:148px;">Create One Task Per Finding</th>
-            <th class="thWrap thYesNo" style="width:168px;">Include in Preview<br/>Recap Report</th>
+            <th class="thWrap" style="width:140px;">Rule ID</th>
+            <th class="thWrap" style="width:220px;">Rule Name</th>
+            <th class="thWrap" style="width:170px;">Threshold / Setting</th>
+            <th class="thWrap whatChecksCol">What it checks</th>
+            <th class="thWrap thYesNo" style="width:104px;">Active</th>
+            <th class="thWrap thYesNo" style="width:130px;">Create Asana Task</th>
+            <th class="thWrap thYesNo" style="width:156px;">Create One Task Per Finding</th>
+            <th class="thWrap thYesNo" style="width:170px;">Include in Preview Recap Report</th>
             <th class="thWrap saveCol" style="width:86px;">Save</th>
           </tr>
         </thead>
@@ -1334,7 +1357,7 @@
             <td><span class="mono">${rid}</span></td>
             <td>${rname}</td>
             <td>${paramsCell}</td>
-            <td>
+            <td class="whatChecksCell">
               <div class="defTip" data-full="${escapeAttr(defRaw)}">
                 <div class="defClamp">${def}</div>
               </div>
