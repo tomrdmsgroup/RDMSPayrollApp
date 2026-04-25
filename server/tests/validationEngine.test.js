@@ -1,5 +1,7 @@
 const assert = require('assert');
-const { runValidation } = require('../src/domain/validationEngine');
+const fs = require('fs');
+const path = require('path');
+const { runValidation, __test } = require('../src/domain/validationEngine');
 
 async function testRunValidationFindsNewEmpRateDept() {
   const selectedKey = '2026-03-01__2026-03-14';
@@ -21,15 +23,13 @@ async function testRunValidationFindsNewEmpRateDept() {
             employeeGuid: 'E1',
             employeeName: 'Alex Able',
             jobName: 'Server',
-            regularHours: 10,
-            regularCost: 200,
+            hourlyRate: 20,
           },
           {
             employeeGuid: 'E2',
             employeeName: 'Bri Baker',
             jobName: 'Bar',
-            regularHours: 8,
-            regularCost: 160,
+            hourlyRate: 20,
           },
         ],
         [prior1Key]: [
@@ -37,8 +37,7 @@ async function testRunValidationFindsNewEmpRateDept() {
             employeeGuid: 'E1',
             employeeName: 'Alex Able',
             jobName: 'Host',
-            regularHours: 8,
-            regularCost: 160,
+            hourlyRate: 20,
           },
         ],
       },
@@ -70,8 +69,8 @@ async function testRunValidationHonorsExclusionsAndActiveRules() {
       comparison_periods: [],
       toast_rows_by_period: {
         '2026-03-01__2026-03-14': [
-          { employeeGuid: 'EX1', employeeName: 'Excluded Person', jobName: 'Server', regularHours: 8, regularCost: 120 },
-          { employeeGuid: 'A1', employeeName: 'Active Person', jobName: 'Server', regularHours: 8, regularCost: 120 },
+          { employeeGuid: 'EX1', employeeName: 'Excluded Person', jobName: 'Server', hourlyRate: 20 },
+          { employeeGuid: 'A1', employeeName: 'Active Person', jobName: 'Server', hourlyRate: 20 },
         ],
       },
     },
@@ -90,7 +89,115 @@ async function testRunValidationHonorsExclusionsAndActiveRules() {
   assert.equal(result.findings[0].rule_id, 'NEWEMP');
 }
 
+function testValidationEngineDoesNotImportAnalyticsProvider() {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'domain', 'validationEngine.js'), 'utf8');
+  assert.equal(source.includes('fetchToastAnalyticsJobsFromVitals'), false);
+}
+
+function testValidationEngineDoesNotCallEraLaborEndpoint() {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'domain', 'validationEngine.js'), 'utf8');
+  assert.equal(source.includes('/era/v1/labor'), false);
+}
+
+async function testFetchToastRowsForPeriodsUsesStandardOnlyAndLoadsSelectedAndPrior() {
+  const calls = {
+    vitals: 0,
+    employees: 0,
+    jobs: 0,
+    timeEntries: [],
+  };
+
+  const result = await __test.fetchToastRowsForPeriods({
+    clientLocationId: 'Test Location',
+    periods: [
+      { period_start: '2026-03-01', period_end: '2026-03-14' },
+      { period_start: '2026-02-15', period_end: '2026-02-28' },
+    ],
+    deps: {
+      fetchVitalsSnapshot: async () => {
+        calls.vitals += 1;
+        return { data: [{}] };
+      },
+      fetchToastEmployeesFromVitals: async () => {
+        calls.employees += 1;
+        return {
+          ok: true,
+          data: [{ guid: 'E1', firstName: 'Alex', lastName: 'Able', externalEmployeeId: 'PAY-1' }],
+        };
+      },
+      fetchToastJobsFromVitals: async () => {
+        calls.jobs += 1;
+        return {
+          ok: true,
+          data: [{ guid: 'J1', title: 'Server', code: 'S-1' }],
+        };
+      },
+      fetchToastTimeEntriesFromVitals: async ({ periodStart, periodEnd }) => {
+        calls.timeEntries.push(`${periodStart}__${periodEnd}`);
+        return {
+          ok: true,
+          data: [
+            {
+              employeeReference: { guid: 'E1' },
+              jobReference: { guid: 'J1' },
+              hourlyWage: 22.5,
+              regularHours: 8,
+              overtimeHours: 1,
+              businessDate: '2026-03-02',
+            },
+          ],
+        };
+      },
+    },
+  });
+
+  assert.equal(calls.vitals, 1);
+  assert.equal(calls.employees, 1);
+  assert.equal(calls.jobs, 1);
+  assert.deepEqual(calls.timeEntries, ['2026-03-01__2026-03-14', '2026-02-15__2026-02-28']);
+  assert.equal(Object.keys(result.rowsByPeriod).length, 2);
+  assert.equal(result.sourceMeta.length, 2);
+  assert.equal(result.sourceMeta[0].source, 'toast_standard_labor');
+  assert.deepEqual(result.sourceMeta[0].endpoints, ['/labor/v1/timeEntries', '/labor/v1/employees', '/labor/v1/jobs']);
+}
+
+function testStandardJoinNormalizesEmployeeJobAndRateFields() {
+  const rows = __test.normalizeStandardValidationRows({
+    timeEntryRows: [
+      {
+        employeeReference: { guid: 'emp-1' },
+        jobReference: { guid: 'job-1' },
+        hourlyWage: 18.5,
+        regularHours: 6,
+        overtimeHours: 2,
+        businessDate: '2026-03-11',
+        inDate: '2026-03-11T09:00:00.000Z',
+        outDate: '2026-03-11T17:00:00.000Z',
+      },
+    ],
+    employeeRows: [{ guid: 'emp-1', firstName: 'Alex', lastName: 'Able', externalEmployeeId: 'P-100' }],
+    jobRows: [{ guid: 'job-1', title: 'Server', code: 'S-1', defaultWage: 25 }],
+  });
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].employeeGuid, 'emp-1');
+  assert.equal(rows[0].toast_employee_id, 'emp-1');
+  assert.equal(rows[0].employeeName, 'Able, Alex');
+  assert.equal(rows[0].externalEmployeeId, 'P-100');
+  assert.equal(rows[0].jobGuid, 'job-1');
+  assert.equal(rows[0].jobTitle, 'Server');
+  assert.equal(rows[0].departmentName, 'Server');
+  assert.equal(rows[0].jobCode, 'S-1');
+  assert.equal(rows[0].hourlyRate, 18.5);
+  assert.equal(rows[0].payRate, 18.5);
+  assert.equal(rows[0].rate, 18.5);
+}
+
 module.exports = {
   testRunValidationFindsNewEmpRateDept,
   testRunValidationHonorsExclusionsAndActiveRules,
+  testValidationEngineDoesNotImportAnalyticsProvider,
+  testValidationEngineDoesNotCallEraLaborEndpoint,
+  testFetchToastRowsForPeriodsUsesStandardOnlyAndLoadsSelectedAndPrior,
+  testStandardJoinNormalizesEmployeeJobAndRateFields,
 };

@@ -39,6 +39,10 @@ const {
 const {
   testRunValidationFindsNewEmpRateDept,
   testRunValidationHonorsExclusionsAndActiveRules,
+  testValidationEngineDoesNotImportAnalyticsProvider,
+  testValidationEngineDoesNotCallEraLaborEndpoint,
+  testFetchToastRowsForPeriodsUsesStandardOnlyAndLoadsSelectedAndPrior,
+  testStandardJoinNormalizesEmployeeJobAndRateFields,
 } = require('./validationEngine.test');
 const {
   testNormalizeEmployeeIdentityUsesFallbackMappings,
@@ -133,6 +137,10 @@ async function runAll() {
     testIsFailureFindingOnlyErrors,
     testRunValidationFindsNewEmpRateDept,
     testRunValidationHonorsExclusionsAndActiveRules,
+    testValidationEngineDoesNotImportAnalyticsProvider,
+    testValidationEngineDoesNotCallEraLaborEndpoint,
+    testFetchToastRowsForPeriodsUsesStandardOnlyAndLoadsSelectedAndPrior,
+    testStandardJoinNormalizesEmployeeJobAndRateFields,
     testNormalizeEmployeeIdentityUsesFallbackMappings,
     testGroupingUsesToastGuidNotPayrollEmployeeId,
     testGroupingSplitsSameEmployeeAndDepartmentAcrossRates,
