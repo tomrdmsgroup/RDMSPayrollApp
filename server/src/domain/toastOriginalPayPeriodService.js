@@ -966,7 +966,7 @@ function buildToastOriginalHoursRows({ timeEntryRows, employeeRows, jobRows, inc
   const empDim = {};
   for (const e of Array.isArray(employeeRows) ? employeeRows : []) {
     const chosenName = safeTrim(e?.chosenName);
-    const computedName = fullNameFromParts(e?.firstName, e?.lastName) || chosenName;
+    const computedName = formatLastFirst(e?.firstName, e?.lastName) || chosenName;
     const obj = {
       displayName: computedName || '',
       externalId: safeTrim(e?.externalEmployeeId) || safeTrim(e?.externalId) || '',
