@@ -643,6 +643,7 @@
     toastOriginalLastApiLoadPayload: null,
     toastOriginalLastUploadResponse: null,
     toastOriginalLastApiLoadResponse: null,
+    earningsWipOverrideConfirmed: false,
   };
   let excludedSearchDebounceTimer = null;
 
@@ -650,7 +651,7 @@
     { key: "dashboardMain", label: "Payroll Dashboard", tabs: [] },
     { key: "setup", label: "Setup", tabs: ["excluded", "confirmations", "communicationSetup"] },
     { key: "payrollValidation", label: "Payroll Validation", tabs: ["rules", "outcome", "clientValidationConfig"] },
-    { key: "earningsAuditMain", label: "Earnings Audit", tabs: ["toastOriginal", "earningsAudit", "earningsComparison"] },
+    { key: "earningsAuditMain", label: "Earnings Audit", tabs: ["toastOriginal", "earningsAudit", "earningsComparison", "earningsWipExport"] },
     { key: "tipsAudit", label: "Tips Audit", tabs: ["tipImport"] },
     { key: "reportsMain", label: "Reports", tabs: ["payrollExport", "reports"] },
   ];
@@ -714,6 +715,12 @@
       label: "Step 3: Earnings Comparison",
       main: "earningsAuditMain",
       subtitle: "Coming soon. This page will compare Step 1 uploads to Step 2 API rows.",
+      existing: true,
+    },
+    earningsWipExport: {
+      label: "Step 4: Earnings WIP Export",
+      main: "earningsAuditMain",
+      subtitle: "Review the payroll export format, confirm comparison status, then export the Earnings WIP file.",
       existing: true,
     },
     tipImport: {
@@ -824,6 +831,15 @@
         return;
       }
       renderEarningsComparisonTab();
+      return;
+    }
+
+    if (nextTab === "earningsWipExport") {
+      if (!state.toastOriginalSelector) {
+        loadToastOriginalSelectorForSelected();
+        return;
+      }
+      renderEarningsWipExportTab();
       return;
     }
 
@@ -1577,20 +1593,25 @@
     await loadExcludedForSelected();
   }
 
-  async function loadRecapForSelected() {
-    const sel = document.getElementById("locationSelect");
-    const name = sel.value;
+  async function loadRecapSnapshotForSelected() {
+    const name = document.getElementById("locationSelect").value;
     state.recap = null;
-    renderConfirmations();
     if (!name) return;
 
     const q = encodeURIComponent(name);
     const { resp, body } = await apiGet(`/staff/recap?locationName=${q}`);
-    if (!resp.ok) {
-      document.getElementById("content").innerHTML = `<div class="muted">Recap error: ${body.error || "unknown_error"}</div>`;
+    if (!resp.ok) throw new Error(body.error || "unknown_error");
+    state.recap = body.recap || null;
+  }
+
+  async function loadRecapForSelected() {
+    renderConfirmations();
+    try {
+      await loadRecapSnapshotForSelected();
+    } catch (err) {
+      document.getElementById("content").innerHTML = `<div class="muted">Recap error: ${escapeHtml((err && err.message) || "unknown_error")}</div>`;
       return;
     }
-    state.recap = body.recap || null;
     renderConfirmations();
   }
 
@@ -1750,7 +1771,145 @@
   function renderActiveToastAuditPage() {
     if (state.tab === "earningsAudit") renderEarningsAuditTab();
     else if (state.tab === "earningsComparison") renderEarningsComparisonTab();
+    else if (state.tab === "earningsWipExport") renderEarningsWipExportTab();
     else renderToastOriginalTab();
+  }
+
+  function getEarningsWipExportFormat(payrollCompanyRaw) {
+    const payrollCompany = String(payrollCompanyRaw || "").trim();
+    if (!payrollCompany) {
+      return { formatLabel: "Missing payroll company", exportConfigured: false };
+    }
+    if (payrollCompany === "ADP Run") {
+      return { formatLabel: "ADP Run Earnings WIP", exportConfigured: true };
+    }
+    if (payrollCompany === "ADP WFN") {
+      return { formatLabel: "ADP WFN Earnings WIP, not configured yet", exportConfigured: false };
+    }
+    if (payrollCompany === "Paychex") {
+      return { formatLabel: "Paychex Earnings WIP, not configured yet", exportConfigured: false };
+    }
+    return {
+      formatLabel: "No Earnings WIP export format configured for this payroll company",
+      exportConfigured: false,
+    };
+  }
+
+  function getStep3ReadinessStatus(comparison) {
+    const summary = comparison?.summary || {};
+    const hasIssue =
+      (summary.rowVariance || 0) !== 0 ||
+      Math.abs(summary.regVariance || 0) > (comparison?.hoursTolerance || 0.01) ||
+      Math.abs(summary.otVariance || 0) > (comparison?.hoursTolerance || 0.01) ||
+      (summary.rateMismatchCount || 0) > 0 ||
+      (comparison?.csvKeyIssues || []).length > 0 ||
+      (comparison?.apiKeyIssues || []).length > 0 ||
+      (comparison?.missingInApi || []).length > 0 ||
+      (comparison?.missingInCsv || []).length > 0 ||
+      (comparison?.hourMismatches || []).length > 0;
+    return hasIssue
+      ? {
+          ready: false,
+          title: "Review required before export",
+          detail: "Step 3 has comparison issues. Export is allowed only with override.",
+          toneClass: "review",
+        }
+      : {
+          ready: true,
+          title: "Ready to export",
+          detail: "No blocking comparison issues found.",
+          toneClass: "matched",
+        };
+  }
+
+  function renderEarningsWipExportTab() {
+    const content = document.getElementById("content");
+    const locationName = document.getElementById("locationSelect").value;
+    if (!locationName) {
+      content.innerHTML = "<div class='loading'>Select a location to use Earnings WIP Export.</div>";
+      return;
+    }
+
+    const selectedPeriod = getSelectedToastOriginalPeriod();
+    const csvRows = extractToastOriginalCsvRows(state.toastOriginalCsvBaseline);
+    const apiRows = Array.isArray(state.toastOriginalData?.rows) ? state.toastOriginalData.rows : [];
+    const comparison = compareEarningsGroups(csvRows, apiRows, state.excluded);
+    const readiness = getStep3ReadinessStatus(comparison);
+    const payrollCompany = String(state.recap?.payroll_company || "").trim();
+    const exportInfo = getEarningsWipExportFormat(payrollCompany);
+    const exportBlockedByFormat = !exportInfo.exportConfigured;
+    const needsOverride = !readiness.ready;
+    const exportActionEnabled = !exportBlockedByFormat && (!needsOverride || state.earningsWipOverrideConfirmed);
+
+    // TODO: When export storage is implemented, capture:
+    // override_used, override_user, override_timestamp, step3_status_at_export,
+    // payroll_company, export_format, period_start, period_end.
+    const overrideHtml = needsOverride
+      ? `
+          <div class="miniCard" style="margin-top:12px;border-color:rgba(241, 196, 15, 0.55);">
+            <label class="row" style="gap:8px;align-items:flex-start;">
+              <input id="earningsWipOverrideCheckbox" type="checkbox" ${state.earningsWipOverrideConfirmed ? "checked" : ""} />
+              <span>I understand Step 3 has unresolved issues and want to export anyway.</span>
+            </label>
+          </div>
+        `
+      : "";
+
+    const formatWarningHtml = exportBlockedByFormat
+      ? `<div class="statusCard review" style="margin-top:12px;">
+          <div class="statusCardTitle">Export format warning</div>
+          <div class="muted">No Earnings WIP export format is configured for this payroll company yet.</div>
+        </div>`
+      : "";
+
+    content.innerHTML = `
+      <div class="stack">
+        <div class="panel">
+          <div class="sectionTitle" style="margin-top:0;">Earnings WIP Export Setup</div>
+          <div class="muted" style="margin-top:8px;">Review export readiness for this location and pay period.</div>
+
+          <div class="summaryGrid" style="margin-top:12px;">
+            <div class="summaryMetric"><div class="summaryMetricLabel">Location</div><div class="summaryMetricValue">${escapeHtml(locationName)}</div></div>
+            <div class="summaryMetric"><div class="summaryMetricLabel">Selected pay period</div><div class="summaryMetricValue">${escapeHtml(selectedPeriod?.label || "Not selected")}</div></div>
+            <div class="summaryMetric"><div class="summaryMetricLabel">Payroll company</div><div class="summaryMetricValue">${escapeHtml(payrollCompany || "Missing payroll company")}</div></div>
+            <div class="summaryMetric"><div class="summaryMetricLabel">Export format</div><div class="summaryMetricValue">${escapeHtml(exportInfo.formatLabel)}</div></div>
+            <div class="summaryMetric"><div class="summaryMetricLabel">Source</div><div class="summaryMetricValue">Step 3 Earnings Comparison</div></div>
+            <div class="summaryMetric"><div class="summaryMetricLabel">Comparison status</div><div class="summaryMetricValue">${escapeHtml(readiness.ready ? "Ready to export" : "Review required before export")}</div></div>
+          </div>
+
+          <div class="statusCard ${escapeAttr(readiness.toneClass)}" style="margin-top:12px;">
+            <div class="statusCardTitle">Comparison readiness</div>
+            <div class="statusCardValue">${escapeHtml(readiness.title)}</div>
+            <div class="muted" style="margin-top:4px;">${escapeHtml(readiness.detail)}</div>
+          </div>
+
+          ${formatWarningHtml}
+          ${overrideHtml}
+
+          <div class="row" style="margin-top:14px;">
+            <button class="btn primary" id="earningsWipExportBtn" type="button" ${exportActionEnabled ? "" : "disabled"}>
+              Export Earnings WIP as XLSX
+            </button>
+          </div>
+          <div class="muted" style="margin-top:8px;">Export generation is not configured yet.</div>
+        </div>
+      </div>
+    `;
+
+    const overrideCheckbox = document.getElementById("earningsWipOverrideCheckbox");
+    if (overrideCheckbox) {
+      overrideCheckbox.addEventListener("change", () => {
+        state.earningsWipOverrideConfirmed = !!overrideCheckbox.checked;
+        renderEarningsWipExportTab();
+      });
+    }
+
+    const exportBtn = document.getElementById("earningsWipExportBtn");
+    if (exportBtn) {
+      exportBtn.addEventListener("click", () => {
+        window.alert("Export generation is not configured yet.");
+      });
+    }
   }
 
   function renderOutcomeTab() {
@@ -3224,6 +3383,11 @@
 
     const name = document.getElementById("locationSelect").value;
     if (!name) return;
+    try {
+      await loadRecapSnapshotForSelected();
+    } catch (_err) {
+      state.recap = null;
+    }
     await loadExcludedSnapshotForLocation(name);
 
     const q = encodeURIComponent(name);
@@ -3468,12 +3632,14 @@
     state.toastOriginalLastApiLoadPayload = null;
     state.toastOriginalLastUploadResponse = null;
     state.toastOriginalLastApiLoadResponse = null;
+    state.earningsWipOverrideConfirmed = false;
 
     if (tab === "confirmations") await loadRecapForSelected();
     else if (tab === "rules") await loadRulesForSelected();
     else if (tab === "excluded") await loadExcludedForSelected();
     else if (tab === "outcome") await loadOutcomeSelectorForSelected();
-    else if (tab === "toastOriginal" || tab === "earningsAudit" || tab === "earningsComparison") await loadToastOriginalSelectorForSelected();
+    else if (tab === "toastOriginal" || tab === "earningsAudit" || tab === "earningsComparison" || tab === "earningsWipExport")
+      await loadToastOriginalSelectorForSelected();
   });
 
   document.getElementById("mainTabs").addEventListener("click", (event) => {
