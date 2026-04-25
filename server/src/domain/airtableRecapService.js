@@ -39,9 +39,25 @@ async function airtableListAll({ table, filterByFormula, fields }) {
 
     const url = `${urlBase}/${encodeURIComponent(table)}?${params.toString()}`;
     const resp = await fetch(url, { method: 'GET', headers });
-    const body = await resp.json();
+    const rawBody = await resp.text();
+    let body = {};
+    try {
+      body = rawBody ? JSON.parse(rawBody) : {};
+    } catch (_) {
+      body = {};
+    }
 
-    if (!resp.ok) throw new Error(`airtable_list_failed:${resp.status}`);
+    if (!resp.ok) {
+      const bodyPreview = String(rawBody || '').slice(0, 500);
+      console.error('[airtable] list failed', {
+        table,
+        filterByFormula: filterByFormula || null,
+        requestedFields: Array.isArray(fields) ? fields : [],
+        status: resp.status,
+        bodyPreview,
+      });
+      throw new Error(`airtable_list_failed:${resp.status}`);
+    }
 
     (body.records || []).forEach((r) => out.push(r));
     offset = body.offset || null;
@@ -496,36 +512,27 @@ async function getActivePayrollDashboardRows() {
     table: vitalsTable,
     fields: [
       locationField,
+      'Name',
       'Payroll Calendar (from PR Calendar)',
       'Payroll Calendar',
       'PR Calendar Name',
       'PR Lead',
-      'PR Lead Name',
-      'PR Lead Names',
-      'PR Lead (from PR Lead)',
-      'PR Lead Lookup',
-      'PR Lead Email Lookup',
-      'PR Lead Email',
-      'Time Zone',
-      'PR Validation APP Active?',
     ],
   });
 
   const clientConfigs = vitalsRecords
     .map((record) => {
       const fields = record.fields || {};
-      const clientName = (fields[locationField] || '').toString().trim();
+      const clientName = (fields[locationField] || fields.Name || '').toString().trim();
       const calendarName =
         fields['Payroll Calendar (from PR Calendar)'] || fields['Payroll Calendar'] || fields['PR Calendar Name'] || null;
       return {
         client_name: clientName,
         payroll_calendar: calendarName ? String(calendarName).trim() : '',
-        pr_lead: resolvePrLeadDisplay(fields),
-        time_zone: (fields['Time Zone'] || '').toString().trim(),
-        app_active: fields['PR Validation APP Active?'] === true,
+        pr_lead: (fields['PR Lead'] || '').toString().trim(),
       };
     })
-    .filter((row) => row.client_name && row.payroll_calendar && row.app_active);
+    .filter((row) => row.client_name && row.payroll_calendar);
 
   if (!clientConfigs.length) {
     return {
@@ -534,36 +541,29 @@ async function getActivePayrollDashboardRows() {
     };
   }
 
-  const detailRecords = await airtableListAll({
-    table: payrollDetailsTable,
-    fields: [
-      'PR Calendar Name - Master',
-      'PR Period Start Date',
-      'PR Period End Date',
-      'PR Period Validation Date',
-      'PR Period Submit Date',
-    ],
-  });
-
-  const detailsByCalendar = new Map();
-  for (const rec of detailRecords) {
-    const fields = rec.fields || {};
-    const key = (fields['PR Calendar Name - Master'] || '').toString().trim();
-    if (!key) continue;
-    if (!detailsByCalendar.has(key)) detailsByCalendar.set(key, []);
-    detailsByCalendar.get(key).push(fields);
-  }
-
   const rows = [];
+  const todayYmd = toYmd(new Date().toISOString());
   for (const client of clientConfigs) {
-    const calendarRows = detailsByCalendar.get(client.payroll_calendar) || [];
-    const todayYmd = getTodayYmdForTimeZone(client.time_zone);
+    const filterDetails = `{PR Calendar Name - Master}='${escapeAirtableString(client.payroll_calendar)}'`;
+    const detailRecords = await airtableListAll({
+      table: payrollDetailsTable,
+      filterByFormula: filterDetails,
+      fields: [
+        'PR Period Start Date',
+        'PR Period End Date',
+        'PR Period Validation Date',
+        'PR Period Submit Date',
+        'PR Period Check Date',
+      ],
+    });
 
-    for (const fields of calendarRows) {
+    for (const rec of detailRecords) {
+      const fields = rec.fields || {};
       const startDate = toYmd(fields['PR Period Start Date']);
       const endDate = toYmd(fields['PR Period End Date']);
       const validationDate = toYmd(fields['PR Period Validation Date']);
       const submitDate = toYmd(fields['PR Period Submit Date']);
+      const checkDate = toYmd(fields['PR Period Check Date']);
       if (!endDate || !submitDate) continue;
       if (!(endDate <= todayYmd && todayYmd <= submitDate)) continue;
 
@@ -575,6 +575,7 @@ async function getActivePayrollDashboardRows() {
         payroll_end_date: endDate,
         validation_date: validationDate,
         submit_date: submitDate,
+        check_date: checkDate,
         validated_by_client: 'No',
       });
     }
