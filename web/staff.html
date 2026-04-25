@@ -179,6 +179,20 @@
         font-weight: 600;
         background: #f9fafb;
       }
+      .toastOriginalRowsTable th {
+        text-align: center;
+        color: #374151;
+        background: #f3f4f6;
+        border-bottom: 2px solid rgba(17, 17, 17, 0.18);
+      }
+      .toastOriginalRowsTable td {
+        text-align: center;
+        vertical-align: middle;
+        padding: 8px 10px;
+      }
+      .toastOriginalRowsTable td:first-child {
+        text-align: left;
+      }
       tr:last-child td {
         border-bottom: none;
       }
@@ -1974,38 +1988,44 @@
   }
 
   function renderToastOriginalTable(columns, rows) {
-    const preferredOrder = [
-      "Employee",
-      "Employee ID",
-      "Department",
-      "Job Code",
-      "Regular Hours",
-      "Overtime Hours",
-      "Hourly Rate",
-      "Regular Pay",
-      "Overtime Pay",
-      "Total Pay",
-      "Net Sales",
-      "Declared Tips",
-      "Non-Cash Tips",
-      "Total Tips",
-      "Tips Withheld",
-      "Total Gratuity",
-      "Location",
-      "Location Code",
+    const preferredColumns = [
+      { header: "Employee", sources: ["Employee"] },
+      { header: "Employee ID", sources: ["Employee ID"] },
+      { header: "Job Title", sources: ["Job Title", "Department"] },
+      { header: "Job Code", sources: ["Job Code"] },
+      { header: "Hourly Rate", sources: ["Hourly Rate"] },
+      { header: "Reg Hours", sources: ["Regular Hours"] },
+      { header: "OT Hours", sources: ["Overtime Hours"] },
+      { header: "Regular Pay", sources: ["Regular Pay"] },
+      { header: "Overtime Pay", sources: ["Overtime Pay"] },
+      { header: "Total Pay", sources: ["Total Pay"] },
+      { header: "Net Sales", sources: ["Net Sales"] },
+      { header: "Declared Tips", sources: ["Declared Tips"] },
+      { header: "Non-Cash Tips", sources: ["Non-Cash Tips"] },
+      { header: "Total Tips", sources: ["Total Tips"] },
+      { header: "Tips Withheld", sources: ["Tips Withheld"] },
+      { header: "Total Gratuity", sources: ["Total Gratuity"] },
+      { header: "Location", sources: ["Location"] },
+      { header: "Location Code", sources: ["Location Code"] },
     ];
 
-    const present = preferredOrder.filter((c) => columns.includes(c) || rows.some((r) => r && Object.prototype.hasOwnProperty.call(r, c)));
-    const extras = columns.filter((c) => !present.includes(c) && c !== "Toast Employee ID");
-    const displayColumns = present.concat(extras);
+    const displayColumns = preferredColumns.filter((col) =>
+      col.sources.some((source) => columns.includes(source) || rows.some((r) => r && Object.prototype.hasOwnProperty.call(r, source)))
+    );
+    const coveredSources = new Set(displayColumns.flatMap((col) => col.sources));
+    const extras = columns
+      .filter((c) => !coveredSources.has(c) && c !== "Toast Employee ID")
+      .map((c) => ({ header: c, sources: [c] }));
+    const finalColumns = displayColumns.concat(extras);
 
-    const head = displayColumns.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
+    const head = finalColumns.map((col) => `<th>${escapeHtml(col.header)}</th>`).join("");
     const body = rows.length
       ? rows
           .map((row) => {
-            const cells = displayColumns
+            const cells = finalColumns
               .map((col) => {
-                const value = row && Object.prototype.hasOwnProperty.call(row, col) ? row[col] : "";
+                const sourceKey = col.sources.find((source) => row && Object.prototype.hasOwnProperty.call(row, source));
+                const value = sourceKey ? row[sourceKey] : "";
                 const rendered =
                   value === null || value === undefined
                     ? ""
@@ -2018,7 +2038,7 @@
             return `<tr>${cells}</tr>`;
           })
           .join("")
-      : `<tr><td colspan="${Math.max(displayColumns.length, 1)}" class="muted">No rows returned for this pay period.</td></tr>`;
+      : `<tr><td colspan="${Math.max(finalColumns.length, 1)}" class="muted">No rows returned for this pay period.</td></tr>`;
 
     const regularHoursTotal = rows.reduce((sum, row) => {
       const val = Number(row?.["Regular Hours"]);
@@ -2031,7 +2051,7 @@
 
     return {
       html: `
-        <div class="tableScroll"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>
+        <div class="tableScroll"><table class="toastOriginalRowsTable"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>
         <div class="miniCard" style="margin-top:10px;">
           <div><span class="muted">Regular Hours Total:</span> <b>${escapeHtml(regularHoursTotal.toFixed(2))}</b></div>
           <div style="margin-top:4px;"><span class="muted">Overtime Hours Total:</span> <b>${escapeHtml(
@@ -2314,6 +2334,7 @@
       <div class="stack">
         <div class="panel toastOriginalControlsPanel">
           <div class="sectionTitle" style="margin-top:0;">Pay Period to Audit</div>
+          <div class="sourceNote" style="margin-top:2px;"><em>From Step 1: POS Import</em></div>
           <div class="row" style="margin-top:10px;">
             <label style="min-width:320px;flex:1;">
               <select id="toastOriginalAuditPeriodSelect">
