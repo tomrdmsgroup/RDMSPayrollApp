@@ -2283,14 +2283,36 @@
 
   function normalizeEarningsRow(rawRow) {
     const row = rawRow && typeof rawRow === "object" ? rawRow : {};
+    const getFieldValue = (aliases) => {
+      for (const alias of aliases) {
+        if (Object.prototype.hasOwnProperty.call(row, alias)) return row[alias];
+      }
+      const normalizedAliasSet = new Set(
+        aliases.map((alias) => String(alias || "").toLowerCase().replace(/[^a-z0-9]/g, ""))
+      );
+      for (const [key, value] of Object.entries(row)) {
+        const normalizedKey = String(key || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+        if (normalizedAliasSet.has(normalizedKey)) return value;
+      }
+      return "";
+    };
+    const formatToTwoDecimalsIfNumeric = (value) => {
+      if (value === null || value === undefined) return "";
+      const raw = String(value).trim();
+      if (!raw) return "";
+      const numericCandidate = raw.replace(/[$,%\s]/g, "").replace(/,/g, "");
+      const parsed = Number(numericCandidate);
+      if (!Number.isFinite(parsed)) return raw;
+      return parsed.toFixed(2);
+    };
     return {
-      Employee: row["Employee"] ?? row.employee_name ?? "",
-      "Employee ID": row["Employee ID"] ?? row.employee_id ?? "",
-      "Job Title": row["Job Title"] ?? row["Department"] ?? row.job_title ?? row.department ?? "",
-      "Job Code": row["Job Code"] ?? row.job_code ?? "",
-      "Hourly Rate": row["Hourly Rate"] ?? row.hourly_rate ?? "",
-      "Reg Hours": row["Regular Hours"] ?? row.regular_hours ?? "",
-      "OT Hours": row["Overtime Hours"] ?? row.overtime_hours ?? "",
+      Employee: getFieldValue(["Employee", "employee", "employee_name", "name"]),
+      "Employee ID": getFieldValue(["Employee ID", "employee_id", "employeeId"]),
+      "Job Title": getFieldValue(["Job Title", "job_title", "jobTitle"]),
+      "Job Code": getFieldValue(["Job Code", "job_code", "jobCode"]),
+      "Hourly Rate": formatToTwoDecimalsIfNumeric(getFieldValue(["Hourly Rate", "hourly_rate", "hourlyRate"])),
+      "Reg Hours": formatToTwoDecimalsIfNumeric(getFieldValue(["Regular Hours", "regular_hours", "regularHours"])),
+      "OT Hours": formatToTwoDecimalsIfNumeric(getFieldValue(["Overtime Hours", "overtime_hours", "overtimeHours"])),
     };
   }
 
