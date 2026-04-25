@@ -3,9 +3,7 @@
 // Step 3: Read-only Toast proof.
 // - Pull Toast config from an Airtable vitals record.
 // - OAuth login (clientId/clientSecret/userAccessType) to get a bearer token.
-// - Call:
-//    (A) STANDARD labor time entries
-//    (B) ANALYTICS labor jobs via ERA
+// - Call Toast Standard labor endpoints for earnings-audit workloads.
 // - Never return secrets or tokens.
 
 const { fetchAirtableRecords } = require('./airtableClient');
@@ -492,6 +490,51 @@ async function fetchToastEmployeesFromVitals({ vitalsRecord, locationName = null
   };
 }
 
+async function fetchToastJobsFromVitals({ vitalsRecord, locationName = null }) {
+  const cfg = await resolveStandardConfigForTimeEntries({ vitalsRecord, locationName });
+
+  if (!cfg.hostname || !cfg.clientId || !cfg.clientSecret || !cfg.userAccessType || !cfg.restaurantGuid || !cfg.oauthUrl) {
+    return {
+      ok: false,
+      error: 'toast_missing_required_config',
+      config: sanitizeToastConfig(cfg),
+    };
+  }
+
+  const auth = await loginToast({
+    oauthUrl: cfg.oauthUrl,
+    clientId: cfg.clientId,
+    clientSecret: cfg.clientSecret,
+    userAccessType: cfg.userAccessType,
+  });
+
+  if (!auth.ok) {
+    return { ok: false, error: auth.error, status: auth.status || null, details: auth.details || null };
+  }
+
+  const base = `https://${cfg.hostname}`;
+  const headers = standardHeaders({ token: auth.token, restaurantGuid: cfg.restaurantGuid });
+  const url = new URL('/labor/v1/jobs', base);
+  const res = await fetch(url.toString(), { method: 'GET', headers });
+
+  if (!res.ok) {
+    const details = await safeJson(res);
+    return { ok: false, error: 'toast_jobs_failed', status: res.status, details: details || null };
+  }
+
+  const data = await safeJson(res);
+  return {
+    ok: true,
+    mode: 'standard_jobs',
+    endpoint: '/labor/v1/jobs',
+    identifiers: {
+      restaurantGuid: cfg.restaurantGuid,
+      locationId: cfg.locationId || null,
+    },
+    data: extractToastRows(data),
+  };
+}
+
 async function fetchToastAnalyticsJobsFromVitals({ vitalsRecord, periodStart, periodEnd, locationName = null }) {
   const cfg = await resolveAnalyticsConfigForValidation({ vitalsRecord, locationName });
 
@@ -658,5 +701,6 @@ async function fetchToastAnalyticsJobsFromVitals({ vitalsRecord, periodStart, pe
 module.exports = {
   fetchToastTimeEntriesFromVitals,
   fetchToastEmployeesFromVitals,
+  fetchToastJobsFromVitals,
   fetchToastAnalyticsJobsFromVitals,
 };

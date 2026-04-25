@@ -1,5 +1,7 @@
 const assert = require('assert');
 const { __test } = require('../src/domain/toastOriginalPayPeriodService');
+const fs = require('fs');
+const path = require('path');
 
 function testNormalizeEmployeeIdentityUsesFallbackMappings() {
   const raw = {
@@ -123,10 +125,101 @@ function testOutputContainsOnlyHoursColumnsForToastOriginalRows() {
   assert.equal('Total Gratuity' in rows[0], false);
 }
 
+function testBuildToastOriginalHoursRowsJoinsEmployeesAndJobsFromStandardSources() {
+  const result = __test.buildToastOriginalHoursRows({
+    timeEntryRows: [
+      {
+        guid: 'te-1',
+        employeeReference: { guid: 'emp-1' },
+        jobReference: { guid: 'job-1' },
+        hourlyWage: 18.5,
+        regularHours: 5,
+        overtimeHours: 1,
+      },
+      {
+        guid: 'te-2',
+        employeeReference: { guid: 'emp-1' },
+        jobReference: { guid: 'job-1' },
+        hourlyWage: 18.5,
+        regularHours: 3.25,
+        overtimeHours: 0,
+      },
+    ],
+    employeeRows: [
+      { guid: 'emp-1', chosenName: 'Alex', firstName: 'Alexander', lastName: 'Fox', externalEmployeeId: 'E-100' },
+    ],
+    jobRows: [{ guid: 'job-1', title: 'Server', code: 'S-1', defaultWage: 17.25 }],
+    includeDebug: true,
+  });
+
+  assert.equal(result.rows.length, 1, 'rows should group by employee guid + job guid + hourly wage');
+  assert.deepEqual(result.rows[0], {
+    Employee: 'Alex',
+    'Employee ID': 'E-100',
+    'Job Code': 'S-1',
+    'Job Title': 'Server',
+    'Hourly Rate': 18.5,
+    'Regular Hours': 8.25,
+    'Overtime Hours': 1,
+    employee_name: 'Alex',
+    employee_id: 'E-100',
+    job_name: 'Server',
+    job_code: 'S-1',
+    hourly_rate: 18.5,
+    regular_hours: 8.25,
+    overtime_hours: 1,
+    __field_sources: {
+      employee_name: { source: 'toast_standard_employees', reason: null },
+      employee_id: { source: 'toast_standard_employees.externalEmployeeId', reason: null },
+      job_title: { source: 'toast_standard_jobs.title', reason: null },
+      job_code: { source: 'toast_standard_jobs.code', reason: null },
+      hourly_rate: { source: 'toast_standard_time_entries.hourlyWage', reason: null },
+      hours: { source: 'toast_standard_time_entries', reason: null },
+    },
+  });
+  assert.equal(result.debug.missingJobCodeCount, 0);
+  assert.equal(result.debug.missingJobTitleCount, 0);
+}
+
+function testBuildToastOriginalHoursRowsUsesMissingLabelsOnlyWhenJoinFails() {
+  const result = __test.buildToastOriginalHoursRows({
+    timeEntryRows: [
+      {
+        employeeReference: { guid: 'emp-missing' },
+        jobReference: { guid: 'job-missing' },
+        hourlyWage: 20,
+        regularHours: 1,
+        overtimeHours: 2,
+      },
+    ],
+    employeeRows: [],
+    jobRows: [],
+    includeDebug: true,
+  });
+
+  assert.equal(result.rows[0].Employee, 'Missing Employee Name');
+  assert.equal(result.rows[0]['Employee ID'], 'Missing Employee ID');
+  assert.equal(result.rows[0]['Job Title'], 'Missing job title');
+  assert.equal(result.rows[0]['Job Code'], 'Missing job code');
+  assert.equal(result.debug.missingEmployeeNameCount, 1);
+  assert.equal(result.debug.missingEmployeeIdCount, 1);
+  assert.equal(result.debug.missingJobTitleCount, 1);
+  assert.equal(result.debug.missingJobCodeCount, 1);
+}
+
+function testStep2ServicePathDoesNotImportToastAnalyticsProvider() {
+  const servicePath = path.join(__dirname, '..', 'src', 'domain', 'toastOriginalPayPeriodService.js');
+  const source = fs.readFileSync(servicePath, 'utf8');
+  assert.equal(source.includes('fetchToastAnalyticsJobsFromVitals'), false);
+}
+
 module.exports = {
   testNormalizeEmployeeIdentityUsesFallbackMappings,
   testGroupingUsesToastGuidNotPayrollEmployeeId,
   testGroupingSplitsSameEmployeeAndDepartmentAcrossRates,
   testGroupingSplitsSameEmployeeAcrossDepartments,
   testOutputContainsOnlyHoursColumnsForToastOriginalRows,
+  testBuildToastOriginalHoursRowsJoinsEmployeesAndJobsFromStandardSources,
+  testBuildToastOriginalHoursRowsUsesMissingLabelsOnlyWhenJoinFails,
+  testStep2ServicePathDoesNotImportToastAnalyticsProvider,
 };

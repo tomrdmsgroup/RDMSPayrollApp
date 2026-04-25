@@ -5,8 +5,8 @@
 
 const { fetchVitalsSnapshot } = require('../providers/vitalsProvider');
 const {
-  fetchToastAnalyticsJobsFromVitals,
   fetchToastEmployeesFromVitals,
+  fetchToastJobsFromVitals,
   fetchToastTimeEntriesFromVitals,
 } = require('../providers/toastProvider');
 
@@ -925,12 +925,7 @@ function buildPayrollExportRows(detailRows, fallbackLocationCode = null, { inclu
   return { rows, rowSourceAudit, rowBuildDebugSample };
 }
 
-function buildToastOriginalHoursRows({
-  timeEntryRows,
-  employeeRows,
-  analyticsJobRows,
-  includeDebug = false,
-}) {
+function buildToastOriginalHoursRows({ timeEntryRows, employeeRows, jobRows, includeDebug = false }) {
   const timeAgg = new Map();
   let skippedMissingEmployeeOrJobKey = 0;
 
@@ -942,8 +937,7 @@ function buildToastOriginalHoursRows({
       '';
 
     const jobGuid = safeTrim(te?.jobReference?.guid) || safeTrim(te?.jobGuid) || '';
-    const codeJ = safeTrim(te?.jobCode) || safeTrim(te?.job?.code) || '';
-    const jobKey = jobGuid || codeJ;
+    const jobKey = jobGuid;
 
     if (!emp || !jobKey) {
       skippedMissingEmployeeOrJobKey += 1;
@@ -960,8 +954,6 @@ function buildToastOriginalHoursRows({
         reg: 0,
         ot: 0,
         jobGuid: jobGuid || '',
-        jobCode: codeJ || '',
-        title: safeTrim(te?.job?.title) || safeTrim(te?.job?.name) || '',
       });
     }
 
@@ -969,50 +961,79 @@ function buildToastOriginalHoursRows({
     agg.reg += reg;
     agg.ot += ot;
     if (!agg.jobGuid && jobGuid) agg.jobGuid = jobGuid;
-    if (!agg.jobCode && codeJ) agg.jobCode = codeJ;
-    if (!agg.title) agg.title = safeTrim(te?.job?.title) || safeTrim(te?.job?.name) || '';
   }
 
   const empDim = {};
   for (const e of Array.isArray(employeeRows) ? employeeRows : []) {
+    const chosenName = safeTrim(e?.chosenName);
+    const computedName = chosenName || fullNameFromParts(e?.firstName, e?.lastName);
     const obj = {
-      firstName: e?.firstName || e?.givenName || '',
-      lastName: e?.lastName || e?.familyName || '',
-      externalId: e?.externalEmployeeId || e?.externalId || '',
+      displayName: computedName || '',
+      externalId: safeTrim(e?.externalEmployeeId) || safeTrim(e?.externalId) || '',
+      deleted: !!e?.deleted,
     };
     if (e?.guid) empDim[e.guid] = obj;
     if (e?.v2EmployeeGuid) empDim[e.v2EmployeeGuid] = obj;
   }
 
   const jobsByGuid = {};
-  for (const r of Array.isArray(analyticsJobRows) ? analyticsJobRows : []) {
-    const g = String(r?.jobGuid || r?.jobId || '').trim();
+  for (const r of Array.isArray(jobRows) ? jobRows : []) {
+    const g = String(r?.guid || '').trim();
     if (!g) continue;
     jobsByGuid[g] = {
-      jobCode: String(r?.jobCode || ''),
-      jobTitle: String(r?.jobTitle || ''),
+      jobCode: safeTrim(r?.code) || '',
+      jobTitle: safeTrim(r?.title) || '',
+      defaultWage: toNum(r?.defaultWage),
+      deleted: !!r?.deleted,
+      wageFrequency: safeTrim(r?.wageFrequency),
     };
   }
 
+  let missingEmployeeNameCount = 0;
+  let missingEmployeeIdCount = 0;
+  let missingJobTitleCount = 0;
+  let missingJobCodeCount = 0;
+
   const rows = [];
   for (const [key, v] of timeAgg.entries()) {
-    const [empGuid, jobKey, rateStr] = key.split('|');
+    const [empGuid, jobGuid, rateStr] = key.split('|');
     const emp = empDim[empGuid] || {};
-
-    const jobGuid = v?.jobGuid || (looksLikeUuid(jobKey) ? jobKey : '');
     const jobMeta = (jobGuid && jobsByGuid[jobGuid]) || {};
-    const jobCode = v?.jobCode || jobMeta.jobCode || (looksLikeUuid(jobKey) ? '' : jobKey);
-    const jobTitle = v?.title || jobMeta.jobTitle || '';
+
+    const employeeName = safeTrim(emp.displayName) || 'Missing Employee Name';
+    const employeeId = safeTrim(emp.externalId) || 'Missing Employee ID';
+    const jobCode = safeTrim(jobMeta.jobCode) || 'Missing job code';
+    const jobTitle = safeTrim(jobMeta.jobTitle) || 'Missing job title';
 
     rows.push({
-      Employee: formatLastFirst(emp.firstName, emp.lastName) || emp.externalId || 'Missing Employee Name',
-      'Employee ID': emp.externalId || 'Missing Employee ID',
+      Employee: employeeName,
+      'Employee ID': employeeId,
       'Job Code': jobCode || 'Missing job code',
       'Job Title': jobTitle || 'Missing job title',
-      'Hourly Rate': rateStr || '',
+      'Hourly Rate': toNum(rateStr),
       'Regular Hours': round2(v?.reg),
       'Overtime Hours': round2(v?.ot),
+      employee_name: employeeName,
+      employee_id: employeeId,
+      job_name: jobTitle,
+      job_code: jobCode,
+      hourly_rate: toNum(rateStr),
+      regular_hours: round2(v?.reg),
+      overtime_hours: round2(v?.ot),
+      __field_sources: {
+        employee_name: sourceTag('toast_standard_employees'),
+        employee_id: sourceTag('toast_standard_employees.externalEmployeeId'),
+        job_title: sourceTag('toast_standard_jobs.title'),
+        job_code: sourceTag('toast_standard_jobs.code'),
+        hourly_rate: sourceTag('toast_standard_time_entries.hourlyWage'),
+        hours: sourceTag('toast_standard_time_entries'),
+      },
     });
+
+    if (employeeName === 'Missing Employee Name') missingEmployeeNameCount += 1;
+    if (employeeId === 'Missing Employee ID') missingEmployeeIdCount += 1;
+    if (jobTitle === 'Missing job title') missingJobTitleCount += 1;
+    if (jobCode === 'Missing job code') missingJobCodeCount += 1;
   }
 
   rows.sort((a, b) => {
@@ -1031,8 +1052,12 @@ function buildToastOriginalHoursRows({
       raw_time_entries_count: Array.isArray(timeEntryRows) ? timeEntryRows.length : 0,
       time_agg_group_count: timeAgg.size,
       employee_map_count: Object.keys(empDim).length,
-      analytics_job_rows_count: Array.isArray(analyticsJobRows) ? analyticsJobRows.length : 0,
+      standard_job_rows_count: Array.isArray(jobRows) ? jobRows.length : 0,
       skipped_time_entries_missing_employee_or_job_key: skippedMissingEmployeeOrJobKey,
+      missingEmployeeNameCount,
+      missingEmployeeIdCount,
+      missingJobTitleCount,
+      missingJobCodeCount,
     },
   };
 }
@@ -1230,14 +1255,9 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
     const vitalsRecord = (snapshot && snapshot.data && snapshot.data[0]) || null;
     if (!vitalsRecord) throw new Error('toast_vitals_not_found');
 
-    const [employees, analytics, timeEntries] = await Promise.all([
+    const [employees, jobs, timeEntries] = await Promise.all([
       fetchToastEmployeesFromVitals({ vitalsRecord, locationName: location }),
-      fetchToastAnalyticsJobsFromVitals({
-        vitalsRecord,
-        periodStart: start,
-        periodEnd: end,
-        locationName: location,
-      }),
+      fetchToastJobsFromVitals({ vitalsRecord, locationName: location }),
       fetchToastTimeEntriesFromVitals({
         vitalsRecord,
         periodStart: start,
@@ -1250,23 +1270,35 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
       throw new Error(`toast_employees_failed:${employees.error || 'unknown'}:${formatAnalyticsError(employees)}`);
     }
 
-    if (!analytics.ok) {
-      throw new Error(`toast_analytics_failed:${analytics.error || 'unknown'}:${formatAnalyticsError(analytics)}`);
+    if (!jobs.ok) {
+      throw new Error(`toast_jobs_failed:${jobs.error || 'unknown'}:${formatAnalyticsError(jobs)}`);
     }
 
     const employeeRows = extractRows(employees.data);
     const timeEntryRows = timeEntries && timeEntries.ok ? extractRows(timeEntries.data) : [];
-    const rawAnalyticsRows = extractRows(analytics.data);
+    const jobRows = extractRows(jobs.data);
 
     const rowBuild = buildToastOriginalHoursRows({
       timeEntryRows,
       employeeRows,
-      analyticsJobRows: rawAnalyticsRows,
+      jobRows,
       includeDebug,
     });
 
     const rows = rowBuild.rows;
-    const columns = ['Employee', 'Employee ID', 'Job Code', 'Job Title', 'Hourly Rate', 'Regular Hours', 'Overtime Hours'];
+    const columns = ['Employee', 'Employee ID', 'Job Title', 'Job Code', 'Hourly Rate', 'Regular Hours', 'Overtime Hours'];
+    const rowDebugCounts = rowBuild?.debug || {};
+    const metadata = {
+      standardTimeEntryCount: timeEntryRows.length,
+      standardEmployeeCount: employeeRows.length,
+      standardJobCount: jobRows.length,
+      shapedRowCount: rows.length,
+      missingEmployeeNameCount: rowDebugCounts.missingEmployeeNameCount || 0,
+      missingEmployeeIdCount: rowDebugCounts.missingEmployeeIdCount || 0,
+      missingJobTitleCount: rowDebugCounts.missingJobTitleCount || 0,
+      missingJobCodeCount: rowDebugCounts.missingJobCodeCount || 0,
+      source: 'toast_standard_only',
+    };
 
     const debug = includeDebug
       ? {
@@ -1281,24 +1313,25 @@ async function fetchOriginalToastPayPeriodData({ locationName, periodStart, peri
       source: {
         provider: 'toast',
         api_mode: 'toast_original_hours_time_entries_grouped',
-        label: 'Toast Standard time entries grouped by employee GUID + job + rate with employee/job metadata lookups',
+        label: 'Toast Standard time entries grouped by employee GUID + job GUID + rate with employee/job metadata lookups',
         source_row_grain_before_transform: 'one row per Toast Standard time entry for selected period',
         employee_identity_source: 'Toast Standard labor/hr employees endpoint',
-        labor_totals_source: 'Toast Standard time entries only (regular/overtime hours); analytics totals are not used for hours',
+        labor_totals_source: 'Toast Standard time entries only (regular/overtime hours)',
         employee_column_mapping: 'Employee and Employee ID are display-only fields from Standard employees keyed by guid/v2EmployeeGuid',
-        join_key_between_sources: 'time entries grouped by employeeGuid + jobKey + rate; analytics JOB data is lookup-only by jobGuid/jobId',
-        grouping_key_after_transform: 'Rows are grouped by employee GUID + job key + rate (no name/ID fallback grouping).',
+        join_key_between_sources: 'employeeReference.guid -> employees.guid and jobReference.guid -> jobs.guid',
+        grouping_key_after_transform: 'Rows are grouped by employee GUID + job GUID + hourlyWage.',
         row_grain_target: 'one row per Employee + Job Code + Hourly Rate for selected pay period',
         row_grain_returned: 'one row per Employee + Job Code + Hourly Rate for selected pay period',
         csv_shape_recreation_assessment: null,
         exact_payroll_export_endpoint_available: false,
         note:
-          'This table ports the Google Sheet algorithm: hours come only from Standard time entries; Standard employees enrich display fields; Analytics JOB report is metadata lookup only.',
+          'This table uses Toast Standard only: time entries provide hours/rate and employee/job dimensions are joined from Standard employees/jobs.',
         approximation_notes: [
           'Time entries missing employee key or job key are skipped and counted in debug.',
           'Missing display metadata is emitted as explicit Missing* placeholder text in output columns.',
         ],
       },
+      metadata,
       row_count: rows.length,
       columns,
       rows,
@@ -1327,5 +1360,6 @@ module.exports = {
     buildPayrollExportRows,
     buildTimeEntryIdentityIndex,
     buildEmployeeJobCompositeLookupKeys,
+    buildToastOriginalHoursRows,
   },
 };
