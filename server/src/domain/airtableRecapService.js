@@ -51,6 +51,7 @@ async function airtableListAll({ table, filterByFormula, fields }) {
       const bodyPreview = String(rawBody || '').slice(0, 500);
       console.error('[airtable] list failed', {
         table,
+        usedFieldsParam: Array.isArray(fields) && fields.length > 0,
         filterByFormula: filterByFormula || null,
         requestedFields: Array.isArray(fields) ? fields : [],
         status: resp.status,
@@ -508,17 +509,7 @@ async function getActivePayrollDashboardRows() {
   const locationField = requireEnv('AIRTABLE_VITALS_LOCATION_FIELD');
   const payrollDetailsTable = requireEnv('AIRTABLE_PAYROLL_CALENDAR_DETAILS_TABLE');
 
-  const vitalsRecords = await airtableListAll({
-    table: vitalsTable,
-    fields: [
-      locationField,
-      'Name',
-      'Payroll Calendar (from PR Calendar)',
-      'Payroll Calendar',
-      'PR Calendar Name',
-      'PR Lead',
-    ],
-  });
+  const vitalsRecords = await airtableListAll({ table: vitalsTable });
 
   const clientConfigs = vitalsRecords
     .map((record) => {
@@ -529,7 +520,7 @@ async function getActivePayrollDashboardRows() {
       return {
         client_name: clientName,
         payroll_calendar: calendarName ? String(calendarName).trim() : '',
-        pr_lead: (fields['PR Lead'] || '').toString().trim(),
+        pr_lead: resolvePrLeadDisplay(fields),
       };
     })
     .filter((row) => row.client_name && row.payroll_calendar);
@@ -548,13 +539,6 @@ async function getActivePayrollDashboardRows() {
     const detailRecords = await airtableListAll({
       table: payrollDetailsTable,
       filterByFormula: filterDetails,
-      fields: [
-        'PR Period Start Date',
-        'PR Period End Date',
-        'PR Period Validation Date',
-        'PR Period Submit Date',
-        'PR Period Check Date',
-      ],
     });
 
     for (const rec of detailRecords) {
