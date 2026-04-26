@@ -2393,10 +2393,16 @@
       return { text: lines.join("\n"), mappingError: false };
     }
 
+    function findingEmployeeName(finding) {
+      const preferred = String(finding?.employee_name || finding?.employeeName || finding?.employee_display_name || "").trim();
+      return preferred || "Unknown employee";
+    }
+
     includedFindings.forEach((finding) => {
+      const employeeName = findingEmployeeName(finding);
       const rule = finding.rule_name || finding.rule_id || "Validation rule";
       const detail = finding.detail || finding.message || "Review internal validation report for details.";
-      lines.push(`- ${rule}: ${detail}`);
+      lines.push(`- ${employeeName}: ${rule}, ${detail}`);
     });
 
     return { text: lines.join("\n"), mappingError: false };
