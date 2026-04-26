@@ -39,6 +39,10 @@ const {
   getLatestBaseline,
   clearBaseline,
 } = require('../domain/toastPayrollBaselineService');
+const {
+  buildAdpRunEarningsWipWorkbookBuffer,
+  buildAdpRunEarningsWipFilename,
+} = require('../domain/adpRunEarningsWipExportService');
 
 const { rulesCatalog } = require('../domain/rulesCatalog');
 const { getRuleConfigsForLocation, upsertRuleConfig, upsertClientRuleConfig } = require('../domain/rulesConfigDb');
@@ -538,6 +542,43 @@ function router(req, res) {
           ok: true,
           deleted_upload_count: result.deleted_upload_count,
         });
+      } catch (e) {
+        return handleError(res, e);
+      }
+    })();
+    return;
+  }
+
+  if (url.pathname === '/staff/earnings-wip-export/adp-run' && req.method === 'POST') {
+    (async () => {
+      const user = await requireStaff(req, res);
+      if (!user) return;
+      try {
+        const body = await parseBody(req);
+        const locationName = String(body.location_name || '').trim();
+        const periodStart = String(body.period_start || '').trim();
+        const periodEnd = String(body.period_end || '').trim();
+        const rows = Array.isArray(body.rows) ? body.rows : [];
+        const setupAuditFields =
+          body.setup_audit_fields && typeof body.setup_audit_fields === 'object' ? body.setup_audit_fields : {};
+
+        if (!locationName || !periodStart || !periodEnd) {
+          return json(res, 400, { error: 'missing_required_fields' });
+        }
+
+        const buffer = await buildAdpRunEarningsWipWorkbookBuffer({
+          rows,
+          setupAuditFields,
+          periodStart,
+          periodEnd,
+        });
+        const filename = buildAdpRunEarningsWipFilename(locationName, periodStart, periodEnd);
+
+        res.writeHead(200, {
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'Content-Disposition': `attachment; filename="${filename}"`,
+        });
+        res.end(buffer);
       } catch (e) {
         return handleError(res, e);
       }

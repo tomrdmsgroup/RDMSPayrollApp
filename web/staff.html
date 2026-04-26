@@ -696,6 +696,8 @@
     toastOriginalLastUploadResponse: null,
     toastOriginalLastApiLoadResponse: null,
     earningsWipOverrideConfirmed: false,
+    earningsWipExportBusy: false,
+    earningsWipExportError: "",
     dashboardRows: null,
     dashboardLoading: false,
     dashboardError: "",
@@ -967,6 +969,17 @@
     return { resp, body };
   }
 
+  async function apiPostBlob(p, payload) {
+    const resp = await fetch(p, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(payload || {}),
+    });
+    const blob = await resp.blob();
+    return { resp, blob };
+  }
+
   async function apiDelete(p, payload) {
     const resp = await fetch(p, {
       method: "DELETE",
@@ -1033,6 +1046,13 @@
   function fmtDateRange(startYmd, endYmd) {
     if (!startYmd || !endYmd) return "";
     return `${startYmd} to ${endYmd}`;
+  }
+
+  function formatDateMdY(ymd) {
+    const raw = String(ymd || "").trim();
+    const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return raw;
+    return `${m[2]}/${m[3]}/${m[1]}`;
   }
 
   function displayValue(value) {
@@ -2778,48 +2798,47 @@
   function getEarningsWipExportFormat(payrollCompanyRaw) {
     const payrollCompany = String(payrollCompanyRaw || "").trim();
     if (!payrollCompany) {
-      return { formatLabel: "Missing payroll company", exportConfigured: false };
+      return { formatLabel: "Missing payroll company", exportConfigured: false, setupBlocked: true, setupMessage: "Payroll company is missing. Fix in Airtable → Client Vitals → Payroll company." };
     }
     if (payrollCompany === "ADP Run") {
-      return { formatLabel: "ADP Run Earnings WIP", exportConfigured: true };
-    }
-    if (payrollCompany === "ADP WFN") {
-      return { formatLabel: "ADP WFN Earnings WIP, not configured yet", exportConfigured: false };
-    }
-    if (payrollCompany === "Paychex") {
-      return { formatLabel: "Paychex Earnings WIP, not configured yet", exportConfigured: false };
+      return { formatLabel: "ADP Run Earnings WIP", exportConfigured: true, setupBlocked: false, setupMessage: "" };
     }
     return {
-      formatLabel: "No Earnings WIP export format configured for this payroll company",
+      formatLabel: "Payroll company is not supported for Earnings WIP export yet.",
       exportConfigured: false,
+      setupBlocked: true,
+      setupMessage: "Payroll company is not supported for Earnings WIP export yet. Fix in Airtable → Client Vitals → Payroll company.",
     };
   }
 
-  function getStep3ReadinessStatus(comparison) {
+  function getStep4ReadinessStatus({ baseline, data, comparison }) {
+    const step1Complete = !!baseline;
+    const step2Complete = !!(data && Array.isArray(data.rows) && data.rows.length);
     const summary = comparison?.summary || {};
-    const hasIssue =
-      (summary.rowVariance || 0) !== 0 ||
-      Math.abs(summary.regVariance || 0) > (comparison?.hoursTolerance || 0.01) ||
-      Math.abs(summary.otVariance || 0) > (comparison?.hoursTolerance || 0.01) ||
-      (summary.rateMismatchCount || 0) > 0 ||
-      (comparison?.csvKeyIssues || []).length > 0 ||
-      (comparison?.apiKeyIssues || []).length > 0 ||
-      (comparison?.missingInApi || []).length > 0 ||
-      (comparison?.missingInCsv || []).length > 0 ||
-      (comparison?.hourMismatches || []).length > 0;
-    return hasIssue
-      ? {
-          ready: false,
-          title: "Review required before export",
-          detail: "Step 3 has comparison issues. Export is allowed only with override.",
-          toneClass: "review",
-        }
-      : {
-          ready: true,
-          title: "Ready to export",
-          detail: "No blocking comparison issues found.",
-          toneClass: "matched",
-        };
+    const tolerance = comparison?.hoursTolerance || 0.01;
+    const regularMatch = step1Complete && step2Complete && Math.abs(summary.regVariance || 0) <= tolerance;
+    const overtimeMatch = step1Complete && step2Complete && Math.abs(summary.otVariance || 0) <= tolerance;
+    const ready = step1Complete && step2Complete && regularMatch && overtimeMatch;
+
+    let detail = "Earnings WIP Export is ready. The CSV upload exists, the Earnings Audit has been run for the selected pay period, and Regular/Overtime hours match between the uploaded CSV and Toast/API data.";
+    if (!step1Complete) {
+      detail = "Earnings WIP Export is locked because no CSV upload has been completed. Go to Step 1: POS Import and upload the payroll CSV before exporting.";
+    } else if (!step2Complete) {
+      detail = "Earnings WIP Export is locked because the Earnings Audit has not been run for the selected pay period. Go to Step 2: Earnings Audit and run the audit for this pay period.";
+    } else if (!regularMatch) {
+      detail = "Earnings WIP Export is locked because Regular Hours do not match between the uploaded CSV and Toast/API data. This usually means the wrong CSV was uploaded, the wrong pay period was selected, or the audit needs to be rerun.";
+    } else if (!overtimeMatch) {
+      detail = "Earnings WIP Export is locked because Overtime Hours do not match between the uploaded CSV and Toast/API data. Confirm the upload and selected pay period, then rerun Steps 1 to 3.";
+    }
+
+    return {
+      ready,
+      detail,
+      step1Complete,
+      step2Complete,
+      regularMatch,
+      overtimeMatch,
+    };
   }
 
   function renderEarningsWipExportTab() {
@@ -2834,33 +2853,45 @@
     const csvRows = extractToastOriginalCsvRows(state.toastOriginalCsvBaseline);
     const apiRows = Array.isArray(state.toastOriginalData?.rows) ? state.toastOriginalData.rows : [];
     const comparison = compareEarningsGroups(csvRows, apiRows, state.excluded);
-    const readiness = getStep3ReadinessStatus(comparison);
-    const payrollCompany = String(state.recap?.payroll_company || "").trim();
+    const readiness = getStep4ReadinessStatus({
+      baseline: state.toastOriginalCsvBaseline,
+      data: state.toastOriginalData,
+      comparison,
+    });
+    const setupAuditFields = state.recap?.setup_audit_fields || {};
+    const payrollCompany = String(setupAuditFields["Payroll company"] || state.recap?.payroll_company || "").trim();
     const exportInfo = getEarningsWipExportFormat(payrollCompany);
-    const exportBlockedByFormat = !exportInfo.exportConfigured;
-    const needsOverride = !readiness.ready;
-    const exportActionEnabled = !exportBlockedByFormat && (!needsOverride || state.earningsWipOverrideConfirmed);
+    const exportActionEnabled = readiness.ready && exportInfo.exportConfigured && !state.earningsWipExportBusy;
 
-    // TODO: When export storage is implemented, capture:
-    // override_used, override_user, override_timestamp, step3_status_at_export,
-    // payroll_company, export_format, period_start, period_end.
-    const overrideHtml = needsOverride
-      ? `
-          <div class="miniCard" style="margin-top:12px;border-color:rgba(241, 196, 15, 0.55);">
-            <label class="row" style="gap:8px;align-items:flex-start;">
-              <input id="earningsWipOverrideCheckbox" type="checkbox" ${state.earningsWipOverrideConfirmed ? "checked" : ""} />
-              <span>I understand Step 3 has unresolved issues and want to export anyway.</span>
-            </label>
-          </div>
-        `
-      : "";
-
-    const formatWarningHtml = exportBlockedByFormat
+    const formatWarningHtml = !exportInfo.exportConfigured
       ? `<div class="statusCard review" style="margin-top:12px;">
           <div class="statusCardTitle">Export format warning</div>
-          <div class="muted">No Earnings WIP export format is configured for this payroll company yet.</div>
+          <div class="muted">${escapeHtml(exportInfo.setupMessage || "No Earnings WIP export format is configured for this payroll company yet.")}</div>
         </div>`
       : "";
+
+    const readinessTiles = [
+      {
+        title: "Step 1 Upload",
+        status: readiness.step1Complete ? "Complete" : "Incomplete",
+        styleClass: readiness.step1Complete ? "matched" : "review",
+      },
+      {
+        title: "Step 2 Earnings Audit",
+        status: readiness.step2Complete ? "Complete" : "Incomplete",
+        styleClass: readiness.step2Complete ? "matched" : "review",
+      },
+      {
+        title: "Regular Hours",
+        status: readiness.regularMatch ? "Match" : "Do Not Match",
+        styleClass: readiness.regularMatch ? "matched" : "review",
+      },
+      {
+        title: "Overtime Hours",
+        status: readiness.overtimeMatch ? "Match" : "Do Not Match",
+        styleClass: readiness.overtimeMatch ? "matched" : "review",
+      },
+    ];
 
     content.innerHTML = `
       <div class="stack">
@@ -2874,40 +2905,76 @@
             <div class="summaryMetric"><div class="summaryMetricLabel">Payroll company</div><div class="summaryMetricValue">${escapeHtml(payrollCompany || "Missing payroll company")}</div></div>
             <div class="summaryMetric"><div class="summaryMetricLabel">Export format</div><div class="summaryMetricValue">${escapeHtml(exportInfo.formatLabel)}</div></div>
             <div class="summaryMetric"><div class="summaryMetricLabel">Source</div><div class="summaryMetricValue">Step 3 Earnings Comparison</div></div>
-            <div class="summaryMetric"><div class="summaryMetricLabel">Comparison status</div><div class="summaryMetricValue">${escapeHtml(readiness.ready ? "Ready to export" : "Review required before export")}</div></div>
+            <div class="summaryMetric"><div class="summaryMetricLabel">Comparison status</div><div class="summaryMetricValue">${escapeHtml(readiness.ready ? "Ready to export" : "Locked")}</div></div>
           </div>
 
-          <div class="statusCard ${escapeAttr(readiness.toneClass)}" style="margin-top:12px;">
-            <div class="statusCardTitle">Comparison readiness</div>
-            <div class="statusCardValue">${escapeHtml(readiness.title)}</div>
+          <div class="summaryGrid" style="margin-top:12px;">
+            ${readinessTiles
+              .map(
+                (tile) => `
+              <div class="statusCard ${escapeAttr(tile.styleClass)}" style="margin:0;">
+                <div class="statusCardTitle">${escapeHtml(tile.title)}</div>
+                <div class="statusCardValue">${escapeHtml(tile.status)}</div>
+              </div>`
+              )
+              .join("")}
+          </div>
+
+          <div class="statusCard ${readiness.ready ? "matched" : "review"}" style="margin-top:12px;">
+            <div class="statusCardTitle">Export readiness</div>
             <div class="muted" style="margin-top:4px;">${escapeHtml(readiness.detail)}</div>
           </div>
 
           ${formatWarningHtml}
-          ${overrideHtml}
 
           <div class="row" style="margin-top:14px;">
             <button class="btn primary" id="earningsWipExportBtn" type="button" ${exportActionEnabled ? "" : "disabled"}>
-              Export Earnings WIP as XLSX
+              ${state.earningsWipExportBusy ? "Exporting..." : "Export Earnings WIP as XLSX"}
             </button>
           </div>
-          <div class="muted" style="margin-top:8px;">Export generation is not configured yet.</div>
+          ${state.earningsWipExportError ? `<div class="muted" style="margin-top:8px;">Export failed: ${escapeHtml(state.earningsWipExportError)}</div>` : ""}
         </div>
       </div>
     `;
 
-    const overrideCheckbox = document.getElementById("earningsWipOverrideCheckbox");
-    if (overrideCheckbox) {
-      overrideCheckbox.addEventListener("change", () => {
-        state.earningsWipOverrideConfirmed = !!overrideCheckbox.checked;
-        renderEarningsWipExportTab();
-      });
-    }
-
     const exportBtn = document.getElementById("earningsWipExportBtn");
     if (exportBtn) {
-      exportBtn.addEventListener("click", () => {
-        window.alert("Export generation is not configured yet.");
+      exportBtn.addEventListener("click", async () => {
+        if (!exportActionEnabled) return;
+        state.earningsWipExportBusy = true;
+        state.earningsWipExportError = "";
+        renderEarningsWipExportTab();
+        try {
+          const payload = {
+            location_name: locationName,
+            period_start: selectedPeriod?.period_start || selectedPeriod?.start_date || "",
+            period_end: selectedPeriod?.period_end || selectedPeriod?.end_date || "",
+            rows: apiRows,
+            setup_audit_fields: setupAuditFields,
+          };
+          const { resp, blob } = await apiPostBlob("/staff/earnings-wip-export/adp-run", payload);
+          if (!resp.ok) {
+            const message = await blob.text().catch(() => "");
+            throw new Error(message || "export_failed");
+          }
+          const start = formatDateMdY(payload.period_start).replace(/\//g, "-");
+          const end = formatDateMdY(payload.period_end).replace(/\//g, "-");
+          const safeLocation = String(locationName || "Location").replace(/[\\/:*?\"<>|]+/g, "-").trim();
+          const fileName = `${safeLocation} Earnings WIP ${start} to ${end}.xlsx`;
+          const url = window.URL.createObjectURL(blob);
+          const anchor = document.createElement("a");
+          anchor.href = url;
+          anchor.download = fileName;
+          document.body.appendChild(anchor);
+          anchor.click();
+          anchor.remove();
+          window.URL.revokeObjectURL(url);
+        } catch (err) {
+          state.earningsWipExportError = err?.message || "export_failed";
+        } finally {
+          state.earningsWipExportBusy = false;
+          renderEarningsWipExportTab();
+        }
       });
     }
   }
@@ -4639,6 +4706,8 @@
     state.toastOriginalLastUploadResponse = null;
     state.toastOriginalLastApiLoadResponse = null;
     state.earningsWipOverrideConfirmed = false;
+    state.earningsWipExportBusy = false;
+    state.earningsWipExportError = "";
     state.dashboardRows = null;
     state.dashboardLoading = false;
     state.dashboardError = "";
