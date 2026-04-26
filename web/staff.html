@@ -777,7 +777,7 @@
     earningsComparison: {
       label: "Step 3: Earnings Comparison",
       main: "earningsAuditMain",
-      subtitle: "Coming soon. This page will compare Step 1 uploads to Step 2 API rows.",
+      subtitle: "Compare Step 1 POS Import rows to Step 2 Earnings Audit rows for the selected pay period.",
       existing: true,
     },
     earningsWipExport: {
@@ -2500,7 +2500,7 @@
               ? `
           <label style="display:block;margin-top:12px;">
             <div class="muted" style="margin-bottom:6px;">Pay Period</div>
-            <select id="recapReportPayPeriodSelect" style="width:min(620px,100%);">
+            <select id="recapReportPayPeriodSelect" class="auditLightBlueField" style="width:min(620px,100%);">
               ${options
                 .map((opt) => {
                   const selectedValue =
@@ -4169,12 +4169,11 @@
     content.innerHTML = `
       <div class="stack">
         <div class="panel">
-          <div class="sectionTitle" style="margin-top:0;">Step 3: Earnings Comparison</div>
-          <div class="muted" style="margin-top:8px;">Compares normalized rows from Step 1 POS Import and Step 2 Earnings Audit for the selected pay period.</div>
-          <div class="row" style="gap:16px;margin-top:12px;">
+          <div class="row" style="gap:16px;margin-top:0;">
             <div><span class="muted">Location:</span> ${escapeHtml(locationName)}</div>
             <div><span class="muted">Selected pay period:</span> ${escapeHtml(selectedPeriod?.label || "Not selected")}</div>
           </div>
+          <div class="muted" style="margin-top:8px;">Compares normalized rows from Step 1 POS Import and Step 2 Earnings Audit for the selected pay period.</div>
           <div class="comparisonTilesGrid" style="margin-top:12px;">
             ${renderComparisonTile("Row Count", rowCountMatches ? "MATCH" : "DO NOT MATCH", rowCountMatches ? "positive" : "negative", [
               `CSV: ${escapeHtml(String(s.csvGroupCount))}`,
