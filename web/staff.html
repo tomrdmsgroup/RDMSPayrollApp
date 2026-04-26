@@ -2945,11 +2945,49 @@
         state.earningsWipExportError = "";
         renderEarningsWipExportTab();
         try {
+          const excludedMatchers = buildExcludedMatchers(state.excluded);
+          const validationIssueMap = new Map();
+          (Array.isArray(comparison.apiKeyIssues) ? comparison.apiKeyIssues : []).forEach((issueRow) => {
+            const normalized = normalizeEarningsRow(issueRow);
+            const key = [
+              normalizeComparisonKeyPart(normalized.employeeGuid || ""),
+              normalizeComparisonKeyPart(normalized.employeeId || ""),
+              normalizeComparisonKeyPart(normalized.jobCode || ""),
+              normalizeComparisonKeyPart(normalized.employee || ""),
+            ].join("|||");
+            if (key && !validationIssueMap.has(key)) validationIssueMap.set(key, String(issueRow.issue || "").trim());
+          });
+          const rowsForExport = (Array.isArray(apiRows) ? apiRows : []).map((row) => {
+            const normalized = normalizeEarningsRow(row);
+            const rawEmployeeGuid = String(normalized.employeeGuid || "").trim();
+            const rawEmployeeId = String(normalized.employeeId || "").trim();
+            const employeeName = String(normalized.employee || "").trim();
+            const excludedReasonByName = buildNameVariants(employeeName)
+              .map((nameVariant) => excludedMatchers.byName.get(nameVariant) || "")
+              .find(Boolean);
+            const excludedReason =
+              excludedMatchers.byGuid.get(normalizeComparisonKeyPart(rawEmployeeGuid)) ||
+              excludedMatchers.byEmployeeId.get(normalizeComparisonKeyPart(rawEmployeeId)) ||
+              excludedReasonByName ||
+              "";
+            const validationKey = [
+              normalizeComparisonKeyPart(rawEmployeeGuid),
+              normalizeComparisonKeyPart(rawEmployeeId),
+              normalizeComparisonKeyPart(normalized.jobCode || ""),
+              normalizeComparisonKeyPart(employeeName),
+            ].join("|||");
+            const validationIssue = validationIssueMap.get(validationKey) || "";
+            return {
+              ...row,
+              __wip_excluded_reason: excludedReason ? "Excluded from Earnings WIP: staff member is on excluded staff list." : "",
+              __wip_validation_note: excludedReason ? "" : validationIssue,
+            };
+          });
           const payload = {
             location_name: locationName,
             period_start: selectedPeriod?.period_start || selectedPeriod?.start_date || "",
             period_end: selectedPeriod?.period_end || selectedPeriod?.end_date || "",
-            rows: apiRows,
+            rows: rowsForExport,
             setup_audit_fields: setupAuditFields,
           };
           const { resp, blob } = await apiPostBlob("/staff/earnings-wip-export/adp-run", payload);
