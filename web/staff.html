@@ -1079,44 +1079,45 @@
       lateNotice.textContent = p.late_message || "Late warning";
     }
 
+    const airtableWhereToFix = (tableName, fieldName) => `Airtable → ${tableName} → ${fieldName}`;
+
     const payPeriodRows = [
-      { label: "Pay Period Start", value: p.start_date, source: "Payroll Calendar" },
-      { label: "Pay Period End", value: p.end_date, source: "Payroll Calendar" },
-      { label: "Validation date", value: p.validation_date, source: "Payroll Calendar" },
-      { label: "Submit date", value: p.submit_date, source: "Payroll Calendar" },
-      { label: "Check date", value: p.check_date, source: "Payroll Calendar" },
+      { label: "Pay Period Start", value: p.start_date, where_to_fix: airtableWhereToFix('Payroll Calendar Details', 'PR Period Start Date') },
+      { label: "Pay Period End", value: p.end_date, where_to_fix: airtableWhereToFix('Payroll Calendar Details', 'PR Period End Date') },
+      { label: "Validation date", value: p.validation_date, where_to_fix: airtableWhereToFix('Payroll Calendar Details', 'PR Period Validation Date') },
+      { label: "Submit date", value: p.submit_date, where_to_fix: airtableWhereToFix('Payroll Calendar Details', 'PR Period Submit Date') },
+      { label: "Check date", value: p.check_date, where_to_fix: airtableWhereToFix('Payroll Calendar Details', 'PR Period Check Date') },
       { label: "Validation Cutoff", value: p.cutoff_local, source: "Derived from calendar date + validation end time + time zone" },
       { label: "Validation cutoff (UTC)", value: p.cutoff_utc, source: "Derived from calendar date + validation end time + time zone" },
       { label: "Late Status", value: truthyYesNo(p.is_late), source: "Derived from calendar date + validation end time + time zone" },
-      { label: "Pay Period Range", value: fmtDateRange(p.start_date, p.end_date), source: "Payroll Calendar" },
+      { label: "Pay Period Range", value: fmtDateRange(p.start_date, p.end_date), source: "Derived from pay period start + pay period end" },
     ];
 
     const setupAuditFields = r.setup_audit_fields || {};
-    const airtableWhereToFix = (fieldName) => `Client Vitals Airtable → ${fieldName}`;
 
     const configRows = [
       { label: "Location Name", value: r.location_name, source: "Client Vitals" },
-      { label: "Payroll Calendar", value: r.calendar_name, source: "Client Vitals" },
-      { label: "App Active", value: truthyYesNo(r.app_active), source: "Client Vitals" },
-      { label: "Time zone", value: r.time_zone, source: "Client Vitals" },
-      { label: "Validation End Time", value: r.validation_end_time_next_day, source: "Client Vitals" },
-      { label: "Payroll Company", value: setupAuditFields['Payroll company'] || r.payroll_company, where_to_fix: airtableWhereToFix('Payroll company') },
-      { label: "POS type", value: r.pos_type, source: "Client Vitals" },
-      { label: "Payroll project email", value: r.payroll_project_email, source: "Client Vitals" },
-      { label: "Tip report type", value: r.tip_report_type, source: "Client Vitals" },
-      { label: "Payroll Company Code / IID", value: setupAuditFields['Payroll company code'] || r.payroll_company_code, where_to_fix: airtableWhereToFix('Payroll company code') },
-      { label: "Regular Hours Earning Code", value: setupAuditFields['PR Reg Earning Code'], where_to_fix: airtableWhereToFix('PR Reg Earning Code') },
-      { label: "Overtime Hours Earning Code", value: setupAuditFields['PR Overtime Earning Code'], where_to_fix: airtableWhereToFix('PR Overtime Earning Code') },
-      { label: "Double Time Hours Earning Code", value: setupAuditFields['PR Double Time Earning Code'], where_to_fix: airtableWhereToFix('PR Double Time Earning Code') },
-      { label: "Meal/Break Premium Earning Code", value: setupAuditFields['PR MBP Earning Code'], where_to_fix: airtableWhereToFix('PR MBP Earning Code') },
-      { label: "Tips to Pay Earning Code", value: setupAuditFields['PR Tips to Pay Earning Code'], where_to_fix: airtableWhereToFix('PR Tips to Pay Earning Code') },
-      { label: "Tips to Tax Earning Code", value: setupAuditFields['PR Tips to Tax Earning Code'], where_to_fix: airtableWhereToFix('PR Tips to Tax Earning Code') },
-      { label: "Sick Hours Earning Code", value: setupAuditFields['PR Sick Hours Earning Code'], where_to_fix: airtableWhereToFix('PR Sick Hours Earning Code') },
-      { label: "Pay frequency", value: r.pay_frequency, source: "Client Vitals" },
-      { label: "Preview Contacts", value: r.preview_recipients_summary, source: "Preview Contact Emails" },
-      { label: "Preview contact email count", value: displayValue(r.preview_recipients_count), source: "Preview Contact Emails" },
-      { label: "Asana Project GUID", value: r.asana_project_guid, source: "Airtable - Client Vitals" },
-      { label: "Asana Inbox Section GUID", value: r.asana_inbox_section_guid, source: "Airtable - Client Vitals" },
+      { label: "Payroll Calendar", value: r.calendar_name, where_to_fix: airtableWhereToFix('Client Vitals', 'Payroll Calendar') },
+      { label: "App Active", value: truthyYesNo(r.app_active), where_to_fix: airtableWhereToFix('Client Vitals', 'PR Validation APP Active?') },
+      { label: "Time zone", value: r.time_zone, where_to_fix: airtableWhereToFix('Client Vitals', 'Time Zone') },
+      { label: "Validation End Time", value: r.validation_end_time_next_day, where_to_fix: airtableWhereToFix('Client Vitals', 'Validation End Time (Next Day)') },
+      { label: "Payroll Company", value: setupAuditFields['Payroll company'] || r.payroll_company, where_to_fix: airtableWhereToFix('Client Vitals', 'Payroll company') },
+      { label: "POS type", value: r.pos_type, where_to_fix: airtableWhereToFix('Client Vitals', 'POS Type') },
+      { label: "Payroll project email", value: r.payroll_project_email, where_to_fix: airtableWhereToFix('Client Vitals', 'PR RDMS Payroll Project Email Address') },
+      { label: "Tip report type", value: r.tip_report_type, where_to_fix: airtableWhereToFix('Client Vitals', 'PR Tip Report Type') },
+      { label: "Payroll Company Code / IID", value: setupAuditFields['Payroll company code'] || r.payroll_company_code, where_to_fix: airtableWhereToFix('Client Vitals', 'Payroll company code') },
+      { label: "Regular Hours Earning Code", value: setupAuditFields['PR Reg Earning Code'], where_to_fix: airtableWhereToFix('Client Vitals', 'PR Reg Earning Code') },
+      { label: "Overtime Hours Earning Code", value: setupAuditFields['PR Overtime Earning Code'], where_to_fix: airtableWhereToFix('Client Vitals', 'PR Overtime Earning Code') },
+      { label: "Double Time Hours Earning Code", value: setupAuditFields['PR Double Time Earning Code'], where_to_fix: airtableWhereToFix('Client Vitals', 'PR Double Time Earning Code') },
+      { label: "Meal/Break Premium Earning Code", value: setupAuditFields['PR MBP Earning Code'], where_to_fix: airtableWhereToFix('Client Vitals', 'PR MBP Earning Code') },
+      { label: "Tips to Pay Earning Code", value: setupAuditFields['PR Tips to Pay Earning Code'], where_to_fix: airtableWhereToFix('Client Vitals', 'PR Tips to Pay Earning Code') },
+      { label: "Tips to Tax Earning Code", value: setupAuditFields['PR Tips to Tax Earning Code'], where_to_fix: airtableWhereToFix('Client Vitals', 'PR Tips to Tax Earning Code') },
+      { label: "Sick Hours Earning Code", value: setupAuditFields['PR Sick Hours Earning Code'], where_to_fix: airtableWhereToFix('Client Vitals', 'PR Sick Hours Earning Code') },
+      { label: "Pay frequency", value: r.pay_frequency, where_to_fix: airtableWhereToFix('Client Vitals', 'PR Pay Frequency for Upload') },
+      { label: "Preview Contacts", value: r.preview_recipients_summary, source: "Derived from Client Vitals preview email fields" },
+      { label: "Preview contact email count", value: displayValue(r.preview_recipients_count), source: "Derived from Client Vitals preview email fields" },
+      { label: "Asana Project GUID", value: r.asana_project_guid, where_to_fix: airtableWhereToFix('Client Vitals', 'PR Asana Project GUID') },
+      { label: "Asana Inbox Section GUID", value: r.asana_inbox_section_guid, where_to_fix: airtableWhereToFix('Client Vitals', 'PR Asana Inbox Section GUID') },
     ];
 
     const itemRows = [];
