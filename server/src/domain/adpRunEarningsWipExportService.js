@@ -70,6 +70,8 @@ function normalizeSourceRow(row) {
     sickHours: toNumber(pick(row, ['Sick Hours', 'sick_hours', 'sickHours'])),
     mbpHours: toNumber(pick(row, ['MBP Hours', 'mbp_hours', 'mbpHours', 'Meal Break Premium Hours', 'meal_break_premium_hours'])),
     earningType: String(pick(row, ['Earning Type', 'earning_type', 'pay_type', 'type']) || '').trim().toLowerCase(),
+    wipExcludedReason: String(pick(row, ['__wip_excluded_reason']) || '').trim(),
+    wipValidationNote: String(pick(row, ['__wip_validation_note']) || '').trim(),
   };
 }
 
@@ -128,6 +130,16 @@ function createAdpRunEarningsWipDataset({ rows = [], setupAuditFields = {}, peri
       ['overtime', normalized.overtimeHours],
       ['doubletime', normalized.doubleTimeHours],
     ];
+    if (normalized.wipExcludedReason) {
+      excludedRows.push({
+        ...base,
+        earningCode: '',
+        payHours: 0,
+        wipNote: normalized.wipExcludedReason,
+      });
+      return;
+    }
+
     const hasPositiveEarningsHours = hoursByType.some(([, hours]) => hours >= 0.005);
     if (!hasPositiveEarningsHours) {
       const type = normalized.earningType;
@@ -148,6 +160,7 @@ function createAdpRunEarningsWipDataset({ rows = [], setupAuditFields = {}, peri
       const earningCode = getEarningCodeForType(setupAuditFields, type);
       const candidate = buildWipRow(base, hours, earningCode);
 
+      if (normalized.wipValidationNote) return pushValidation(candidate, normalized.wipValidationNote);
       if (!iid) return pushValidation(candidate, 'Missing Payroll Company Code / IID. Fix in Airtable → Client Vitals → Payroll company code.');
       if (!candidate.employeeId) return pushValidation(candidate, 'Missing Employee Id.');
       if (!candidate.departmentNumber) return pushValidation(candidate, 'Missing Department Number.');

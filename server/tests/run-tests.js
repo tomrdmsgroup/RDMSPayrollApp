@@ -61,6 +61,10 @@ const {
   testBuildStableKeyPrefersEmployeeIdOverToastGuid,
   testBuildStableKeyFallsBackToEmployeeNameBeforeToastGuid,
 } = require('./toastPayrollBaselineService.test');
+const {
+  testExcludedStaffWinsBeforeValidationPlacement,
+  testValidationOutcomePreventsTopSectionPlacement,
+} = require('./adpRunEarningsWipExportService.test');
 
 function testTokenLifecycle() {
   const token = issueToken({ action: 'approve', ttlMinutes: 0.001 });
@@ -153,6 +157,8 @@ async function runAll() {
     testCompareRowsDetectsMissingAndMismatches,
     testBuildStableKeyPrefersEmployeeIdOverToastGuid,
     testBuildStableKeyFallsBackToEmployeeNameBeforeToastGuid,
+    testExcludedStaffWinsBeforeValidationPlacement,
+    testValidationOutcomePreventsTopSectionPlacement,
   ];
   for (const fn of tests) {
     await fn();
