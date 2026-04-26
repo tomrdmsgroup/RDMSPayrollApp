@@ -3252,7 +3252,7 @@
       <div class="statusCard matched" style="margin-top:12px;">
         <div class="statusCardTitle">Upload Review</div>
         <div class="statusCardValue">READY</div>
-        <div class="muted" style="margin-top:4px;">CSV uploaded for selected pay period.</div>
+        <div class="muted" style="margin-top:4px;">CSV baseline is available for this app pay period. Period alignment is checked in Step 3.</div>
       </div>
       <div class="summaryGrid" style="margin-top:10px;">
         <div class="summaryMetric"><div class="summaryMetricLabel">Rows</div><div class="summaryMetricValue">${escapeHtml(String(summary.rows))}</div></div>
@@ -4111,6 +4111,7 @@
     const selector = state.toastOriginalSelector;
     ensureToastOriginalSelection(selector);
     const periodOptions = buildToastOriginalPeriodOptions(selector);
+    const selectedPeriod = getSelectedToastOriginalPeriod();
     const selectedValue =
       state.toastOriginalSelectionBucket === "prior"
         ? `prior:${String(state.toastOriginalSelectionPriorRecordId || "")}`
@@ -4158,7 +4159,9 @@
             state.toastOriginalCsvBaseline
               ? `<div class="miniCard" style="margin-top:12px;">
                   <div><span class="muted">Latest baseline:</span> ${escapeHtml(state.toastOriginalCsvBaseline.file_name || "uploaded.csv")}</div>
-                  <div class="muted" style="margin-top:4px;">Uploaded by ${escapeHtml(state.toastOriginalCsvBaseline.uploaded_by || "")} at ${escapeHtml(state.toastOriginalCsvBaseline.uploaded_at || "")}</div>
+                  <div><span class="muted">Associated app pay period:</span> ${escapeHtml(selectedPeriod?.start_date || "Not selected")} to ${escapeHtml(selectedPeriod?.end_date || "Not selected")}</div>
+                  <div><span class="muted">Uploaded by:</span> ${escapeHtml(state.toastOriginalCsvBaseline.uploaded_by || "Not available")}</div>
+                  <div><span class="muted">Uploaded at:</span> ${escapeHtml(state.toastOriginalCsvBaseline.uploaded_at || "Not available")}</div>
                 </div>`
               : ""
           }
