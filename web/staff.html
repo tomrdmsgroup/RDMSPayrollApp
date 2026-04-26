@@ -708,6 +708,7 @@
     recapReportError: "",
   };
   let excludedSearchDebounceTimer = null;
+  let excludedSearchRequestSeq = 0;
 
   const NAV_CONFIG = [
     { key: "dashboardMain", label: "Payroll Dashboard", tabs: [] },
@@ -1895,6 +1896,7 @@
     state.excludedDraftNote = "";
     clearTimeout(excludedSearchDebounceTimer);
     excludedSearchDebounceTimer = null;
+    excludedSearchRequestSeq += 1;
 
     if (!name) {
       content.innerHTML = "<div class='loading'>Select a location to manage excluded staff.</div>";
@@ -1999,6 +2001,25 @@
     `;
   }
 
+  function bindExcludedSearchResultEvents() {
+    const content = document.getElementById("content");
+    if (!content) return;
+    content.querySelectorAll("input[name='excludedSearchChoice']").forEach((el) => {
+      el.addEventListener("change", () => {
+        state.selectedSearchEmployeeId = el.value;
+        const selected = state.employeeSearchResults.find((x) => x.employeeId === el.value);
+        if (selected) state.excludedSearchQuery = selected.employeeName || state.excludedSearchQuery;
+      });
+    });
+  }
+
+  function renderExcludedSearchResultsOnly() {
+    const wrap = document.getElementById("excludedSearchResultsWrap");
+    if (!wrap) return;
+    wrap.innerHTML = renderSearchResults();
+    bindExcludedSearchResultEvents();
+  }
+
   function renderExcludedTab() {
     const content = document.getElementById("content");
     if (!state.excludedLocationName) {
@@ -2012,13 +2033,13 @@
           <div class="sectionTitle" style="margin-top:0;">Add Excluded Staff</div>
           <p class="sectionHelp">Search for one employee, add a reason, then save.</p>
           <div class="row">
-            <input class="input" id="excludedSearchInput" placeholder="Search Toast employee by name or ID" style="flex:1;min-width:260px;" />
+            <input class="input auditLightBlueField" id="excludedSearchInput" placeholder="Search Toast employee by name or ID" style="flex:1;min-width:260px;" />
             <button class="btn" id="excludedSearchBtn" type="button">Search</button>
           </div>
-          ${renderSearchResults()}
+          <div id="excludedSearchResultsWrap">${renderSearchResults()}</div>
           <div class="row" style="margin-top:10px;">
-            <input class="input" id="excludedReasonInput" placeholder="Reason (required)" style="flex:1;min-width:220px;" value="${escapeAttr(state.excludedDraftReason)}" />
-            <input class="input" id="excludedNoteInput" placeholder="Note (optional)" style="flex:1;min-width:220px;" value="${escapeAttr(state.excludedDraftNote)}" />
+            <input class="input auditLightBlueField" id="excludedReasonInput" placeholder="Reason (required)" style="flex:1;min-width:220px;" value="${escapeAttr(state.excludedDraftReason)}" />
+            <input class="input auditLightBlueField" id="excludedNoteInput" placeholder="Note (optional)" style="flex:1;min-width:220px;" value="${escapeAttr(state.excludedDraftNote)}" />
             <button class="btn primary" id="addExcludedBtn" type="button">Add</button>
           </div>
         </div>
@@ -2039,14 +2060,7 @@
     searchInput.addEventListener("input", onExcludedSearchInputChange);
     addBtn.addEventListener("click", addSelectedExcludedStaff);
 
-    content.querySelectorAll("input[name='excludedSearchChoice']").forEach((el) => {
-      el.addEventListener("change", () => {
-        state.selectedSearchEmployeeId = el.value;
-        const selected = state.employeeSearchResults.find((x) => x.employeeId === el.value);
-        if (selected) state.excludedSearchQuery = selected.employeeName || state.excludedSearchQuery;
-        renderExcludedTab();
-      });
-    });
+    bindExcludedSearchResultEvents();
     content.querySelectorAll("button[data-action='edit-excluded']").forEach((btn) => {
       btn.addEventListener("click", onEditExcludedRow);
     });
@@ -2064,17 +2078,17 @@
       state.excludedHasSearched = false;
       state.employeeSearchResults = [];
       state.selectedSearchEmployeeId = null;
-      renderExcludedTab();
+      renderExcludedSearchResultsOnly();
       return;
     }
 
     excludedSearchDebounceTimer = setTimeout(() => {
-      searchEmployeesForExcluded({ allowShortQuery: false, silentEmpty: true });
-    }, 300);
+      searchEmployeesForExcluded({ silentEmpty: true });
+    }, 600);
   }
 
   async function searchEmployeesForExcluded(opts = {}) {
-    const { allowShortQuery = true, silentEmpty = false } = opts;
+    const { silentEmpty = false } = opts;
     if (!state.excludedLocationName) return;
     const input = document.getElementById("excludedSearchInput");
     const q = (input && input.value ? input.value : "").trim();
@@ -2083,28 +2097,39 @@
       if (!silentEmpty) alert("Enter a search term first.");
       return;
     }
-    if (!allowShortQuery && q.length < 2) {
+    if (q.length < 2) {
+      state.excludedSearchLoading = false;
+      state.excludedHasSearched = false;
+      state.employeeSearchResults = [];
+      state.selectedSearchEmployeeId = null;
+      renderExcludedSearchResultsOnly();
       return;
     }
 
+    const requestQuery = q;
+    const requestSeq = ++excludedSearchRequestSeq;
     state.excludedSearchLoading = true;
     state.excludedHasSearched = true;
-    renderExcludedTab();
+    renderExcludedSearchResultsOnly();
     const query = new URLSearchParams({
       locationName: state.excludedLocationName,
-      q,
+      q: requestQuery,
       limit: "12",
     });
     const { resp, body } = await apiGet(`/staff/toast-employees?${query.toString()}`);
+    const latestQuery = ((document.getElementById("excludedSearchInput")?.value || "").trim() || state.excludedSearchQuery).trim();
+    if (requestSeq !== excludedSearchRequestSeq || latestQuery !== requestQuery) {
+      return;
+    }
     state.excludedSearchLoading = false;
     if (!resp.ok) {
-      renderExcludedTab();
+      renderExcludedSearchResultsOnly();
       alert(`Employee search failed: ${body.error || "unknown_error"}`);
       return;
     }
     state.employeeSearchResults = Array.isArray(body.employees) ? body.employees : [];
     state.selectedSearchEmployeeId = state.employeeSearchResults[0]?.employeeId || null;
-    renderExcludedTab();
+    renderExcludedSearchResultsOnly();
   }
 
   async function addSelectedExcludedStaff() {
