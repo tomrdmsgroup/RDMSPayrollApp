@@ -1046,12 +1046,13 @@
       .map((row) => {
         const { status, klass, detail } = valStatus(row.value);
         const shownValue = detail || "Missing";
+        const whereToFix = row.where_to_fix || row.source || "";
         return `
           <tr>
-            <td style="width:260px;">${escapeHtml(row.label)}</td>
+            <td style="width:260px;white-space:normal;overflow-wrap:anywhere;">${escapeHtml(row.label)}</td>
             <td style="width:120px;">${pill(status, klass)}</td>
             <td>${escapeHtml(shownValue)}</td>
-            <td style="width:280px;"><span class="sourceNote">Source: ${escapeHtml(row.source)}</span></td>
+            <td style="width:280px;white-space:normal;overflow-wrap:anywhere;"><span class="sourceNote">${escapeHtml(whereToFix)}</span></td>
           </tr>
         `;
       })
@@ -1090,17 +1091,27 @@
       { label: "Pay Period Range", value: fmtDateRange(p.start_date, p.end_date), source: "Payroll Calendar" },
     ];
 
+    const setupAuditFields = r.setup_audit_fields || {};
+    const airtableWhereToFix = (fieldName) => `Setup → Airtable Setup Audit → ${fieldName}`;
+
     const configRows = [
       { label: "Location Name", value: r.location_name, source: "Client Vitals" },
       { label: "Payroll Calendar", value: r.calendar_name, source: "Client Vitals" },
       { label: "App Active", value: truthyYesNo(r.app_active), source: "Client Vitals" },
       { label: "Time zone", value: r.time_zone, source: "Client Vitals" },
       { label: "Validation End Time", value: r.validation_end_time_next_day, source: "Client Vitals" },
-      { label: "Payroll company", value: r.payroll_company, source: "Client Vitals" },
+      { label: "Payroll Company", value: setupAuditFields['Payroll company'] || r.payroll_company, where_to_fix: airtableWhereToFix('Payroll company') },
       { label: "POS type", value: r.pos_type, source: "Client Vitals" },
       { label: "Payroll project email", value: r.payroll_project_email, source: "Client Vitals" },
       { label: "Tip report type", value: r.tip_report_type, source: "Client Vitals" },
-      { label: "Payroll company code", value: r.payroll_company_code, source: "Client Vitals" },
+      { label: "Payroll Company Code / IID", value: setupAuditFields['Payroll company code'] || r.payroll_company_code, where_to_fix: airtableWhereToFix('Payroll company code') },
+      { label: "Regular Hours Earning Code", value: setupAuditFields['PR Reg Earning Code'], where_to_fix: airtableWhereToFix('PR Reg Earning Code') },
+      { label: "Overtime Hours Earning Code", value: setupAuditFields['PR Overtime Earning Code'], where_to_fix: airtableWhereToFix('PR Overtime Earning Code') },
+      { label: "Double Time Hours Earning Code", value: setupAuditFields['PR Double Time Earning Code'], where_to_fix: airtableWhereToFix('PR Double Time Earning Code') },
+      { label: "Meal/Break Premium Earning Code", value: setupAuditFields['PR MBP Earning Code'], where_to_fix: airtableWhereToFix('PR MBP Earning Code') },
+      { label: "Tips to Pay Earning Code", value: setupAuditFields['PR Tips to Pay Earning Code'], where_to_fix: airtableWhereToFix('PR Tips to Pay Earning Code') },
+      { label: "Tips to Tax Earning Code", value: setupAuditFields['PR Tips to Tax Earning Code'], where_to_fix: airtableWhereToFix('PR Tips to Tax Earning Code') },
+      { label: "Sick Hours Earning Code", value: setupAuditFields['PR Sick Hours Earning Code'], where_to_fix: airtableWhereToFix('PR Sick Hours Earning Code') },
       { label: "Pay frequency", value: r.pay_frequency, source: "Client Vitals" },
       { label: "Preview Contacts", value: r.preview_recipients_summary, source: "Preview Contact Emails" },
       { label: "Preview contact email count", value: displayValue(r.preview_recipients_count), source: "Preview Contact Emails" },
