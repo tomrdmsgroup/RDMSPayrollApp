@@ -340,6 +340,18 @@ async function getRecapForLocationName(locationName) {
   const payrollCompanyCode = (vitals['PR Company Code (for UPload)'] || '').toString().trim();
   const payFrequency = (vitals['PR Pay Frequency for Upload'] || '').toString().trim();
 
+  const setupAuditFields = {
+    'Payroll company': (vitals['Payroll company'] || payrollCompany || '').toString().trim() || null,
+    'Payroll company code': (vitals['Payroll company code'] || payrollCompanyCode || '').toString().trim() || null,
+    'PR Reg Earning Code': (vitals['PR Reg Earning Code'] || '').toString().trim() || null,
+    'PR Overtime Earning Code': (vitals['PR Overtime Earning Code'] || '').toString().trim() || null,
+    'PR Double Time Earning Code': (vitals['PR Double Time Earning Code'] || '').toString().trim() || null,
+    'PR MBP Earning Code': (vitals['PR MBP Earning Code'] || '').toString().trim() || null,
+    'PR Tips to Pay Earning Code': (vitals['PR Tips to Pay Earning Code'] || '').toString().trim() || null,
+    'PR Tips to Tax Earning Code': (vitals['PR Tips to Tax Earning Code'] || '').toString().trim() || null,
+    'PR Sick Hours Earning Code': (vitals['PR Sick Hours Earning Code'] || '').toString().trim() || null,
+  };
+
   const filterDetails = `{PR Calendar Name - Master}='${escapeAirtableString(calendarName)}'`;
   const detailRecords = await airtableListAll({ table: payrollDetailsTable, filterByFormula: filterDetails });
 
@@ -380,6 +392,7 @@ async function getRecapForLocationName(locationName) {
     tip_report_type: tipReportType || null,
     payroll_company_code: payrollCompanyCode || null,
     pay_frequency: payFrequency || null,
+    setup_audit_fields: setupAuditFields,
 
     preview_recipients_count: preview.count,
     preview_recipients_summary: preview.summary,
