@@ -706,6 +706,10 @@
     recapReportRules: null,
     recapReportLoading: false,
     recapReportError: "",
+    recapReportOutcome: null,
+    recapReportGenerated: false,
+    recapReportGenerating: false,
+    recapReportRunError: "",
   };
   let excludedSearchDebounceTimer = null;
   let excludedSearchRequestSeq = 0;
@@ -2366,15 +2370,7 @@
     state.recapReportSelectionPriorRecordId = preferred.recordId;
   }
 
-  function findOutcomePeriodRange(outcome) {
-    const selected = outcome?.validation_context?.selected_period || {};
-    const start = selected.period_start || selected.start_date || null;
-    const end = selected.period_end || selected.end_date || null;
-    if (!start || !end) return null;
-    return { start, end };
-  }
-
-  function buildPayrollRecapText({ locationName, selectedPeriod, includedRules, outcome }) {
+  function buildPayrollRecapText({ locationName, selectedPeriod, includedRules, outcome, hasGenerated }) {
     const lines = [];
     const start = selectedPeriod?.start_date || "";
     const end = selectedPeriod?.end_date || "";
@@ -2384,24 +2380,13 @@
     lines.push("");
     lines.push("Validation recap:");
 
-    if (!selectedPeriod) {
+    if (!selectedPeriod || !hasGenerated) {
       lines.push("Click Generate Payroll Recap Notes to build recap notes for this pay period.");
       return { text: lines.join("\n"), mappingError: false };
     }
 
     lines.push("Payroll recap notes generated for this pay period.");
     lines.push("");
-
-    if (!outcome) {
-      lines.push("Internal validation has not been run for this pay period yet.");
-      return { text: lines.join("\n"), mappingError: false };
-    }
-
-    const outcomeRange = findOutcomePeriodRange(outcome);
-    if (!outcomeRange || outcomeRange.start !== start || outcomeRange.end !== end) {
-      lines.push("Internal validation has not been run for this pay period yet.");
-      return { text: lines.join("\n"), mappingError: false };
-    }
 
     const findings = Array.isArray(outcome.findings) ? outcome.findings : [];
     const includedRuleIds = new Set(includedRules.map((rule) => String(rule.rule_id || "").trim()).filter(Boolean));
@@ -2414,7 +2399,7 @@
     }
 
     if (!includedFindings.length) {
-      lines.push("No preview recap note items were noted for this pay period.");
+      lines.push("No preview recap validation items were noted for this pay period.");
       return { text: lines.join("\n"), mappingError: false };
     }
 
@@ -2463,7 +2448,8 @@
       locationName,
       selectedPeriod,
       includedRules,
-      outcome: state.outcomeResult?.outcome || null,
+      outcome: state.recapReportOutcome || { findings: [] },
+      hasGenerated: state.recapReportGenerated,
     });
 
     const includedRulesHtml = includedRules.length
@@ -2487,6 +2473,7 @@
         <div class="panel">
           <div class="sectionTitle" style="margin-top:0;">Report Header</div>
           ${state.recapReportError ? `<div class="muted" style="margin-bottom:10px;">${escapeHtml(state.recapReportError)}</div>` : ""}
+          ${state.recapReportRunError ? `<div class="muted" style="margin-bottom:10px;">Generate failed: ${escapeHtml(state.recapReportRunError)}</div>` : ""}
           <div class="summaryGrid">
             <div class="summaryMetric"><div class="summaryMetricLabel">Location</div><div class="summaryMetricValue">${escapeHtml(locationName)}</div></div>
             <div class="summaryMetric"><div class="summaryMetricLabel">Pay Period</div><div class="summaryMetricValue">${escapeHtml(selectedRange || "Click Generate Payroll Recap Notes to build recap notes for this pay period.")}</div></div>
@@ -2521,7 +2508,9 @@
         <div class="panel">
           <div class="sectionTitle" style="margin-top:0;">Preview Recap Notes</div>
           <div class="row" style="margin-bottom:12px;">
-            <button class="btn primary" id="generatePayrollRecapNotesBtn" type="button">Generate Payroll Recap Notes</button>
+            <button class="btn primary" id="generatePayrollRecapNotesBtn" type="button" ${state.recapReportGenerating ? "disabled" : ""}>${
+              state.recapReportGenerating ? "Generating..." : "Generate Payroll Recap Notes"
+            }</button>
           </div>
           <textarea id="payrollRecapText" class="input" style="min-height:240px;resize:vertical;font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;">${escapeHtml(
             recapResult.text
@@ -2546,15 +2535,16 @@
           state.recapReportSelectionBucket = val;
           state.recapReportSelectionPriorRecordId = "";
         }
+        state.recapReportGenerated = false;
+        state.recapReportOutcome = null;
+        state.recapReportRunError = "";
         renderPayrollRecapReportTab();
       });
     }
 
     const generateBtn = document.getElementById("generatePayrollRecapNotesBtn");
     if (generateBtn) {
-      generateBtn.addEventListener("click", () => {
-        renderPayrollRecapReportTab();
-      });
+      generateBtn.addEventListener("click", runPayrollRecapValidation);
     }
 
     const copyBtn = document.getElementById("copyRecapTextBtn");
@@ -2589,6 +2579,10 @@
     state.recapReportRules = null;
     state.recapReportLoading = false;
     state.recapReportError = "";
+    state.recapReportOutcome = null;
+    state.recapReportGenerated = false;
+    state.recapReportGenerating = false;
+    state.recapReportRunError = "";
     state.recapReportSelectionBucket = "";
     state.recapReportSelectionPriorRecordId = "";
 
@@ -2627,6 +2621,54 @@
       if (!Array.isArray(state.recapReportRules)) state.recapReportRules = [];
       state.recapReportLoading = false;
       ensureRecapReportSelection(state.recapReportSelector);
+      renderPayrollRecapReportTab();
+    }
+  }
+
+  async function runPayrollRecapValidation() {
+    const selected = recapReportSelectedPeriod();
+    if (!selected) {
+      state.recapReportRunError = "no_selected_pay_period";
+      state.recapReportGenerated = false;
+      renderPayrollRecapReportTab();
+      return;
+    }
+    const locationName = document.getElementById("locationSelect").value;
+    if (!locationName) {
+      state.recapReportRunError = "location_required";
+      state.recapReportGenerated = false;
+      renderPayrollRecapReportTab();
+      return;
+    }
+
+    state.recapReportGenerating = true;
+    state.recapReportRunError = "";
+    renderPayrollRecapReportTab();
+
+    try {
+      const { resp, body } = await apiPost("/staff/validation-outcome/run", {
+        location_name: locationName,
+        period_start: selected.start_date,
+        period_end: selected.end_date,
+        validation_date: selected.validation_date || null,
+        report_only: true,
+        suppress_asana: true,
+        create_asana_tasks: false,
+      });
+      if (!resp.ok) {
+        state.recapReportRunError = body.error || "run_failed";
+        state.recapReportOutcome = null;
+        state.recapReportGenerated = false;
+        return;
+      }
+      state.recapReportOutcome = body.outcome || { findings: [] };
+      state.recapReportGenerated = true;
+    } catch (err) {
+      state.recapReportRunError = (err && err.message) || "run_failed";
+      state.recapReportOutcome = null;
+      state.recapReportGenerated = false;
+    } finally {
+      state.recapReportGenerating = false;
       renderPayrollRecapReportTab();
     }
   }
@@ -4595,6 +4637,10 @@
     state.recapReportRules = null;
     state.recapReportLoading = false;
     state.recapReportError = "";
+    state.recapReportOutcome = null;
+    state.recapReportGenerated = false;
+    state.recapReportGenerating = false;
+    state.recapReportRunError = "";
 
     if (tab === "dashboard") await loadPayrollDashboard();
     else if (tab === "confirmations") await loadRecapForSelected();

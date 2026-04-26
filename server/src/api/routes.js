@@ -554,6 +554,9 @@ function router(req, res) {
         const locationName = String(body.location_name || '').trim();
         const periodStart = String(body.period_start || '').trim();
         const periodEnd = String(body.period_end || '').trim();
+        const reportOnly = body.report_only === true;
+        const suppressAsana = body.suppress_asana === true;
+        const createAsanaTasks = body.create_asana_tasks === true;
         if (!locationName || !periodStart || !periodEnd) {
           return json(res, 400, { error: 'missing_required_fields' });
         }
@@ -563,13 +566,16 @@ function router(req, res) {
           period_start: periodStart,
           period_end: periodEnd,
           payload: {
-            source: 'staff_outcome_tab',
+            source: reportOnly ? 'staff_payroll_recap_report' : 'staff_outcome_tab',
             selected_period: {
               period_start: periodStart,
               period_end: periodEnd,
               validation_date: body.validation_date || null,
             },
             requested_by: user.email,
+            report_only: reportOnly,
+            suppress_asana: suppressAsana,
+            create_asana_tasks: createAsanaTasks,
           },
           status: 'running',
         });
