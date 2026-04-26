@@ -66,6 +66,10 @@ function normalizeSourceRow(row) {
     regularHours: toNumber(pick(row, ['Regular Hours', 'regular_hours', 'regularHours', 'reg_hours'])),
     overtimeHours: toNumber(pick(row, ['Overtime Hours', 'overtime_hours', 'overtimeHours', 'ot_hours'])),
     doubleTimeHours: toNumber(pick(row, ['Double Time Hours', 'double_time_hours', 'doubleTimeHours', 'dt_hours'])),
+    tipsHours: toNumber(pick(row, ['Tips Hours', 'tips_hours', 'tipsHours'])),
+    sickHours: toNumber(pick(row, ['Sick Hours', 'sick_hours', 'sickHours'])),
+    mbpHours: toNumber(pick(row, ['MBP Hours', 'mbp_hours', 'mbpHours', 'Meal Break Premium Hours', 'meal_break_premium_hours'])),
+    earningType: String(pick(row, ['Earning Type', 'earning_type', 'pay_type', 'type']) || '').trim().toLowerCase(),
   };
 }
 
@@ -119,17 +123,27 @@ function createAdpRunEarningsWipDataset({ rows = [], setupAuditFields = {}, peri
       rateAmount: normalized.rateAmount,
     };
 
-    [
+    const hoursByType = [
       ['regular', normalized.regularHours],
       ['overtime', normalized.overtimeHours],
       ['doubletime', normalized.doubleTimeHours],
-    ].forEach(([type, hours]) => {
-      if (hours < 0.005) {
-        if (hours !== 0) {
-          excludedRows.push({ ...base, earningCode: '', payHours: Number(hours.toFixed(2)), wipNote: 'Excluded from Earnings WIP: zero hours.' });
-        }
-        return;
+    ];
+    const hasPositiveEarningsHours = hoursByType.some(([, hours]) => hours >= 0.005);
+    if (!hasPositiveEarningsHours) {
+      const type = normalized.earningType;
+      let note = 'Excluded from Earnings WIP: zero hours.';
+      if (normalized.tipsHours >= 0.005 || type.includes('tip')) note = 'Excluded from Earnings WIP: tips handled in Tips WIP.';
+      else if (normalized.sickHours >= 0.005 || type.includes('sick')) note = 'Excluded from Earnings WIP: sick hours are not part of Earnings WIP.';
+      else if (normalized.mbpHours >= 0.005 || type.includes('mbp') || type.includes('meal')) note = 'Excluded from Earnings WIP: MBP hours are not part of Earnings WIP.';
+      else if (type && !type.includes('regular') && !type.includes('overtime') && !type.includes('double')) {
+        note = 'Excluded from Earnings WIP: non-earnings type.';
       }
+      excludedRows.push({ ...base, earningCode: '', payHours: 0, wipNote: note });
+      return;
+    }
+
+    hoursByType.forEach(([type, hours]) => {
+      if (hours < 0.005) return;
 
       const earningCode = getEarningCodeForType(setupAuditFields, type);
       const candidate = buildWipRow(base, hours, earningCode);
@@ -191,12 +205,14 @@ async function buildAdpRunEarningsWipWorkbookBuffer({ rows = [], setupAuditField
 
   if (dataset.validationRows.length) {
     sheet.addRow([]); sheet.addRow([]); sheet.addRow([]);
+    sheet.addRow(['NEEDS ATTENTION']);
     sheet.addRow([...dataset.headers, 'WIP NOTE']);
     dataset.validationRows.forEach((row) => sheet.addRow([...rowToCells(row), row.wipNote || '']));
   }
 
   if (dataset.excludedRows.length) {
     sheet.addRow([]); sheet.addRow([]); sheet.addRow([]);
+    sheet.addRow(['EXCLUDED STAFF']);
     sheet.addRow([...dataset.headers, 'WIP NOTE']);
     dataset.excludedRows.forEach((row) => sheet.addRow([...rowToCells(row), row.wipNote || '']));
   }
