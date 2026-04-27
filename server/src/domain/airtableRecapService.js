@@ -417,6 +417,8 @@ function buildPayPeriodSelectorFromSortedRows(sortedRows, todayYmd) {
 }
 
 async function listPayrollCalendarDetailRecordsForCalendarName({ payrollDetailsTable, calendarName }) {
+  const target = normalizeNameForMatch(calendarName);
+
   const candidateFields = [
     'PR Calendar Name - Master',
     'PR Calendar',
@@ -429,6 +431,7 @@ async function listPayrollCalendarDetailRecordsForCalendarName({ payrollDetailsT
 
   for (const fieldName of candidateFields) {
     const filterByFormula = `{${fieldName}}='${escapeAirtableString(calendarName)}'`;
+
     try {
       const records = await airtableListAll({
         table: payrollDetailsTable,
@@ -459,9 +462,59 @@ async function listPayrollCalendarDetailRecordsForCalendarName({ payrollDetailsT
     }
   }
 
+  let allRecords = [];
+  try {
+    allRecords = await airtableListAll({ table: payrollDetailsTable });
+  } catch (err) {
+    attempts.push({
+      field_name: '*scan_all_fields*',
+      filter_by_formula: null,
+      record_count: 0,
+      scanned_record_count: 0,
+      matched_field_names: [],
+      error: err?.message || 'unknown_error',
+    });
+
+    return {
+      records: [],
+      matched_field_name: null,
+      attempts,
+    };
+  }
+
+  const matchedFieldNames = new Set();
+
+  const matchedRecords = allRecords.filter((record) => {
+    const fields = record.fields || {};
+
+    return Object.entries(fields).some(([fieldName, value]) => {
+      const values = Array.isArray(value) ? value : [value];
+
+      return values.some((entry) => {
+        if (entry === null || entry === undefined) return false;
+        if (typeof entry === 'object') return false;
+
+        const normalized = normalizeNameForMatch(entry);
+        const matched = normalized === target;
+
+        if (matched) matchedFieldNames.add(fieldName);
+        return matched;
+      });
+    });
+  });
+
+  attempts.push({
+    field_name: '*scan_all_fields*',
+    filter_by_formula: null,
+    record_count: matchedRecords.length,
+    scanned_record_count: allRecords.length,
+    matched_field_names: Array.from(matchedFieldNames).sort(),
+    error: null,
+  });
+
   return {
-    records: [],
-    matched_field_name: null,
+    records: matchedRecords,
+    matched_field_name: matchedFieldNames.size ? Array.from(matchedFieldNames).sort().join(', ') : null,
     attempts,
   };
 }
@@ -1044,7 +1097,16 @@ async function getPayPeriodSelectorForLocationName(locationName) {
   });
   const detailRecords = detailLookup.records;
   const rows = sortRowsByStartAsc(detailRecords);
-  if (!rows.length) throw new Error('no_pay_periods_found');
+    if (!rows.length) {
+      const err = new Error('no_pay_periods_found');
+      err.debug = {
+        location_name: name,
+        payroll_calendar: calendarName,
+        matched_calendar_detail_field: detailLookup.matched_field_name,
+        calendar_detail_lookup_attempts: detailLookup.attempts,
+      };
+      throw err;
+    }
 
   const todayYmd = toYmd(new Date().toISOString());
   const selector = buildPayPeriodSelectorFromSortedRows(rows, todayYmd);
