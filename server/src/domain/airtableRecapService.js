@@ -377,6 +377,45 @@ function toSelectorPeriod(row) {
   };
 }
 
+function buildPayPeriodSelectorFromSortedRows(sortedRows, todayYmd) {
+  const selectorRows = (sortedRows || [])
+    .map((row) => ({ row, period: toSelectorPeriod(row) }))
+    .filter((x) => x.period && x.period.start_date && x.period.end_date);
+
+  const currentIndex = selectorRows.findIndex(
+    (x) => x.period.start_date <= todayYmd && todayYmd <= x.period.end_date,
+  );
+
+  if (currentIndex >= 0) {
+    return {
+      next_pay_period: selectorRows[currentIndex + 1]?.period || null,
+      current_pay_period: selectorRows[currentIndex].period,
+      prior_pay_periods: selectorRows
+        .slice(0, currentIndex)
+        .reverse()
+        .map((x) => x.period),
+    };
+  }
+
+  const nextIndex = selectorRows.findIndex((x) => x.period.start_date > todayYmd);
+  if (nextIndex >= 0) {
+    return {
+      next_pay_period: selectorRows[nextIndex].period,
+      current_pay_period: null,
+      prior_pay_periods: selectorRows
+        .slice(0, nextIndex)
+        .reverse()
+        .map((x) => x.period),
+    };
+  }
+
+  return {
+    next_pay_period: null,
+    current_pay_period: null,
+    prior_pay_periods: selectorRows.reverse().map((x) => x.period),
+  };
+}
+
 function normalizePreviewRecipients(vitals) {
   const emails = [];
   for (let i = 1; i <= 5; i++) {
@@ -954,54 +993,21 @@ async function getPayPeriodSelectorForLocationName(locationName) {
   const rows = sortRowsByStartAsc(detailRecords);
   if (!rows.length) throw new Error('no_pay_periods_found');
 
-  const todayYmd = toYmd(new Date().toISOString());
-
-  const currentIndex = rows.findIndex((row) => {
-    const startYmd = toYmd(row.fields['PR Period Start Date']);
-    const submitYmd = toYmd(row.fields['PR Period Submit Date']);
-    if (!startYmd || !submitYmd || !todayYmd) return false;
-    return startYmd <= todayYmd && todayYmd <= submitYmd;
-  });
-
-  const nextIndex =
-    currentIndex >= 0
-      ? currentIndex + 1 < rows.length
-        ? currentIndex + 1
-        : -1
-      : rows.findIndex((row) => {
-          const startYmd = toYmd(row.fields['PR Period Start Date']);
-          if (!startYmd || !todayYmd) return false;
-          return startYmd > todayYmd;
-        });
-
-  const currentRow = currentIndex >= 0 ? rows[currentIndex] : null;
-  const nextRow = nextIndex >= 0 ? rows[nextIndex] : null;
-
-  let priorRows = [];
-  if (currentIndex >= 0) {
-    priorRows = rows.slice(0, currentIndex).reverse();
-  } else if (nextIndex >= 0) {
-    priorRows = rows.slice(0, nextIndex).reverse();
-  } else {
-    priorRows = [...rows].reverse();
-  }
-
-  const currentPeriod = toSelectorPeriod(currentRow);
-  const nextPeriod = toSelectorPeriod(nextRow);
-  const priorPeriods = priorRows.map(toSelectorPeriod).filter(Boolean);
+  const todayYmd = toYmd(new Date());
+  const selector = buildPayPeriodSelectorFromSortedRows(rows, todayYmd);
 
   return {
     location_name: name,
     payroll_calendar: calendarName,
-    current_pay_period: currentPeriod,
-    next_pay_period: nextPeriod,
-    prior_pay_periods: priorPeriods,
+    current_pay_period: selector.current_pay_period,
+    next_pay_period: selector.next_pay_period,
+    prior_pay_periods: selector.prior_pay_periods,
     debug: {
       detail_row_count: rows.length,
       todayYmd: todayYmd || null,
-      current_found: Boolean(currentPeriod),
-      next_found: Boolean(nextPeriod),
-      prior_count: priorPeriods.length,
+      current_found: Boolean(selector.current_pay_period),
+      next_found: Boolean(selector.next_pay_period),
+      prior_count: selector.prior_pay_periods.length,
     },
   };
 }
@@ -1244,6 +1250,7 @@ module.exports = {
   getRecapForLocationName,
   getAirtableSetupAuditForLocationName,
   getPayPeriodSelectorForLocationName,
+  buildPayPeriodSelectorFromSortedRows,
   getActivePayrollDashboardRows,
   getCommunicationRecipientsForLocationName,
 };
