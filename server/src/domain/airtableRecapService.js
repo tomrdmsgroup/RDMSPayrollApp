@@ -326,23 +326,27 @@ function findCurrentPeriodRow(rows, nowUtc) {
   return candidates[0];
 }
 
-function findDashboardActivePeriodRow(rows, nowUtc) {
-  const now = nowUtc || new Date();
+function findDashboardActivePeriodRow(rows, todayYmd) {
+  const today = String(todayYmd || '').trim();
+  if (!today) return null;
+
   const candidates = rows
     .map((r) => {
       const fields = r.fields || {};
+      const endDate = toYmd(fields['PR Period End Date']);
+      const submitDate = toYmd(fields['PR Period Submit Date']);
       return {
         record_id: r.id,
         fields,
-        end: new Date(fields['PR Period End Date']),
-        submit: new Date(fields['PR Period Submit Date']),
+        end_date: endDate,
+        submit_date: submitDate,
       };
     })
-    .filter((x) => !Number.isNaN(x.end.getTime()) && !Number.isNaN(x.submit.getTime()))
-    .filter((x) => now.getTime() >= x.end.getTime() && now.getTime() <= x.submit.getTime());
+    .filter((x) => x.end_date && x.submit_date)
+    .filter((x) => x.end_date <= today && today <= x.submit_date);
 
   if (!candidates.length) return null;
-  candidates.sort((a, b) => b.end.getTime() - a.end.getTime());
+  candidates.sort((a, b) => String(b.end_date).localeCompare(String(a.end_date)));
   return candidates[0];
 }
 
@@ -500,7 +504,6 @@ function toSetupAuditRow({ section, item, value, whereToFix, sensitive = false }
 async function getAirtableSetupAuditForLocationName(locationName) {
   const vitalsTable = requireEnv('AIRTABLE_VITALS_TABLE');
   const locationField = requireEnv('AIRTABLE_VITALS_LOCATION_FIELD');
-  const payrollDetailsTable = requireEnv('AIRTABLE_PAYROLL_CALENDAR_DETAILS_TABLE');
 
   const name = String(locationName || '').trim();
   if (!name) throw new Error('location_name_required');
@@ -576,7 +579,6 @@ async function getAirtableSetupAuditForLocationName(locationName) {
   };
 
   const whereVitals = (fieldName) => `Airtable → Client Vitals → ${fieldName}`;
-  const whereCalendarDetails = (fieldName) => `Airtable → Payroll Calendar Details → ${fieldName}`;
   const whereApiConfig = (fieldName) => `Airtable → API Config → ${fieldName}`;
   const fullSlug = toSafeSlug(name);
   const rootSlug = toSafeSlug(getRootLocationName(name));
@@ -801,33 +803,6 @@ async function getAirtableSetupAuditForLocationName(locationName) {
     }),
   ];
 
-  let currentPayPeriod = null;
-  if (calendarName) {
-    const filterDetails = `{PR Calendar Name - Master}='${escapeAirtableString(calendarName)}'`;
-    const detailRecords = await airtableListAll({ table: payrollDetailsTable, filterByFormula: filterDetails });
-    const current = findCurrentPeriodRow(detailRecords, new Date());
-    if (current) {
-      const fields = current.fields || {};
-      currentPayPeriod = {
-        record_id: current.record_id,
-        start_date: toYmd(fields['PR Period Start Date']),
-        end_date: toYmd(fields['PR Period End Date']),
-        validation_date: toYmd(fields['PR Period Validation Date']),
-        submit_date: toYmd(fields['PR Period Submit Date']),
-        check_date: toYmd(fields['PR Period Check Date']),
-      };
-    } else {
-      setupAuditRows.push(
-        toSetupAuditRow({
-          section: 'Pay Period',
-          item: 'Current pay period',
-          value: null,
-          whereToFix: whereCalendarDetails('Current period row (PR Period Start/Submit Date)'),
-        })
-      );
-    }
-  }
-
   return {
     location_name: name,
     calendar_name: calendarName || null,
@@ -839,7 +814,6 @@ async function getAirtableSetupAuditForLocationName(locationName) {
     api_config_duplicate_record_count: apiConfigDuplicateRecordCount,
     api_config_duplicate_record_ids: apiConfigDuplicateRecordIds,
     setup_audit_fields: setupAuditFields,
-    current_pay_period: currentPayPeriod,
     setup_audit_rows: setupAuditRows,
   };
 }
@@ -1100,7 +1074,24 @@ async function getActivePayrollDashboardRows() {
   const vitalsRecords = await airtableListAll({ table: vitalsTable });
 
   const rows = [];
-  const now = new Date();
+  const todayYmd = getTodayYmdForTimeZone(null);
+  const debug = {
+    total_vitals_records: vitalsRecords.length,
+    eligible_dashboard_clients: 0,
+    skipped_missing_client_name: 0,
+    skipped_missing_payroll_calendar: 0,
+    skipped_not_rdms_processes_payroll_yes: 0,
+    calendar_detail_queries: 0,
+    calendars_with_zero_detail_rows: 0,
+    clients_with_detail_rows_but_no_active_period: 0,
+    active_rows_returned: 0,
+    skipped_samples: [],
+  };
+  const addSkippedSample = (sample) => {
+    if (debug.skipped_samples.length >= 25) return;
+    debug.skipped_samples.push(sample);
+  };
+
   for (const record of vitalsRecords) {
     const fields = record.fields || {};
     const clientName = (fields[locationField] || fields.Name || '').toString().trim();
@@ -1112,42 +1103,84 @@ async function getActivePayrollDashboardRows() {
       pr_lead: resolvePrLeadDisplay(fields),
     };
 
-    if (!(client.client_name && client.payroll_calendar && rdmsPassed)) {
-      console.log('[payroll-dashboard-active] skipping client', {
+    if (!rdmsPassed) {
+      debug.skipped_not_rdms_processes_payroll_yes += 1;
+      addSkippedSample({
         client_name: client.client_name || null,
         payroll_calendar: client.payroll_calendar || null,
-        rdms_processes_payroll_passed: rdmsPassed,
-        detail_row_count: 0,
-        dashboard_active_period_found: false,
+        rdms_processes_payroll: fields['RDMS Processes Payroll'] || null,
+        reason: 'rdms_processes_payroll_not_yes',
+        todayYmd,
       });
       continue;
     }
 
+    if (!client.client_name) {
+      debug.skipped_missing_client_name += 1;
+      addSkippedSample({
+        client_name: null,
+        payroll_calendar: client.payroll_calendar || null,
+        rdms_processes_payroll: fields['RDMS Processes Payroll'] || null,
+        reason: 'missing_client_name',
+        todayYmd,
+      });
+      continue;
+    }
+
+    if (!client.payroll_calendar) {
+      debug.skipped_missing_payroll_calendar += 1;
+      addSkippedSample({
+        client_name: client.client_name,
+        payroll_calendar: null,
+        rdms_processes_payroll: fields['RDMS Processes Payroll'] || null,
+        reason: 'missing_payroll_calendar',
+        todayYmd,
+      });
+      continue;
+    }
+
+    debug.eligible_dashboard_clients += 1;
     const filterDetails = `{PR Calendar Name - Master}='${escapeAirtableString(client.payroll_calendar)}'`;
+    debug.calendar_detail_queries += 1;
     const detailRecords = await airtableListAll({
       table: payrollDetailsTable,
       filterByFormula: filterDetails,
     });
 
-    const active = findDashboardActivePeriodRow(detailRecords, now);
-    if (!active) {
-      console.log('[payroll-dashboard-active] skipping client', {
+    if (!detailRecords.length) {
+      debug.calendars_with_zero_detail_rows += 1;
+      addSkippedSample({
         client_name: client.client_name,
         payroll_calendar: client.payroll_calendar,
-        rdms_processes_payroll_passed: rdmsPassed,
-        detail_row_count: detailRecords.length,
-        dashboard_active_period_found: false,
+        rdms_processes_payroll: fields['RDMS Processes Payroll'] || null,
+        reason: 'zero_payroll_calendar_detail_rows',
+        detail_row_count: 0,
+        todayYmd,
       });
       continue;
     }
 
-    console.log('[payroll-dashboard-active] active client', {
-      client_name: client.client_name,
-      payroll_calendar: client.payroll_calendar,
-      pr_period_start_date: toYmd(active.fields['PR Period Start Date']),
-      pr_period_end_date: toYmd(active.fields['PR Period End Date']),
-      pr_period_submit_date: toYmd(active.fields['PR Period Submit Date']),
-    });
+    const active = findDashboardActivePeriodRow(detailRecords, todayYmd);
+    if (!active) {
+      debug.clients_with_detail_rows_but_no_active_period += 1;
+      addSkippedSample({
+        client_name: client.client_name,
+        payroll_calendar: client.payroll_calendar,
+        rdms_processes_payroll: fields['RDMS Processes Payroll'] || null,
+        reason: 'no_active_period_end_to_submit_window',
+        detail_row_count: detailRecords.length,
+        todayYmd,
+        sample_periods: detailRecords.slice(0, 3).map((detail) => {
+          const detailFields = detail.fields || {};
+          return {
+            start_date: toYmd(detailFields['PR Period Start Date']),
+            end_date: toYmd(detailFields['PR Period End Date']),
+            submit_date: toYmd(detailFields['PR Period Submit Date']),
+          };
+        }),
+      });
+      continue;
+    }
 
     rows.push({
       client_name: client.client_name,
@@ -1161,10 +1194,12 @@ async function getActivePayrollDashboardRows() {
       validated_by_client: 'No',
     });
   }
+  debug.active_rows_returned = rows.length;
 
   return {
     refreshed_at: new Date().toISOString(),
     rows: sortDashboardRows(rows),
+    debug,
   };
 }
 
