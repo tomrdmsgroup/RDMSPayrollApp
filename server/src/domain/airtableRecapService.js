@@ -956,9 +956,34 @@ async function getPayPeriodSelectorForLocationName(locationName) {
 
   const now = new Date();
   const current = findCurrentPeriodRow(detailRecords, now);
-  const currentIndex = current ? rows.findIndex((r) => r.record_id === current.record_id) : -1;
-  const next = currentIndex >= 0 ? rows[currentIndex + 1] || null : null;
-  const priorRows = currentIndex > 0 ? rows.slice(0, currentIndex).reverse() : [];
+  const nowMs = now.getTime();
+
+  let currentIndex = current ? rows.findIndex((r) => r.record_id === current.record_id) : -1;
+  let insertionIndex = rows.findIndex((r) => r.start.getTime() > nowMs);
+
+  if (!current) {
+    if (insertionIndex >= 0) {
+      currentIndex = insertionIndex - 1;
+    } else if (rows.length) {
+      currentIndex = rows.length - 1;
+    }
+  }
+
+  if (insertionIndex < 0 && current && currentIndex >= 0) {
+    insertionIndex = currentIndex + 1;
+  }
+
+  let next = null;
+  let priorRows = [];
+
+  if (current && currentIndex >= 0) {
+    next = rows[currentIndex + 1] || null;
+    priorRows = currentIndex > 0 ? rows.slice(0, currentIndex).reverse() : [];
+  } else {
+    if (insertionIndex >= 0) next = rows[insertionIndex] || null;
+    const priorEnd = insertionIndex >= 0 ? insertionIndex : rows.length;
+    priorRows = priorEnd > 0 ? rows.slice(0, priorEnd).reverse() : [];
+  }
 
   const currentPeriod = toSelectorPeriod(current);
   const nextPeriod = toSelectorPeriod(next);
@@ -970,6 +995,8 @@ async function getPayPeriodSelectorForLocationName(locationName) {
     if (todayYmd && todayYmd > currentPeriod.validation_date) {
       defaultBucket = nextPeriod ? 'next' : 'current';
     }
+  } else if (nextPeriod) {
+    defaultBucket = 'next';
   }
 
   const defaultSelection =
@@ -984,6 +1011,15 @@ async function getPayPeriodSelectorForLocationName(locationName) {
     next_pay_period: nextPeriod,
     prior_pay_periods: priorPeriods,
     default_selection: defaultSelection,
+    debug: {
+      location_name: name,
+      calendar_name: calendarName,
+      detail_row_count: rows.length,
+      current_found: Boolean(currentPeriod),
+      current_index: currentIndex,
+      next_found: Boolean(nextPeriod),
+      prior_count: priorPeriods.length,
+    },
   };
 }
 
