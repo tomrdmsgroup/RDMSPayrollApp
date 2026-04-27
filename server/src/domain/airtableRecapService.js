@@ -954,69 +954,52 @@ async function getPayPeriodSelectorForLocationName(locationName) {
   const rows = sortRowsByStartAsc(detailRecords);
   if (!rows.length) throw new Error('no_pay_periods_found');
 
-  const now = new Date();
-  const current = findCurrentPeriodRow(detailRecords, now);
-  const nowMs = now.getTime();
+  const todayYmd = toYmd(new Date().toISOString());
 
-  let currentIndex = current ? rows.findIndex((r) => r.record_id === current.record_id) : -1;
-  let insertionIndex = rows.findIndex((r) => r.start.getTime() > nowMs);
+  const currentIndex = rows.findIndex((row) => {
+    const startYmd = toYmd(row.fields['PR Period Start Date']);
+    const submitYmd = toYmd(row.fields['PR Period Submit Date']);
+    if (!startYmd || !submitYmd || !todayYmd) return false;
+    return startYmd <= todayYmd && todayYmd <= submitYmd;
+  });
 
-  if (!current) {
-    if (insertionIndex >= 0) {
-      currentIndex = insertionIndex - 1;
-    } else if (rows.length) {
-      currentIndex = rows.length - 1;
-    }
-  }
+  const nextIndex =
+    currentIndex >= 0
+      ? currentIndex + 1 < rows.length
+        ? currentIndex + 1
+        : -1
+      : rows.findIndex((row) => {
+          const startYmd = toYmd(row.fields['PR Period Start Date']);
+          if (!startYmd || !todayYmd) return false;
+          return startYmd > todayYmd;
+        });
 
-  if (insertionIndex < 0 && current && currentIndex >= 0) {
-    insertionIndex = currentIndex + 1;
-  }
+  const currentRow = currentIndex >= 0 ? rows[currentIndex] : null;
+  const nextRow = nextIndex >= 0 ? rows[nextIndex] : null;
 
-  let next = null;
   let priorRows = [];
-
-  if (current && currentIndex >= 0) {
-    next = rows[currentIndex + 1] || null;
-    priorRows = currentIndex > 0 ? rows.slice(0, currentIndex).reverse() : [];
+  if (currentIndex >= 0) {
+    priorRows = rows.slice(0, currentIndex).reverse();
+  } else if (nextIndex >= 0) {
+    priorRows = rows.slice(0, nextIndex).reverse();
   } else {
-    if (insertionIndex >= 0) next = rows[insertionIndex] || null;
-    const priorEnd = insertionIndex >= 0 ? insertionIndex : rows.length;
-    priorRows = priorEnd > 0 ? rows.slice(0, priorEnd).reverse() : [];
+    priorRows = [...rows].reverse();
   }
 
-  const currentPeriod = toSelectorPeriod(current);
-  const nextPeriod = toSelectorPeriod(next);
+  const currentPeriod = toSelectorPeriod(currentRow);
+  const nextPeriod = toSelectorPeriod(nextRow);
   const priorPeriods = priorRows.map(toSelectorPeriod).filter(Boolean);
-
-  let defaultBucket = 'current';
-  if (currentPeriod && currentPeriod.validation_date) {
-    const todayYmd = toYmd(now.toISOString());
-    if (todayYmd && todayYmd > currentPeriod.validation_date) {
-      defaultBucket = nextPeriod ? 'next' : 'current';
-    }
-  } else if (nextPeriod) {
-    defaultBucket = 'next';
-  }
-
-  const defaultSelection =
-    defaultBucket === 'next'
-      ? { bucket: 'next', period: nextPeriod }
-      : { bucket: 'current', period: currentPeriod };
 
   return {
     location_name: name,
-    calendar_name: calendarName,
+    payroll_calendar: calendarName,
     current_pay_period: currentPeriod,
     next_pay_period: nextPeriod,
     prior_pay_periods: priorPeriods,
-    default_selection: defaultSelection,
     debug: {
-      location_name: name,
-      calendar_name: calendarName,
       detail_row_count: rows.length,
+      todayYmd: todayYmd || null,
       current_found: Boolean(currentPeriod),
-      current_index: currentIndex,
       next_found: Boolean(nextPeriod),
       prior_count: priorPeriods.length,
     },
