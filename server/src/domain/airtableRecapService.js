@@ -290,10 +290,16 @@ async function listLocationNames() {
     fields: [locationField],
   });
 
-  const names = recs
-    .map((r) => (r.fields || {})[locationField])
-    .map((v) => (v || '').toString().trim())
-    .filter(Boolean);
+  const seen = new Set();
+  const names = [];
+  recs.forEach((r) => {
+    const name = ((r.fields || {})[locationField] || '').toString().trim();
+    if (!name) return;
+    const key = name.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    names.push(name);
+  });
 
   names.sort((a, b) => a.localeCompare(b));
   return names;
@@ -313,10 +319,10 @@ function normalizeCalendarFieldValue(value) {
 
 function resolveCalendarNameFromVitals(vitals) {
   const candidateFields = [
+    'PR Calendar',
     'Payroll Calendar (from PR Calendar)',
     'Payroll Calendar',
     'PR Calendar Name',
-    'PR Calendar',
   ];
 
   for (const fieldName of candidateFields) {
@@ -325,6 +331,299 @@ function resolveCalendarNameFromVitals(vitals) {
   }
 
   return null;
+}
+
+function normalizeAuditRowValue(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'boolean') return value ? 'YES' : 'NO';
+  if (Array.isArray(value)) {
+    const values = value
+      .map((entry) => String(entry === null || entry === undefined ? '' : entry).trim())
+      .filter(Boolean);
+    return values.join(', ');
+  }
+  return String(value).trim();
+}
+
+function toSetupAuditRow({ section, item, value, whereToFix, sensitive = false }) {
+  const normalized = normalizeAuditRowValue(value);
+  const isMissing = !normalized;
+  return {
+    section,
+    item,
+    status: isMissing ? 'Missing' : 'OK',
+    value: isMissing ? null : sensitive ? 'Configured' : normalized,
+    where_to_fix: whereToFix,
+  };
+}
+
+async function getAirtableSetupAuditForLocationName(locationName) {
+  const vitalsTable = requireEnv('AIRTABLE_VITALS_TABLE');
+  const locationField = requireEnv('AIRTABLE_VITALS_LOCATION_FIELD');
+  const payrollDetailsTable = requireEnv('AIRTABLE_PAYROLL_CALENDAR_DETAILS_TABLE');
+
+  const name = String(locationName || '').trim();
+  if (!name) throw new Error('location_name_required');
+
+  const filterVitals = `{${locationField}}='${escapeAirtableString(name)}'`;
+  const vitalsRecords = await airtableListAll({ table: vitalsTable, filterByFormula: filterVitals });
+  if (!vitalsRecords.length) throw new Error('location_not_found');
+
+  const selectedVitalsRecord = vitalsRecords[0];
+  const vitals = selectedVitalsRecord.fields || {};
+  const duplicateVitalsRecordIds = vitalsRecords.map((record) => record.id).filter(Boolean);
+  const duplicateVitalsRecordCount = duplicateVitalsRecordIds.length;
+  if (duplicateVitalsRecordCount > 1) {
+    console.warn('[airtableSetupAudit] duplicate vitals records found for location', {
+      selected_location: name,
+      duplicate_vitals_record_count: duplicateVitalsRecordCount,
+      duplicate_vitals_record_ids: duplicateVitalsRecordIds,
+    });
+  }
+
+  const calendarName = resolveCalendarNameFromVitals(vitals);
+  const setupAuditFields = {
+    'Payroll company': (vitals['Payroll company'] || vitals['Payroll Company'] || '').toString().trim() || null,
+    'Payroll company code':
+      (vitals['Payroll company code'] || vitals['PR Company Code (for UPload)'] || '').toString().trim() || null,
+    'PR Reg Earning Code': (vitals['PR Reg Earning Code'] || '').toString().trim() || null,
+    'PR Overtime Earning Code': (vitals['PR Overtime Earning Code'] || '').toString().trim() || null,
+    'PR Double Time Earning Code': (vitals['PR Double Time Earning Code'] || '').toString().trim() || null,
+    'PR MBP Earning Code': (vitals['PR MBP Earning Code'] || '').toString().trim() || null,
+    'PR Tips to Pay Earning Code': (vitals['PR Tips to Pay Earning Code'] || '').toString().trim() || null,
+    'PR Tips to Tax Earning Code': (vitals['PR Tips to Tax Earning Code'] || '').toString().trim() || null,
+    'PR Sick Hours Earning Code': (vitals['PR Sick Hours Earning Code'] || '').toString().trim() || null,
+  };
+
+  const whereVitals = (fieldName) => `Airtable → Client Vitals → ${fieldName}`;
+  const whereCalendarDetails = (fieldName) => `Airtable → Payroll Calendar Details → ${fieldName}`;
+
+  const setupAuditRows = [
+    toSetupAuditRow({
+      section: 'Payroll Core',
+      item: 'PR Calendar / Payroll Calendar',
+      value: calendarName,
+      whereToFix: whereVitals('PR Calendar'),
+    }),
+    toSetupAuditRow({
+      section: 'Payroll Core',
+      item: 'Time Zone',
+      value: vitals['Time Zone'],
+      whereToFix: whereVitals('Time Zone'),
+    }),
+    toSetupAuditRow({
+      section: 'Payroll Core',
+      item: 'Validation End Time (Next Day)',
+      value: vitals['Validation End Time (Next Day)'],
+      whereToFix: whereVitals('Validation End Time (Next Day)'),
+    }),
+    toSetupAuditRow({
+      section: 'Payroll Core',
+      item: 'PR Validation APP Active?',
+      value:
+        vitals['PR Validation APP Active?'] === true
+          ? 'YES'
+          : vitals['PR Validation APP Active?'] === false
+            ? 'NO'
+            : null,
+      whereToFix: whereVitals('PR Validation APP Active?'),
+    }),
+    toSetupAuditRow({
+      section: 'Payroll Core',
+      item: 'Payroll Company',
+      value: setupAuditFields['Payroll company'],
+      whereToFix: whereVitals('Payroll company'),
+    }),
+    toSetupAuditRow({
+      section: 'Payroll Core',
+      item: 'Payroll company code',
+      value: setupAuditFields['Payroll company code'],
+      whereToFix: whereVitals('Payroll company code'),
+    }),
+    toSetupAuditRow({
+      section: 'Payroll Core',
+      item: 'PR Pay Frequency for Upload',
+      value: vitals['PR Pay Frequency for Upload'],
+      whereToFix: whereVitals('PR Pay Frequency for Upload'),
+    }),
+    toSetupAuditRow({
+      section: 'Payroll Core',
+      item: 'PR RDMS Payroll Project Email Address',
+      value: vitals['PR RDMS Payroll Project Email Address'],
+      whereToFix: whereVitals('PR RDMS Payroll Project Email Address'),
+    }),
+    toSetupAuditRow({
+      section: 'Payroll Core',
+      item: 'PR Tip Report Type',
+      value: vitals['PR Tip Report Type'],
+      whereToFix: whereVitals('PR Tip Report Type'),
+    }),
+    toSetupAuditRow({
+      section: 'Contacts',
+      item: 'Payroll Preview 1 Email',
+      value: vitals['Payroll Preview 1 Email'],
+      whereToFix: whereVitals('Payroll Preview 1 Email'),
+    }),
+    toSetupAuditRow({
+      section: 'Contacts',
+      item: 'Payroll Preview 2 Email',
+      value: vitals['Payroll Preview 2 Email'],
+      whereToFix: whereVitals('Payroll Preview 2 Email'),
+    }),
+    toSetupAuditRow({
+      section: 'Contacts',
+      item: 'Payroll Preview 3 Email',
+      value: vitals['Payroll Preview 3 Email'],
+      whereToFix: whereVitals('Payroll Preview 3 Email'),
+    }),
+    toSetupAuditRow({
+      section: 'Contacts',
+      item: 'Payroll Preview 4 Email',
+      value: vitals['Payroll Preview 4 Email'],
+      whereToFix: whereVitals('Payroll Preview 4 Email'),
+    }),
+    toSetupAuditRow({
+      section: 'Contacts',
+      item: 'Payroll Preview 5 Email',
+      value: vitals['Payroll Preview 5 Email'],
+      whereToFix: whereVitals('Payroll Preview 5 Email'),
+    }),
+    toSetupAuditRow({
+      section: 'Asana',
+      item: 'PR Asana Project GUID',
+      value: vitals['PR Asana Project GUID'],
+      whereToFix: whereVitals('PR Asana Project GUID'),
+    }),
+    toSetupAuditRow({
+      section: 'Asana',
+      item: 'PR Asana Inbox Section GUID',
+      value: vitals['PR Asana Inbox Section GUID'],
+      whereToFix: whereVitals('PR Asana Inbox Section GUID'),
+    }),
+    toSetupAuditRow({
+      section: 'ADP / Earnings',
+      item: 'PR Reg Earning Code',
+      value: setupAuditFields['PR Reg Earning Code'],
+      whereToFix: whereVitals('PR Reg Earning Code'),
+    }),
+    toSetupAuditRow({
+      section: 'ADP / Earnings',
+      item: 'PR Overtime Earning Code',
+      value: setupAuditFields['PR Overtime Earning Code'],
+      whereToFix: whereVitals('PR Overtime Earning Code'),
+    }),
+    toSetupAuditRow({
+      section: 'ADP / Earnings',
+      item: 'PR Double Time Earning Code',
+      value: setupAuditFields['PR Double Time Earning Code'],
+      whereToFix: whereVitals('PR Double Time Earning Code'),
+    }),
+    toSetupAuditRow({
+      section: 'ADP / Earnings',
+      item: 'PR MBP Earning Code',
+      value: setupAuditFields['PR MBP Earning Code'],
+      whereToFix: whereVitals('PR MBP Earning Code'),
+    }),
+    toSetupAuditRow({
+      section: 'ADP / Earnings',
+      item: 'PR Tips to Pay Earning Code',
+      value: setupAuditFields['PR Tips to Pay Earning Code'],
+      whereToFix: whereVitals('PR Tips to Pay Earning Code'),
+    }),
+    toSetupAuditRow({
+      section: 'ADP / Earnings',
+      item: 'PR Tips to Tax Earning Code',
+      value: setupAuditFields['PR Tips to Tax Earning Code'],
+      whereToFix: whereVitals('PR Tips to Tax Earning Code'),
+    }),
+    toSetupAuditRow({
+      section: 'ADP / Earnings',
+      item: 'PR Sick Hours Earning Code',
+      value: setupAuditFields['PR Sick Hours Earning Code'],
+      whereToFix: whereVitals('PR Sick Hours Earning Code'),
+    }),
+    toSetupAuditRow({
+      section: 'Toast API',
+      item: 'Toast API Hostname',
+      value: vitals['Toast API Hostname'],
+      whereToFix: whereVitals('Toast API Hostname'),
+    }),
+    toSetupAuditRow({
+      section: 'Toast API',
+      item: 'Toast API Client ID',
+      value: vitals['Toast API Client ID'],
+      whereToFix: whereVitals('Toast API Client ID'),
+    }),
+    toSetupAuditRow({
+      section: 'Toast API',
+      item: 'Toast API Client Secret',
+      value: vitals['Toast API Client Secret'],
+      whereToFix: whereVitals('Toast API Client Secret'),
+      sensitive: true,
+    }),
+    toSetupAuditRow({
+      section: 'Toast API',
+      item: 'Toast API User Access Type',
+      value: vitals['Toast API User Access Type'],
+      whereToFix: whereVitals('Toast API User Access Type'),
+    }),
+    toSetupAuditRow({
+      section: 'Toast API',
+      item: 'Toast API OAuth URL',
+      value: vitals['Toast API OAuth URL'],
+      whereToFix: whereVitals('Toast API OAuth URL'),
+    }),
+    toSetupAuditRow({
+      section: 'Toast API',
+      item: 'Toast API Restaurant GUID',
+      value: vitals['Toast API Restaurant GUID'],
+      whereToFix: whereVitals('Toast API Restaurant GUID'),
+    }),
+    toSetupAuditRow({
+      section: 'Toast API',
+      item: 'Toast API Restaurant External ID',
+      value: vitals['Toast API Restaurant External ID'],
+      whereToFix: whereVitals('Toast API Restaurant External ID'),
+    }),
+  ];
+
+  let currentPayPeriod = null;
+  if (calendarName) {
+    const filterDetails = `{PR Calendar Name - Master}='${escapeAirtableString(calendarName)}'`;
+    const detailRecords = await airtableListAll({ table: payrollDetailsTable, filterByFormula: filterDetails });
+    const current = findCurrentPeriodRow(detailRecords, new Date());
+    if (current) {
+      const fields = current.fields || {};
+      currentPayPeriod = {
+        record_id: current.record_id,
+        start_date: toYmd(fields['PR Period Start Date']),
+        end_date: toYmd(fields['PR Period End Date']),
+        validation_date: toYmd(fields['PR Period Validation Date']),
+        submit_date: toYmd(fields['PR Period Submit Date']),
+        check_date: toYmd(fields['PR Period Check Date']),
+      };
+    } else {
+      setupAuditRows.push(
+        toSetupAuditRow({
+          section: 'Pay Period',
+          item: 'Current pay period',
+          value: null,
+          whereToFix: whereCalendarDetails('Current period row (PR Period Start/Submit Date)'),
+        })
+      );
+    }
+  }
+
+  return {
+    location_name: name,
+    calendar_name: calendarName || null,
+    vitals_record_id: selectedVitalsRecord.id || null,
+    duplicate_vitals_record_count: duplicateVitalsRecordCount,
+    duplicate_vitals_record_ids: duplicateVitalsRecordIds,
+    setup_audit_fields: setupAuditFields,
+    current_pay_period: currentPayPeriod,
+    setup_audit_rows: setupAuditRows,
+  };
 }
 
 async function getRecapForLocationName(locationName) {
@@ -662,6 +961,7 @@ async function getCommunicationRecipientsForLocationName(locationName) {
 module.exports = {
   listLocationNames,
   getRecapForLocationName,
+  getAirtableSetupAuditForLocationName,
   getPayPeriodSelectorForLocationName,
   getActivePayrollDashboardRows,
   getCommunicationRecipientsForLocationName,
