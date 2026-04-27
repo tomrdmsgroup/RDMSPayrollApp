@@ -551,6 +551,10 @@ function sortDashboardRows(rows) {
   });
 }
 
+function isRdmsProcessesPayrollYes(value) {
+  return String(value || '').trim().toUpperCase() === 'YES';
+}
+
 async function getActivePayrollDashboardRows() {
   const vitalsTable = requireEnv('AIRTABLE_VITALS_TABLE');
   const locationField = requireEnv('AIRTABLE_VITALS_LOCATION_FIELD');
@@ -567,10 +571,11 @@ async function getActivePayrollDashboardRows() {
       return {
         client_name: clientName,
         payroll_calendar: calendarName ? String(calendarName).trim() : '',
+        rdms_processes_payroll: fields['RDMS Processes Payroll'],
         pr_lead: resolvePrLeadDisplay(fields),
       };
     })
-    .filter((row) => row.client_name && row.payroll_calendar);
+    .filter((row) => row.client_name && row.payroll_calendar && isRdmsProcessesPayrollYes(row.rdms_processes_payroll));
 
   if (!clientConfigs.length) {
     return {
