@@ -23,6 +23,7 @@ const {
 const {
   listLocationNames,
   getRecapForLocationName,
+  getAirtableSetupAuditForLocationName,
   getPayPeriodSelectorForLocationName,
   getActivePayrollDashboardRows,
   getCommunicationRecipientsForLocationName,
@@ -348,6 +349,22 @@ function router(req, res) {
         if (!locationName) return json(res, 400, { error: 'locationName_required' });
         const recap = await getRecapForLocationName(locationName);
         return json(res, 200, { recap });
+      } catch (e) {
+        return handleError(res, e);
+      }
+    })();
+    return;
+  }
+
+  if (url.pathname === '/staff/setup-audit' && req.method === 'GET') {
+    (async () => {
+      const user = await requireStaff(req, res);
+      if (!user) return;
+      try {
+        const locationName = url.searchParams.get('locationName');
+        if (!locationName) return json(res, 400, { error: 'locationName_required' });
+        const setupAudit = await getAirtableSetupAuditForLocationName(locationName);
+        return json(res, 200, { setup_audit: setupAudit });
       } catch (e) {
         return handleError(res, e);
       }

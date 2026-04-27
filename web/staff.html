@@ -653,6 +653,7 @@
     currentUserEmail: "",
     locations: [],
     recap: null,
+    setupAudit: null,
     rules: null,
     rulesLocationName: null,
     clientRules: null,
@@ -867,7 +868,7 @@
     document.getElementById("pageSub").textContent = meta.subtitle;
 
     if (nextTab === "confirmations") {
-      loadRecapForSelected();
+      loadSetupAuditForSelected();
       return;
     }
 
@@ -1085,80 +1086,41 @@
     lateNotice.style.display = "none";
     lateNotice.textContent = "";
 
-    if (!state.recap) {
+    if (!state.setupAudit) {
       content.innerHTML = "<div class='loading'>Select a location to load data.</div>";
       return;
     }
 
-    const r = state.recap;
-    const p = r.current_pay_period || {};
-
-    const isLate = !!p.is_late;
-    if (isLate) {
-      lateNotice.style.display = "block";
-      lateNotice.textContent = p.late_message || "Late warning";
-    }
-
-    const airtableWhereToFix = (tableName, fieldName) => `Airtable → ${tableName} → ${fieldName}`;
-
-    const payPeriodRows = [
-      { label: "Pay Period Start", value: p.start_date, where_to_fix: airtableWhereToFix('Payroll Calendar Details', 'PR Period Start Date') },
-      { label: "Pay Period End", value: p.end_date, where_to_fix: airtableWhereToFix('Payroll Calendar Details', 'PR Period End Date') },
-      { label: "Validation date", value: p.validation_date, where_to_fix: airtableWhereToFix('Payroll Calendar Details', 'PR Period Validation Date') },
-      { label: "Submit date", value: p.submit_date, where_to_fix: airtableWhereToFix('Payroll Calendar Details', 'PR Period Submit Date') },
-      { label: "Check date", value: p.check_date, where_to_fix: airtableWhereToFix('Payroll Calendar Details', 'PR Period Check Date') },
-      { label: "Validation Cutoff", value: p.cutoff_local, source: "Derived from calendar date + validation end time + time zone" },
-      { label: "Validation cutoff (UTC)", value: p.cutoff_utc, source: "Derived from calendar date + validation end time + time zone" },
-      { label: "Late Status", value: truthyYesNo(p.is_late), source: "Derived from calendar date + validation end time + time zone" },
-      { label: "Pay Period Range", value: fmtDateRange(p.start_date, p.end_date), source: "Derived from pay period start + pay period end" },
-    ];
-
-    const setupAuditFields = r.setup_audit_fields || {};
-
-    const configRows = [
-      { label: "Location Name", value: r.location_name, source: "Client Vitals" },
-      { label: "Payroll Calendar", value: r.calendar_name, where_to_fix: airtableWhereToFix('Client Vitals', 'Payroll Calendar') },
-      { label: "App Active", value: truthyYesNo(r.app_active), where_to_fix: airtableWhereToFix('Client Vitals', 'PR Validation APP Active?') },
-      { label: "Time zone", value: r.time_zone, where_to_fix: airtableWhereToFix('Client Vitals', 'Time Zone') },
-      { label: "Validation End Time", value: r.validation_end_time_next_day, where_to_fix: airtableWhereToFix('Client Vitals', 'Validation End Time (Next Day)') },
-      { label: "Payroll Company", value: setupAuditFields['Payroll company'] || r.payroll_company, where_to_fix: airtableWhereToFix('Client Vitals', 'Payroll company') },
-      { label: "POS type", value: r.pos_type, where_to_fix: airtableWhereToFix('Client Vitals', 'POS Type') },
-      { label: "Payroll project email", value: r.payroll_project_email, where_to_fix: airtableWhereToFix('Client Vitals', 'PR RDMS Payroll Project Email Address') },
-      { label: "Tip report type", value: r.tip_report_type, where_to_fix: airtableWhereToFix('Client Vitals', 'PR Tip Report Type') },
-      { label: "Payroll Company Code / IID", value: setupAuditFields['Payroll company code'] || r.payroll_company_code, where_to_fix: airtableWhereToFix('Client Vitals', 'Payroll company code') },
-      { label: "Regular Hours Earning Code", value: setupAuditFields['PR Reg Earning Code'], where_to_fix: airtableWhereToFix('Client Vitals', 'PR Reg Earning Code') },
-      { label: "Overtime Hours Earning Code", value: setupAuditFields['PR Overtime Earning Code'], where_to_fix: airtableWhereToFix('Client Vitals', 'PR Overtime Earning Code') },
-      { label: "Double Time Hours Earning Code", value: setupAuditFields['PR Double Time Earning Code'], where_to_fix: airtableWhereToFix('Client Vitals', 'PR Double Time Earning Code') },
-      { label: "Meal/Break Premium Earning Code", value: setupAuditFields['PR MBP Earning Code'], where_to_fix: airtableWhereToFix('Client Vitals', 'PR MBP Earning Code') },
-      { label: "Tips to Pay Earning Code", value: setupAuditFields['PR Tips to Pay Earning Code'], where_to_fix: airtableWhereToFix('Client Vitals', 'PR Tips to Pay Earning Code') },
-      { label: "Tips to Tax Earning Code", value: setupAuditFields['PR Tips to Tax Earning Code'], where_to_fix: airtableWhereToFix('Client Vitals', 'PR Tips to Tax Earning Code') },
-      { label: "Sick Hours Earning Code", value: setupAuditFields['PR Sick Hours Earning Code'], where_to_fix: airtableWhereToFix('Client Vitals', 'PR Sick Hours Earning Code') },
-      { label: "Pay frequency", value: r.pay_frequency, where_to_fix: airtableWhereToFix('Client Vitals', 'PR Pay Frequency for Upload') },
-      { label: "Preview Contacts", value: r.preview_recipients_summary, source: "Derived from Client Vitals preview email fields" },
-      { label: "Preview contact email count", value: displayValue(r.preview_recipients_count), source: "Derived from Client Vitals preview email fields" },
-      { label: "Asana Project GUID", value: r.asana_project_guid, where_to_fix: airtableWhereToFix('Client Vitals', 'PR Asana Project GUID') },
-      { label: "Asana Inbox Section GUID", value: r.asana_inbox_section_guid, where_to_fix: airtableWhereToFix('Client Vitals', 'PR Asana Inbox Section GUID') },
-    ];
-
-    const itemRows = [];
-    const items = Array.isArray(r.items) ? r.items : [];
-    items.forEach((it) => {
-      const label = (it && it.name ? String(it.name).trim() : "");
-      const value = it ? it.detail || it.status || null : null;
-      if (!label) return;
-      itemRows.push({
-        label,
-        value,
-        source: "Asana Setup",
-      });
-    });
+    const setupAudit = state.setupAudit || {};
+    const rows = Array.isArray(setupAudit.setup_audit_rows) ? setupAudit.setup_audit_rows : [];
+    const tableRows = rows.length
+      ? rows
+          .map((row) => {
+            const statusText = row.status === "Missing" ? "Missing" : "OK";
+            const statusKlass = row.status === "Missing" ? "bad" : "ok";
+            const valueText = row.value === null || row.value === undefined || String(row.value).trim() === "" ? "Missing" : String(row.value);
+            return `
+              <tr>
+                <td style="width:160px;white-space:normal;overflow-wrap:anywhere;">${escapeHtml(row.section || "")}</td>
+                <td style="width:240px;white-space:normal;overflow-wrap:anywhere;">${escapeHtml(row.item || "")}</td>
+                <td style="width:120px;">${pill(statusText, statusKlass)}</td>
+                <td>${escapeHtml(valueText)}</td>
+                <td style="width:320px;white-space:normal;overflow-wrap:anywhere;"><span class="sourceNote">${escapeHtml(
+                  row.where_to_fix || ""
+                )}</span></td>
+              </tr>
+            `;
+          })
+          .join("")
+      : `<tr><td colspan="5" class="muted">No setup audit rows available.</td></tr>`;
 
     content.innerHTML = `
-      <div class="sectionTitle">Pay Period</div>
-      <p class="sectionHelp">Use this section first. It shows the exact payroll period and validation timing for this location.</p>
+      <div class="sectionTitle">Airtable Setup Audit</div>
+      <p class="sectionHelp">Review each row below. Missing setup fields stay in-table and do not block this page from loading.</p>
       <table>
         <thead>
           <tr>
+            <th>Section</th>
             <th>Item</th>
             <th>Status</th>
             <th>Value</th>
@@ -1166,28 +1128,11 @@
           </tr>
         </thead>
         <tbody>
-          ${renderFriendlyRows(payPeriodRows)}
-        </tbody>
-      </table>
-
-      <div class="sectionTitle">Setup / Configuration Confirmations</div>
-      <p class="sectionHelp">Review this section second. Missing items here should be fixed in the source listed in the right column.</p>
-      <table>
-        <thead>
-          <tr>
-            <th>Item</th>
-            <th>Status</th>
-            <th>Value</th>
-            <th>Where to fix</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${renderFriendlyRows(configRows)}
-          ${renderFriendlyRows(itemRows)}
+          ${tableRows}
         </tbody>
       </table>
       <div class="muted" style="margin-top:10px;">
-        Goal: help payroll staff quickly understand what is set up, what is missing, and where to fix it.
+        Location: ${escapeHtml(setupAudit.location_name || "")}
       </div>
     `;
   }
@@ -2261,6 +2206,30 @@
       document.getElementById("content").innerHTML = `<div class="muted">Recap error: ${escapeHtml((err && err.message) || "unknown_error")}</div>`;
       return;
     }
+    renderConfirmations();
+  }
+
+  async function loadSetupAuditForSelected() {
+    renderConfirmations();
+    const name = document.getElementById("locationSelect").value;
+    state.setupAudit = null;
+    if (!name) {
+      renderConfirmations();
+      return;
+    }
+
+    try {
+      const q = encodeURIComponent(name);
+      const { resp, body } = await apiGet(`/staff/setup-audit?locationName=${q}`);
+      if (!resp.ok) throw new Error(body.error || "unknown_error");
+      state.setupAudit = body.setup_audit || null;
+    } catch (err) {
+      document.getElementById("content").innerHTML = `<div class="muted">Airtable Setup Audit error: ${escapeHtml(
+        (err && err.message) || "unknown_error"
+      )}</div>`;
+      return;
+    }
+
     renderConfirmations();
   }
 
@@ -4724,6 +4693,7 @@
   document.getElementById("locationSelect").addEventListener("change", async () => {
     const tab = state.tab;
     state.recap = null;
+    state.setupAudit = null;
     state.rules = null;
     state.rulesLocationName = null;
     state.clientRules = null;
@@ -4765,7 +4735,7 @@
     state.recapReportRunError = "";
 
     if (tab === "dashboard") await loadPayrollDashboard();
-    else if (tab === "confirmations") await loadRecapForSelected();
+    else if (tab === "confirmations") await loadSetupAuditForSelected();
     else if (tab === "rules") await loadRulesForSelected();
     else if (tab === "clientValidationConfig") await loadClientRulesForSelected();
     else if (tab === "communicationSetup") await loadCommunicationSetupForSelected();
