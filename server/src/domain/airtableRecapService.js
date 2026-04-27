@@ -416,6 +416,56 @@ function buildPayPeriodSelectorFromSortedRows(sortedRows, todayYmd) {
   };
 }
 
+async function listPayrollCalendarDetailRecordsForCalendarName({ payrollDetailsTable, calendarName }) {
+  const candidateFields = [
+    'PR Calendar Name - Master',
+    'PR Calendar',
+    'Payroll Calendar',
+    'Payroll Calendar Name',
+    'PR Calendar Name',
+  ];
+
+  const attempts = [];
+
+  for (const fieldName of candidateFields) {
+    const filterByFormula = `{${fieldName}}='${escapeAirtableString(calendarName)}'`;
+    try {
+      const records = await airtableListAll({
+        table: payrollDetailsTable,
+        filterByFormula,
+      });
+
+      attempts.push({
+        field_name: fieldName,
+        filter_by_formula: filterByFormula,
+        record_count: records.length,
+        error: null,
+      });
+
+      if (records.length) {
+        return {
+          records,
+          matched_field_name: fieldName,
+          attempts,
+        };
+      }
+    } catch (err) {
+      attempts.push({
+        field_name: fieldName,
+        filter_by_formula: filterByFormula,
+        record_count: 0,
+        error: err?.message || 'unknown_error',
+      });
+    }
+  }
+
+  return {
+    records: [],
+    matched_field_name: null,
+    attempts,
+  };
+}
+
 function normalizePreviewRecipients(vitals) {
   const emails = [];
   for (let i = 1; i <= 5; i++) {
@@ -988,12 +1038,15 @@ async function getPayPeriodSelectorForLocationName(locationName) {
   const calendarName = resolveCalendarNameFromVitals(vitals);
   if (!calendarName) throw new Error('missing_payroll_calendar_name');
 
-  const filterDetails = `{PR Calendar Name - Master}='${escapeAirtableString(calendarName)}'`;
-  const detailRecords = await airtableListAll({ table: payrollDetailsTable, filterByFormula: filterDetails });
+  const detailLookup = await listPayrollCalendarDetailRecordsForCalendarName({
+    payrollDetailsTable,
+    calendarName,
+  });
+  const detailRecords = detailLookup.records;
   const rows = sortRowsByStartAsc(detailRecords);
   if (!rows.length) throw new Error('no_pay_periods_found');
 
-  const todayYmd = toYmd(new Date());
+  const todayYmd = toYmd(new Date().toISOString());
   const selector = buildPayPeriodSelectorFromSortedRows(rows, todayYmd);
 
   return {
@@ -1003,7 +1056,10 @@ async function getPayPeriodSelectorForLocationName(locationName) {
     next_pay_period: selector.next_pay_period,
     prior_pay_periods: selector.prior_pay_periods,
     debug: {
+      payroll_calendar: calendarName,
       detail_row_count: rows.length,
+      matched_calendar_detail_field: detailLookup.matched_field_name,
+      calendar_detail_lookup_attempts: detailLookup.attempts,
       todayYmd: todayYmd || null,
       current_found: Boolean(selector.current_pay_period),
       next_found: Boolean(selector.next_pay_period),
