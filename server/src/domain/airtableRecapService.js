@@ -326,6 +326,26 @@ function findCurrentPeriodRow(rows, nowUtc) {
   return candidates[0];
 }
 
+function findDashboardActivePeriodRow(rows, nowUtc) {
+  const now = nowUtc || new Date();
+  const candidates = rows
+    .map((r) => {
+      const fields = r.fields || {};
+      return {
+        record_id: r.id,
+        fields,
+        end: new Date(fields['PR Period End Date']),
+        submit: new Date(fields['PR Period Submit Date']),
+      };
+    })
+    .filter((x) => !Number.isNaN(x.end.getTime()) && !Number.isNaN(x.submit.getTime()))
+    .filter((x) => now.getTime() >= x.end.getTime() && now.getTime() <= x.submit.getTime());
+
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => b.end.getTime() - a.end.getTime());
+  return candidates[0];
+}
+
 function sortRowsByStartAsc(rows) {
   return rows
     .map((r) => ({
@@ -1079,58 +1099,67 @@ async function getActivePayrollDashboardRows() {
 
   const vitalsRecords = await airtableListAll({ table: vitalsTable });
 
-  const clientConfigs = vitalsRecords
-    .map((record) => {
-      const fields = record.fields || {};
-      const clientName = (fields[locationField] || fields.Name || '').toString().trim();
-      const calendarName = resolveCalendarNameFromVitals(fields);
-      return {
-        client_name: clientName,
-        payroll_calendar: calendarName || '',
-        rdms_processes_payroll: fields['RDMS Processes Payroll'],
-        pr_lead: resolvePrLeadDisplay(fields),
-      };
-    })
-    .filter((row) => row.client_name && row.payroll_calendar && isRdmsProcessesPayrollYes(row.rdms_processes_payroll));
-
-  if (!clientConfigs.length) {
-    return {
-      refreshed_at: new Date().toISOString(),
-      rows: [],
-    };
-  }
-
   const rows = [];
-  const todayYmd = toYmd(new Date().toISOString());
-  for (const client of clientConfigs) {
+  const now = new Date();
+  for (const record of vitalsRecords) {
+    const fields = record.fields || {};
+    const clientName = (fields[locationField] || fields.Name || '').toString().trim();
+    const calendarName = resolveCalendarNameFromVitals(fields) || '';
+    const rdmsPassed = isRdmsProcessesPayrollYes(fields['RDMS Processes Payroll']);
+    const client = {
+      client_name: clientName,
+      payroll_calendar: calendarName,
+      pr_lead: resolvePrLeadDisplay(fields),
+    };
+
+    if (!(client.client_name && client.payroll_calendar && rdmsPassed)) {
+      console.log('[payroll-dashboard-active] skipping client', {
+        client_name: client.client_name || null,
+        payroll_calendar: client.payroll_calendar || null,
+        rdms_processes_payroll_passed: rdmsPassed,
+        detail_row_count: 0,
+        dashboard_active_period_found: false,
+      });
+      continue;
+    }
+
     const filterDetails = `{PR Calendar Name - Master}='${escapeAirtableString(client.payroll_calendar)}'`;
     const detailRecords = await airtableListAll({
       table: payrollDetailsTable,
       filterByFormula: filterDetails,
     });
 
-    for (const rec of detailRecords) {
-      const fields = rec.fields || {};
-      const startDate = toYmd(fields['PR Period Start Date']);
-      const endDate = toYmd(fields['PR Period End Date']);
-      const validationDate = toYmd(fields['PR Period Validation Date']);
-      const submitDate = toYmd(fields['PR Period Submit Date']);
-      const checkDate = toYmd(fields['PR Period Check Date']);
-      if (!endDate || !submitDate) continue;
-      if (!(endDate <= todayYmd && todayYmd <= submitDate)) continue;
-
-      rows.push({
+    const active = findDashboardActivePeriodRow(detailRecords, now);
+    if (!active) {
+      console.log('[payroll-dashboard-active] skipping client', {
         client_name: client.client_name,
         payroll_calendar: client.payroll_calendar,
-        pr_lead: client.pr_lead || '',
-        payroll_start_date: startDate,
-        payroll_end_date: endDate,
-        validation_date: validationDate,
-        submit_date: submitDate,
-        check_date: checkDate,
-        validated_by_client: 'No',
+        rdms_processes_payroll_passed: rdmsPassed,
+        detail_row_count: detailRecords.length,
+        dashboard_active_period_found: false,
       });
+      continue;
     }
+
+    console.log('[payroll-dashboard-active] active client', {
+      client_name: client.client_name,
+      payroll_calendar: client.payroll_calendar,
+      pr_period_start_date: toYmd(active.fields['PR Period Start Date']),
+      pr_period_end_date: toYmd(active.fields['PR Period End Date']),
+      pr_period_submit_date: toYmd(active.fields['PR Period Submit Date']),
+    });
+
+    rows.push({
+      client_name: client.client_name,
+      payroll_calendar: client.payroll_calendar,
+      pr_lead: client.pr_lead || '',
+      payroll_start_date: toYmd(active.fields['PR Period Start Date']),
+      payroll_end_date: toYmd(active.fields['PR Period End Date']),
+      validation_date: toYmd(active.fields['PR Period Validation Date']),
+      submit_date: toYmd(active.fields['PR Period Submit Date']),
+      check_date: toYmd(active.fields['PR Period Check Date']),
+      validated_by_client: 'No',
+    });
   }
 
   return {
