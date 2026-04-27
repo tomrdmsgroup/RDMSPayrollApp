@@ -65,6 +65,13 @@ const {
   testExcludedStaffWinsBeforeValidationPlacement,
   testValidationOutcomePreventsTopSectionPlacement,
 } = require('./adpRunEarningsWipExportService.test');
+const {
+  testSelectorCurrentAndNextByStartEndRange,
+  testSelectorCurrentIgnoresSubmitDateForCurrentBucket,
+  testSelectorNoCurrentGapDoesNotThrowAndReturnsNextAndPriors,
+  testSelectorBeforeFirstRowReturnsFirstAsNext,
+  testSelectorAfterLastRowReturnsAllAsPriorNewestFirst,
+} = require('./airtableRecapService.test');
 
 function testTokenLifecycle() {
   const token = issueToken({ action: 'approve', ttlMinutes: 0.001 });
@@ -159,6 +166,11 @@ async function runAll() {
     testBuildStableKeyFallsBackToEmployeeNameBeforeToastGuid,
     testExcludedStaffWinsBeforeValidationPlacement,
     testValidationOutcomePreventsTopSectionPlacement,
+    testSelectorCurrentAndNextByStartEndRange,
+    testSelectorCurrentIgnoresSubmitDateForCurrentBucket,
+    testSelectorNoCurrentGapDoesNotThrowAndReturnsNextAndPriors,
+    testSelectorBeforeFirstRowReturnsFirstAsNext,
+    testSelectorAfterLastRowReturnsAllAsPriorNewestFirst,
   ];
   for (const fn of tests) {
     await fn();
