@@ -68,6 +68,126 @@ async function airtableListAll({ table, filterByFormula, fields }) {
   return out;
 }
 
+async function airtableListAllFromConfig({ base, token, table, filterByFormula, fields }) {
+  const urlBase = `https://api.airtable.com/v0/${base}`;
+  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+
+  let offset = null;
+  const out = [];
+
+  for (;;) {
+    const params = new URLSearchParams();
+    if (filterByFormula) params.set('filterByFormula', filterByFormula);
+    if (offset) params.set('offset', offset);
+    if (Array.isArray(fields) && fields.length) {
+      fields.forEach((f) => params.append('fields[]', f));
+    }
+
+    const url = `${urlBase}/${encodeURIComponent(table)}?${params.toString()}`;
+    const resp = await fetch(url, { method: 'GET', headers });
+    const rawBody = await resp.text();
+    let body = {};
+    try {
+      body = rawBody ? JSON.parse(rawBody) : {};
+    } catch (_) {
+      body = {};
+    }
+
+    if (!resp.ok) {
+      const bodyPreview = String(rawBody || '').slice(0, 500);
+      console.error('[airtable] list failed', {
+        base,
+        table,
+        usedFieldsParam: Array.isArray(fields) && fields.length > 0,
+        filterByFormula: filterByFormula || null,
+        requestedFields: Array.isArray(fields) ? fields : [],
+        status: resp.status,
+        bodyPreview,
+      });
+      throw new Error(`airtable_list_failed:${resp.status}`);
+    }
+
+    (body.records || []).forEach((r) => out.push(r));
+    offset = body.offset || null;
+    if (!offset) break;
+  }
+
+  return out;
+}
+
+function normalizeNameForMatch(v) {
+  return String(v || '').trim().toLowerCase();
+}
+
+function getRootLocationName(v) {
+  const raw = String(v || '').trim();
+  const [root] = raw.split(/\s+-\s+/);
+  return String(root || '').trim();
+}
+
+function toSafeSlug(v) {
+  return String(v || '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function resolveApiConfigAirtableSettings() {
+  const base = (process.env.AIRTABLE_API_CONFIG_BASE || process.env.AIRTABLE_VITALS_BASE || '').trim();
+  const token = (
+    process.env.AIRTABLE_API_CONFIG_API_KEY ||
+    process.env.AIRTABLE_VITALS_API_KEY ||
+    process.env.AIRTABLE_API_KEY ||
+    ''
+  ).trim();
+  const table = (process.env.AIRTABLE_API_CONFIG_TABLE || 'API Config').trim() || 'API Config';
+  const clientNameField = (process.env.AIRTABLE_API_CONFIG_CLIENT_NAME_FIELD || 'Client Name').trim() || 'Client Name';
+  const displayNameField = (process.env.AIRTABLE_API_CONFIG_DISPLAY_NAME_FIELD || 'Display Name').trim() || 'Display Name';
+  return { base, token, table, clientNameField, displayNameField };
+}
+
+function getMatchingApiConfigRecords({ records, locationName, clientNameField, displayNameField }) {
+  const selectedName = normalizeNameForMatch(locationName);
+  const rootName = normalizeNameForMatch(getRootLocationName(locationName));
+  const rows = (records || []).map((record) => {
+    const fields = record.fields || {};
+    const candidates = [fields[clientNameField], fields[displayNameField]]
+      .flat()
+      .map((value) => normalizeNameForMatch(value))
+      .filter(Boolean);
+    return { record, candidates };
+  });
+
+  const exact = rows.filter((row) => row.candidates.includes(selectedName)).map((row) => row.record);
+  if (exact.length) return { records: exact, matchType: 'exact' };
+
+  if (rootName && rootName !== selectedName) {
+    const root = rows.filter((row) => row.candidates.includes(rootName)).map((row) => row.record);
+    if (root.length) return { records: root, matchType: 'root' };
+  }
+
+  return { records: [], matchType: 'not_found' };
+}
+
+function buildToastSecretEnvVarAuditRow({ item, envCandidates }) {
+  const expectedEnv = envCandidates[0] || null;
+  const configuredEnv =
+    envCandidates.find((envName) => {
+      const value = process.env[envName];
+      return typeof value === 'string' && value.trim() !== '';
+    }) || null;
+  const resolvedEnv = configuredEnv || expectedEnv;
+
+  return {
+    section: 'Toast API',
+    item,
+    status: configuredEnv ? 'OK' : 'Missing',
+    value: resolvedEnv ? `${configuredEnv ? 'Configured' : 'Missing'}: ${resolvedEnv}` : null,
+    where_to_fix: resolvedEnv ? `Render → Environment Variables → ${resolvedEnv}` : 'Render → Environment Variables',
+  };
+}
+
 function parseTime12h(s) {
   const raw = String(s || '').trim();
   if (!raw) return null;
@@ -382,6 +502,46 @@ async function getAirtableSetupAuditForLocationName(locationName) {
   }
 
   const calendarName = resolveCalendarNameFromVitals(vitals);
+  const apiConfigSettings = resolveApiConfigAirtableSettings();
+  const toastApiConfigFields = [
+    'Toast API Hostname',
+    'Toast API Client ID - STANDARD',
+    'Toast API Client ID - ANALYTICS',
+    'Toast API User Access Type',
+    'Toast API OAuth URL',
+    'Toast API Restaurant GUID',
+    'Toast API Restaurant External ID',
+    'Toast Location ID',
+    'Toast Management Group GUID',
+    'Toast Analytics Scope',
+  ];
+  const apiConfigRecords =
+    apiConfigSettings.base && apiConfigSettings.token
+      ? await airtableListAllFromConfig({
+          base: apiConfigSettings.base,
+          token: apiConfigSettings.token,
+          table: apiConfigSettings.table,
+          fields: [apiConfigSettings.clientNameField, apiConfigSettings.displayNameField, ...toastApiConfigFields],
+        })
+      : [];
+  const apiConfigMatch = getMatchingApiConfigRecords({
+    records: apiConfigRecords,
+    locationName: name,
+    clientNameField: apiConfigSettings.clientNameField,
+    displayNameField: apiConfigSettings.displayNameField,
+  });
+  const selectedApiConfigRecord = apiConfigMatch.records[0] || null;
+  const apiConfigDuplicateRecordIds = apiConfigMatch.records.map((record) => record.id).filter(Boolean);
+  const apiConfigDuplicateRecordCount = apiConfigDuplicateRecordIds.length;
+  if (apiConfigDuplicateRecordCount > 1) {
+    console.warn('[airtableSetupAudit] duplicate API config records found for location', {
+      selected_location: name,
+      api_config_match_type: apiConfigMatch.matchType,
+      api_config_duplicate_record_count: apiConfigDuplicateRecordCount,
+      api_config_duplicate_record_ids: apiConfigDuplicateRecordIds,
+    });
+  }
+  const apiConfig = selectedApiConfigRecord ? selectedApiConfigRecord.fields || {} : {};
   const setupAuditFields = {
     'Payroll company': (vitals['Payroll company'] || vitals['Payroll Company'] || '').toString().trim() || null,
     'Payroll company code':
@@ -397,6 +557,15 @@ async function getAirtableSetupAuditForLocationName(locationName) {
 
   const whereVitals = (fieldName) => `Airtable → Client Vitals → ${fieldName}`;
   const whereCalendarDetails = (fieldName) => `Airtable → Payroll Calendar Details → ${fieldName}`;
+  const whereApiConfig = (fieldName) => `Airtable → API Config → ${fieldName}`;
+  const fullSlug = toSafeSlug(name);
+  const rootSlug = toSafeSlug(getRootLocationName(name));
+  const standardSecretCandidates = [...new Set([rootSlug, fullSlug].filter(Boolean))].map(
+    (slug) => `TOAST_STD_CLIENT_SECRET_${slug}`
+  );
+  const analyticsSecretCandidates = [...new Set([rootSlug, fullSlug].filter(Boolean))].map(
+    (slug) => `TOAST_AN_CLIENT_SECRET_${slug}`
+  );
 
   const setupAuditRows = [
     toSetupAuditRow({
@@ -545,45 +714,70 @@ async function getAirtableSetupAuditForLocationName(locationName) {
     toSetupAuditRow({
       section: 'Toast API',
       item: 'Toast API Hostname',
-      value: vitals['Toast API Hostname'],
-      whereToFix: whereVitals('Toast API Hostname'),
+      value: apiConfig['Toast API Hostname'],
+      whereToFix: whereApiConfig('Toast API Hostname'),
     }),
     toSetupAuditRow({
       section: 'Toast API',
-      item: 'Toast API Client ID',
-      value: vitals['Toast API Client ID'],
-      whereToFix: whereVitals('Toast API Client ID'),
+      item: 'Toast API Client ID - STANDARD',
+      value: apiConfig['Toast API Client ID - STANDARD'],
+      whereToFix: whereApiConfig('Toast API Client ID - STANDARD'),
     }),
     toSetupAuditRow({
       section: 'Toast API',
-      item: 'Toast API Client Secret',
-      value: vitals['Toast API Client Secret'],
-      whereToFix: whereVitals('Toast API Client Secret'),
-      sensitive: true,
+      item: 'Toast API Client ID - ANALYTICS',
+      value: apiConfig['Toast API Client ID - ANALYTICS'],
+      whereToFix: whereApiConfig('Toast API Client ID - ANALYTICS'),
+    }),
+    buildToastSecretEnvVarAuditRow({
+      item: 'Toast Standard Client Secret Env Var',
+      envCandidates: standardSecretCandidates,
+    }),
+    buildToastSecretEnvVarAuditRow({
+      item: 'Toast Analytics Client Secret Env Var',
+      envCandidates: analyticsSecretCandidates,
     }),
     toSetupAuditRow({
       section: 'Toast API',
       item: 'Toast API User Access Type',
-      value: vitals['Toast API User Access Type'],
-      whereToFix: whereVitals('Toast API User Access Type'),
+      value: apiConfig['Toast API User Access Type'],
+      whereToFix: whereApiConfig('Toast API User Access Type'),
     }),
     toSetupAuditRow({
       section: 'Toast API',
       item: 'Toast API OAuth URL',
-      value: vitals['Toast API OAuth URL'],
-      whereToFix: whereVitals('Toast API OAuth URL'),
+      value: apiConfig['Toast API OAuth URL'],
+      whereToFix: whereApiConfig('Toast API OAuth URL'),
     }),
     toSetupAuditRow({
       section: 'Toast API',
       item: 'Toast API Restaurant GUID',
-      value: vitals['Toast API Restaurant GUID'],
-      whereToFix: whereVitals('Toast API Restaurant GUID'),
+      value: apiConfig['Toast API Restaurant GUID'],
+      whereToFix: whereApiConfig('Toast API Restaurant GUID'),
     }),
     toSetupAuditRow({
       section: 'Toast API',
       item: 'Toast API Restaurant External ID',
-      value: vitals['Toast API Restaurant External ID'],
-      whereToFix: whereVitals('Toast API Restaurant External ID'),
+      value: apiConfig['Toast API Restaurant External ID'],
+      whereToFix: whereApiConfig('Toast API Restaurant External ID'),
+    }),
+    toSetupAuditRow({
+      section: 'Toast API',
+      item: 'Toast Location ID',
+      value: apiConfig['Toast Location ID'],
+      whereToFix: whereApiConfig('Toast Location ID'),
+    }),
+    toSetupAuditRow({
+      section: 'Toast API',
+      item: 'Toast Management Group GUID',
+      value: apiConfig['Toast Management Group GUID'],
+      whereToFix: whereApiConfig('Toast Management Group GUID'),
+    }),
+    toSetupAuditRow({
+      section: 'Toast API',
+      item: 'Toast Analytics Scope',
+      value: apiConfig['Toast Analytics Scope'],
+      whereToFix: whereApiConfig('Toast Analytics Scope'),
     }),
   ];
 
@@ -620,6 +814,10 @@ async function getAirtableSetupAuditForLocationName(locationName) {
     vitals_record_id: selectedVitalsRecord.id || null,
     duplicate_vitals_record_count: duplicateVitalsRecordCount,
     duplicate_vitals_record_ids: duplicateVitalsRecordIds,
+    api_config_record_id: selectedApiConfigRecord ? selectedApiConfigRecord.id || null : null,
+    api_config_match_type: apiConfigMatch.matchType,
+    api_config_duplicate_record_count: apiConfigDuplicateRecordCount,
+    api_config_duplicate_record_ids: apiConfigDuplicateRecordIds,
     setup_audit_fields: setupAuditFields,
     current_pay_period: currentPayPeriod,
     setup_audit_rows: setupAuditRows,
