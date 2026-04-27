@@ -299,6 +299,34 @@ async function listLocationNames() {
   return names;
 }
 
+function normalizeCalendarFieldValue(value) {
+  if (value === null || value === undefined) return '';
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const normalized = String(item === null || item === undefined ? '' : item).trim();
+      if (normalized) return normalized;
+    }
+    return '';
+  }
+  return String(value).trim();
+}
+
+function resolveCalendarNameFromVitals(vitals) {
+  const candidateFields = [
+    'Payroll Calendar (from PR Calendar)',
+    'Payroll Calendar',
+    'PR Calendar Name',
+    'PR Calendar',
+  ];
+
+  for (const fieldName of candidateFields) {
+    const resolved = normalizeCalendarFieldValue(vitals[fieldName]);
+    if (resolved) return resolved;
+  }
+
+  return null;
+}
+
 async function getRecapForLocationName(locationName) {
   const vitalsTable = requireEnv('AIRTABLE_VITALS_TABLE');
   const locationField = requireEnv('AIRTABLE_VITALS_LOCATION_FIELD');
@@ -313,11 +341,7 @@ async function getRecapForLocationName(locationName) {
 
   const vitals = vitalsRecords[0].fields || {};
 
-  const calendarName =
-    vitals['Payroll Calendar (from PR Calendar)'] ||
-    vitals['Payroll Calendar'] ||
-    vitals['PR Calendar Name'] ||
-    null;
+  const calendarName = resolveCalendarNameFromVitals(vitals);
 
   if (!calendarName) throw new Error('missing_payroll_calendar_name');
 
@@ -431,11 +455,7 @@ async function getPayPeriodSelectorForLocationName(locationName) {
   if (!vitalsRecords.length) throw new Error('location_not_found');
 
   const vitals = vitalsRecords[0].fields || {};
-  const calendarName =
-    vitals['Payroll Calendar (from PR Calendar)'] ||
-    vitals['Payroll Calendar'] ||
-    vitals['PR Calendar Name'] ||
-    null;
+  const calendarName = resolveCalendarNameFromVitals(vitals);
   if (!calendarName) throw new Error('missing_payroll_calendar_name');
 
   const filterDetails = `{PR Calendar Name - Master}='${escapeAirtableString(calendarName)}'`;
@@ -566,11 +586,10 @@ async function getActivePayrollDashboardRows() {
     .map((record) => {
       const fields = record.fields || {};
       const clientName = (fields[locationField] || fields.Name || '').toString().trim();
-      const calendarName =
-        fields['Payroll Calendar (from PR Calendar)'] || fields['Payroll Calendar'] || fields['PR Calendar Name'] || null;
+      const calendarName = resolveCalendarNameFromVitals(fields);
       return {
         client_name: clientName,
-        payroll_calendar: calendarName ? String(calendarName).trim() : '',
+        payroll_calendar: calendarName || '',
         rdms_processes_payroll: fields['RDMS Processes Payroll'],
         pr_lead: resolvePrLeadDisplay(fields),
       };
