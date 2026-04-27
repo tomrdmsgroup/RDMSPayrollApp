@@ -1009,8 +1009,22 @@ async function getRecapForLocationName(locationName) {
     'PR Sick Hours Earning Code': (vitals['PR Sick Hours Earning Code'] || '').toString().trim() || null,
   };
 
-  const filterDetails = `{PR Calendar Name - Master}='${escapeAirtableString(calendarName)}'`;
-  const detailRecords = await airtableListAll({ table: payrollDetailsTable, filterByFormula: filterDetails });
+  const detailLookup = await listPayrollCalendarDetailRecordsForCalendarName({
+      payrollDetailsTable,
+      calendarName,
+    });
+    const detailRecords = detailLookup.records;
+    
+    if (!detailRecords.length) {
+      const err = new Error('no_pay_periods_found');
+      err.debug = {
+        location_name: name,
+        payroll_calendar: calendarName,
+        matched_calendar_detail_field: detailLookup.matched_field_name,
+        calendar_detail_lookup_attempts: detailLookup.attempts,
+      };
+      throw err;
+    }
 
   const current = findCurrentPeriodRow(detailRecords, new Date());
   if (!current) throw new Error('no_current_pay_period_found');
