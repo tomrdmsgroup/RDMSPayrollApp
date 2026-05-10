@@ -193,6 +193,139 @@ function testStandardJoinNormalizesEmployeeJobAndRateFields() {
   assert.equal(rows[0].rate, 18.5);
 }
 
+
+async function testRunValidationMissingIdRule() {
+  const result = await runValidation({
+    run: {
+      id: 103,
+      client_location_id: 'Test Location',
+      period_start: '2026-03-01',
+      period_end: '2026-03-14',
+    },
+    context: {
+      active_rule_ids: ['MISSINGID'],
+      comparison_periods: [],
+      toast_rows_by_period: {
+        '2026-03-01__2026-03-14': [
+          { employeeGuid: 'M1', employeeName: 'Miss One', payrollFileId: '   ' },
+          { employeeGuid: 'M1', employeeName: 'Miss One', payrollFileId: null },
+          { employeeGuid: 'M2', employeeName: 'Has Id', payrollFileId: 'PF-2' },
+          { employeeGuid: 'MX', employeeName: 'Excluded Id', payrollFileId: '' },
+        ],
+      },
+    },
+    exclusions: [{ toast_employee_id: 'MX', active: true, effective_from: '2026-01-01', effective_to: '2026-12-31' }],
+  });
+
+  assert.equal(result.findings.length, 1);
+  assert.equal(result.findings[0].rule_id, 'MISSINGID');
+  assert.equal(result.findings[0].toast_employee_id, 'M1');
+}
+
+async function testRunValidationMissingIdInactiveDoesNotEmit() {
+  const result = await runValidation({
+    run: { id: 104, client_location_id: 'Test Location', period_start: '2026-03-01', period_end: '2026-03-14' },
+    context: {
+      active_rule_ids: ['NEWEMP'],
+      comparison_periods: [],
+      toast_rows_by_period: {
+        '2026-03-01__2026-03-14': [{ employeeGuid: 'M1', employeeName: 'Miss One', payrollFileId: '' }],
+      },
+    },
+    exclusions: [],
+  });
+
+  assert.equal(result.findings.some((f) => f.rule_id === 'MISSINGID'), false);
+}
+
+async function testRunValidationOtThresholdRule() {
+  const ruleCatalog = [
+    { rule_id: 'OTTHRESHOLD', rule_name: 'OT over X Hours', params: JSON.stringify({ threshold: 5 }) },
+  ];
+
+  const result = await runValidation({
+    run: { id: 105, client_location_id: 'Test Location', period_start: '2026-03-01', period_end: '2026-03-14' },
+    context: {
+      active_rule_ids: ['OTTHRESHOLD'],
+      comparison_periods: [],
+      toast_rows_by_period: {
+        '2026-03-01__2026-03-14': [
+          { employeeGuid: 'O1', employeeName: 'Over One', overtimeHours: 3 },
+          { employeeGuid: 'O1', employeeName: 'Over One', overtimeHours: 3 },
+          { employeeGuid: 'O2', employeeName: 'Equal Two', overtimeHours: 5 },
+          { employeeGuid: 'OX', employeeName: 'Excluded OT', overtimeHours: 6 },
+        ],
+      },
+    },
+    exclusions: [{ toast_employee_id: 'OX', active: true, effective_from: '2026-01-01', effective_to: '2026-12-31' }],
+    ruleCatalog,
+  });
+
+  assert.equal(result.findings.length, 1);
+  assert.equal(result.findings[0].rule_id, 'OTTHRESHOLD');
+  assert.equal(result.findings[0].toast_employee_id, 'O1');
+  assert.equal(result.findings[0].detail.includes('6'), true);
+}
+
+async function testRunValidationOtThresholdInvalidConfigSkips() {
+  const result = await runValidation({
+    run: { id: 106, client_location_id: 'Test Location', period_start: '2026-03-01', period_end: '2026-03-14' },
+    context: {
+      active_rule_ids: ['OTTHRESHOLD'],
+      comparison_periods: [],
+      toast_rows_by_period: {
+        '2026-03-01__2026-03-14': [{ employeeGuid: 'O1', employeeName: 'Over One', overtimeHours: 8 }],
+      },
+    },
+    exclusions: [],
+    ruleCatalog: [{ rule_id: 'OTTHRESHOLD', params: 'not-json' }],
+  });
+
+  assert.equal(result.findings.length, 0);
+}
+
+async function testRunValidationMinWageRule() {
+  const result = await runValidation({
+    run: { id: 107, client_location_id: 'Test Location', period_start: '2026-03-01', period_end: '2026-03-14' },
+    context: {
+      active_rule_ids: ['MINWAGE'],
+      comparison_periods: [],
+      toast_rows_by_period: {
+        '2026-03-01__2026-03-14': [
+          { employeeGuid: 'W1', employeeName: 'Wage One', jobName: 'Server', regularHours: 4, regularCost: 40 },
+          { employeeGuid: 'W1', employeeName: 'Wage One', jobName: 'Server', payRate: 10 },
+          { employeeGuid: 'W2', employeeName: 'Wage Two', jobName: 'Bar', rate: 12 },
+          { employeeGuid: 'WX', employeeName: 'Excluded Wage', jobName: 'Host', hourlyRate: 8 },
+        ],
+      },
+    },
+    exclusions: [{ toast_employee_id: 'WX', active: true, effective_from: '2026-01-01', effective_to: '2026-12-31' }],
+    ruleCatalog: [{ rule_id: 'MINWAGE', rule_name: 'Under Minimum Wage', params: { minimumWage: 11 } }],
+  });
+
+  assert.equal(result.findings.length, 1);
+  assert.equal(result.findings[0].rule_id, 'MINWAGE');
+  assert.equal(result.findings[0].toast_employee_id, 'W1');
+  assert.equal(result.findings[0].detail.includes('10.00'), true);
+}
+
+async function testRunValidationMinWageInvalidConfigSkips() {
+  const result = await runValidation({
+    run: { id: 108, client_location_id: 'Test Location', period_start: '2026-03-01', period_end: '2026-03-14' },
+    context: {
+      active_rule_ids: ['MINWAGE'],
+      comparison_periods: [],
+      toast_rows_by_period: {
+        '2026-03-01__2026-03-14': [{ employeeGuid: 'W1', employeeName: 'Wage One', payRate: 9 }],
+      },
+    },
+    exclusions: [],
+    ruleCatalog: [{ rule_id: 'MINWAGE', params: '{"foo":"bar"}' }],
+  });
+
+  assert.equal(result.findings.length, 0);
+}
+
 module.exports = {
   testRunValidationFindsNewEmpRateDept,
   testRunValidationHonorsExclusionsAndActiveRules,
@@ -200,4 +333,10 @@ module.exports = {
   testValidationEngineDoesNotCallEraLaborEndpoint,
   testFetchToastRowsForPeriodsUsesStandardOnlyAndLoadsSelectedAndPrior,
   testStandardJoinNormalizesEmployeeJobAndRateFields,
+  testRunValidationMissingIdRule,
+  testRunValidationMissingIdInactiveDoesNotEmit,
+  testRunValidationOtThresholdRule,
+  testRunValidationOtThresholdInvalidConfigSkips,
+  testRunValidationMinWageRule,
+  testRunValidationMinWageInvalidConfigSkips,
 };
