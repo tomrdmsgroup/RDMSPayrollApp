@@ -458,6 +458,46 @@ async function testRunValidationDupTimeRule() {
   assert.equal(result.findings.every((f) => f.toast_employee_id === 'D1'), true);
 }
 
+async function testRunValidationShiftRulesUseLocationTimezoneForEvaluationAndDetail() {
+  const result = await runValidation({
+    run: { id: 115, client_location_id: 'Sushi Ran', period_start: '2026-04-01', period_end: '2026-04-30' },
+    context: {
+      active_rule_ids: ['LATECLOCKOUT', 'LONGSHIFT', 'DUPTIME'],
+      timezone: 'America/Los_Angeles',
+      comparison_periods: [],
+      toast_rows_by_period: {
+        '2026-04-01__2026-04-30': [
+          // 9:43 PM PT out (should NOT late-flag even though UTC is next-day 04:43)
+          { employeeGuid: 'T1', employeeName: 'Local PM', inDate: '2026-04-19T00:20:00.000Z', outDate: '2026-04-19T04:43:00.000Z' },
+          // 5:03 AM PT out (should late-flag)
+          { employeeGuid: 'T2', employeeName: 'Local AM', inDate: '2026-04-19T06:55:00.000Z', outDate: '2026-04-19T12:03:00.000Z' },
+          // long shift: 8.5h absolute duration, detail should show PT clock times
+          { employeeGuid: 'T3', employeeName: 'Long Shift', inDate: '2026-04-19T16:00:00.000Z', outDate: '2026-04-20T00:30:00.000Z' },
+          // duplicate overlap: absolute overlap; detail should show PT
+          { employeeGuid: 'T4', employeeName: 'Dup Shift', inDate: '2026-04-19T16:00:00.000Z', outDate: '2026-04-19T19:00:00.000Z' },
+          { employeeGuid: 'T4', employeeName: 'Dup Shift', inDate: '2026-04-19T18:00:00.000Z', outDate: '2026-04-19T21:00:00.000Z' },
+        ],
+      },
+      active_rule_configs: { LONGSHIFT: { params: JSON.stringify({ maxHours: 8 }) } },
+    },
+    exclusions: [],
+  });
+
+  const lateIds = result.findings.filter((f) => f.rule_id === 'LATECLOCKOUT').map((f) => f.toast_employee_id);
+  assert.deepEqual(lateIds, ['T2']);
+
+  const lateDetail = result.findings.find((f) => f.rule_id === 'LATECLOCKOUT' && f.toast_employee_id === 'T2')?.detail || '';
+  assert.equal(lateDetail.includes('in 11:55 PM'), true);
+  assert.equal(lateDetail.includes('out 5:03 AM'), true);
+
+  const longDetail = result.findings.find((f) => f.rule_id === 'LONGSHIFT' && f.toast_employee_id === 'T3')?.detail || '';
+  assert.equal(longDetail.includes('in 9:00 AM'), true);
+  assert.equal(longDetail.includes('out 5:30 PM'), true);
+
+  const dupDetail = result.findings.find((f) => f.rule_id === 'DUPTIME' && f.toast_employee_id === 'T4')?.detail || '';
+  assert.equal(dupDetail.includes('9:00 AM-12:00 PM overlaps 11:00 AM-2:00 PM'), true);
+}
+
 module.exports = {
   testRunValidationFindsNewEmpRateDept,
   testRunValidationHonorsExclusionsAndActiveRules,
@@ -476,4 +516,5 @@ module.exports = {
   testRunValidationLateClockoutRule,
   testRunValidationLongShiftRuleAndConfigBehavior,
   testRunValidationDupTimeRule,
+  testRunValidationShiftRulesUseLocationTimezoneForEvaluationAndDetail,
 };
