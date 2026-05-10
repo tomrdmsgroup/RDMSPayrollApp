@@ -584,7 +584,7 @@ function buildFindings({ rowsByPeriod, selectedPeriod, priorPeriods, excludedAud
       const outDate = parseValidDate(row?.outDate);
       if (!outDate) continue;
       const outMinutes = outDate.getHours() * 60 + outDate.getMinutes();
-      if (outMinutes <= 210) continue;
+      if (outMinutes <= 210 || outMinutes >= 720) continue;
       findings.push({
         employee_name: employeeNames.get(employeeId) || normalizeEmployeeName(row) || `Employee ${employeeId}`,
         toast_employee_id: employeeId,
