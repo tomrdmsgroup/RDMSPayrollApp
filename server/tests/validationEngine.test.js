@@ -384,18 +384,20 @@ async function testRunValidationLateClockoutRule() {
       toast_rows_by_period: {
         '2026-03-01__2026-03-14': [
           { employeeGuid: 'L1', employeeName: 'Late One', inDate: '2026-03-03T20:00:00', outDate: '2026-03-04T03:31:00' },
+          { employeeGuid: 'L4', employeeName: 'Late Four', inDate: '2026-03-03T20:00:00', outDate: '2026-03-04T05:03:00' },
           { employeeGuid: 'L2', employeeName: 'Edge Two', inDate: '2026-03-03T20:00:00', outDate: '2026-03-04T03:30:00' },
           { employeeGuid: 'L3', employeeName: 'Early Three', inDate: '2026-03-03T20:00:00', outDate: '2026-03-04T03:29:00' },
+          { employeeGuid: 'L5', employeeName: 'Pm Nine', inDate: '2026-03-03T13:00:00', outDate: '2026-03-03T21:47:00' },
+          { employeeGuid: 'L6', employeeName: 'Pm Ten', inDate: '2026-03-03T13:00:00', outDate: '2026-03-03T22:11:00' },
           { employeeGuid: 'LX', employeeName: 'Excluded Late', inDate: '2026-03-03T20:00:00', outDate: '2026-03-04T04:00:00' },
         ],
       },
     },
-    exclusions: [{ toast_employee_id: 'LX', active: true, effective_from: '2026-01-01', effective_to: '2026-12-31' }],
+    exclusions: [{ toast_employee_id: ' LX ', active: true, effective_from: '2026-01-01', effective_to: '2026-12-31' }],
   });
 
-  assert.equal(result.findings.length, 1);
-  assert.equal(result.findings[0].rule_id, 'LATECLOCKOUT');
-  assert.equal(result.findings[0].toast_employee_id, 'L1');
+  const lateIds = result.findings.filter((f) => f.rule_id === 'LATECLOCKOUT').map((f) => f.toast_employee_id).sort();
+  assert.deepEqual(lateIds, ['L1', 'L4']);
 }
 
 async function testRunValidationLongShiftRuleAndConfigBehavior() {
@@ -414,7 +416,7 @@ async function testRunValidationLongShiftRuleAndConfigBehavior() {
   const withActiveConfig = await runValidation({
     run: { id: 112, client_location_id: 'Test Location', period_start: '2026-03-01', period_end: '2026-03-14' },
     context: { ...baseContext, active_rule_configs: { LONGSHIFT: { params: JSON.stringify({ maxHours: 8 }) } } },
-    exclusions: [{ toast_employee_id: 'SX', active: true, effective_from: '2026-01-01', effective_to: '2026-12-31' }],
+    exclusions: [{ toast_employee_id: ' SX ', active: true, effective_from: '2026-01-01', effective_to: '2026-12-31' }],
     ruleCatalog: [{ rule_id: 'LONGSHIFT', params: { threshold: 12 } }],
   });
   assert.equal(withActiveConfig.findings.length, 1);
@@ -449,7 +451,7 @@ async function testRunValidationDupTimeRule() {
         ],
       },
     },
-    exclusions: [{ toast_employee_id: 'DX', active: true, effective_from: '2026-01-01', effective_to: '2026-12-31' }],
+    exclusions: [{ toast_employee_id: ' DX ', active: true, effective_from: '2026-01-01', effective_to: '2026-12-31' }],
   });
 
   assert.equal(result.findings.length, 2);

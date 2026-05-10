@@ -38,7 +38,7 @@ function isExcluded(exclusions = [], employeeId, targetDate, scopeFlag) {
   if (!targetDate) return false;
   return exclusions.some(
     (ex) =>
-      `${ex.toast_employee_id}` === `${employeeId}` &&
+      String(ex.toast_employee_id).trim() === String(employeeId).trim() &&
       overlapsPeriod(ex, targetDate, targetDate) &&
       isScopeExcluded(ex, scopeFlag)
   );
@@ -74,9 +74,12 @@ function buildExcludedEmployeeDecisions(exclusions = [], periodStart, periodEnd)
     if (!ex.toast_employee_id) return;
     if (!overlapsPeriod(ex, periodStart, periodEnd)) return;
 
-    if (isScopeExcluded(ex, 'audit')) decisions.audit.add(ex.toast_employee_id);
-    if (isScopeExcluded(ex, 'wip')) decisions.wip.add(ex.toast_employee_id);
-    if (isScopeExcluded(ex, 'tips')) decisions.tips.add(ex.toast_employee_id);
+    const normalizedEmployeeId = String(ex.toast_employee_id).trim();
+    if (!normalizedEmployeeId) return;
+
+    if (isScopeExcluded(ex, 'audit')) decisions.audit.add(normalizedEmployeeId);
+    if (isScopeExcluded(ex, 'wip')) decisions.wip.add(normalizedEmployeeId);
+    if (isScopeExcluded(ex, 'tips')) decisions.tips.add(normalizedEmployeeId);
   });
 
   return decisions;
