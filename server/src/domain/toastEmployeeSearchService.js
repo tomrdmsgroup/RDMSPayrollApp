@@ -368,7 +368,7 @@ async function searchToastEmployeesForLocation(locationName, query, limit = 10) 
   };
 }
 
-async function runBarrioToastProof(locationName) {
+async function runToastEmployeeSearchProof(locationName) {
   const cleanedLocationName = safeStr(locationName);
   if (!cleanedLocationName) {
     return { ok: false, locationName: null, failureReason: 'locationName_required' };
@@ -395,7 +395,7 @@ async function runBarrioToastProof(locationName) {
       'AIRTABLE_API_CONFIG_CLIENT_NAME_FIELD',
       'AIRTABLE_API_CONFIG_DISPLAY_NAME_FIELD',
       'TOAST_STD_CLIENT_SECRET_<LOCATION_SLUG>',
-      'TOAST_STD_CLIENT_SECRET_BARRIO (Barrio fallback only)',
+      'TOAST_STD_CLIENT_SECRET_BARRIO (temporary legacy fallback only for Barrio-like location slugs)',
     ],
   };
 
@@ -475,13 +475,13 @@ async function runBarrioToastProof(locationName) {
 
     return result;
   } catch (error) {
-    result.failureReason = error?.message || 'toast_barrio_proof_failed';
+    result.failureReason = error?.message || 'toast_employee_search_proof_failed';
     return result;
   }
 }
 
 module.exports = {
   TOAST_AIRTABLE_FIELDS,
-  runBarrioToastProof,
+  runToastEmployeeSearchProof,
   searchToastEmployeesForLocation,
 };

@@ -28,7 +28,7 @@ const {
   getActivePayrollDashboardRows,
   getCommunicationRecipientsForLocationName,
 } = require('../domain/airtableRecapService');
-const { searchToastEmployeesForLocation } = require('../domain/toastBarrioProofService');
+const { searchToastEmployeesForLocation } = require('../domain/toastEmployeeSearchService');
 const { fetchOriginalToastPayPeriodData } = require('../domain/toastOriginalPayPeriodService');
 const {
   parseCsv,

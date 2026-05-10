@@ -174,28 +174,6 @@ function buildLocationSlug(...candidates) {
   return '';
 }
 
-async function resolveAnalyticsConfigForValidation({ vitalsRecord, locationName }) {
-  const fallback = getToastConfigFromVitals(vitalsRecord, 'analytics');
-  if (!isBarrioLocationName(locationName)) return fallback;
-
-  const apiFields = await fetchApiConfigFieldsForLocation(locationName);
-  if (!apiFields) return fallback;
-
-  const clientId = safeStr(process.env.TOAST_AN_CLIENT_ID_BARRIO) || null;
-  const clientSecret = safeStr(process.env.TOAST_AN_CLIENT_SECRET_BARRIO) || null;
-
-  return {
-    hostname: normalizeHostname(apiFields['Toast API Hostname'] || null),
-    clientId,
-    clientSecret,
-    userAccessType: apiFields['Toast API User Access Type'] || null,
-    restaurantGuid: apiFields['Toast API Restaurant GUID'] || apiFields['Toast API Restaurant External ID'] || null,
-    oauthUrl: apiFields['Toast API OAuth URL'] || null,
-    locationId: apiFields['Toast Location ID'] || null,
-    mgmtGroupGuid: apiFields['Toast Management Group GUID'] || null,
-  };
-}
-
 async function resolveStandardConfigForTimeEntries({ vitalsRecord, locationName }) {
   const fallback = getToastConfigFromVitals(vitalsRecord, 'standard');
   const apiFields = await fetchApiConfigFieldsForLocation(locationName);
@@ -204,6 +182,7 @@ async function resolveStandardConfigForTimeEntries({ vitalsRecord, locationName 
   const locationSlug = buildLocationSlug(apiFields['Display Name'], apiFields['Client Name'], locationName);
   const envSecretName = locationSlug ? `TOAST_STD_CLIENT_SECRET_${locationSlug}` : '';
   let clientSecret = safeStr(envSecretName ? process.env[envSecretName] : '') || null;
+  // Temporary legacy fallback only for Barrio-like slugs until all locations have slug-specific secrets.
   if (!clientSecret && isBarrioLocationName(locationSlug)) {
     clientSecret = safeStr(process.env.TOAST_STD_CLIENT_SECRET_BARRIO) || null;
   }
@@ -553,7 +532,7 @@ async function fetchToastJobsFromVitals({ vitalsRecord, locationName = null }) {
 }
 
 async function fetchToastAnalyticsJobsFromVitals({ vitalsRecord, periodStart, periodEnd, locationName = null }) {
-  const cfg = await resolveAnalyticsConfigForValidation({ vitalsRecord, locationName });
+  const cfg = getToastConfigFromVitals(vitalsRecord, "analytics");
 
   if (!cfg.hostname || !cfg.clientId || !cfg.clientSecret || !cfg.userAccessType || !cfg.restaurantGuid || !cfg.oauthUrl) {
     return {
