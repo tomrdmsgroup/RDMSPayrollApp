@@ -239,15 +239,51 @@ function parseValidDate(value) {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-function formatClockTime(date) {
-  return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+function sanitizeTimeZone(timeZone) {
+  const tz = safeTrim(timeZone);
+  if (!tz) return null;
+  try {
+    Intl.DateTimeFormat('en-US', { timeZone: tz }).format(new Date());
+    return tz;
+  } catch (_err) {
+    return null;
+  }
 }
 
-function formatDateYmd(date) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+function formatClockTime(date, timeZone = null) {
+  const opts = { hour: 'numeric', minute: '2-digit', hour12: true };
+  if (timeZone) opts.timeZone = timeZone;
+  return date.toLocaleTimeString('en-US', opts);
+}
+
+function formatDateYmd(date, timeZone = null) {
+  if (!timeZone) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const get = (type) => parts.find((p) => p.type === type)?.value || '';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
+function minutesInDay(date, timeZone = null) {
+  if (!timeZone) return date.getHours() * 60 + date.getMinutes();
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+  }).formatToParts(date);
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value || '0');
+  const minute = Number(parts.find((p) => p.type === 'minute')?.value || '0');
+  return hour * 60 + minute;
 }
 
 function parseRuleParams(raw) {
@@ -383,7 +419,7 @@ async function fetchToastRowsForPeriods({
   };
 }
 
-function buildFindings({ rowsByPeriod, selectedPeriod, priorPeriods, excludedAuditIds, activeRuleIds, catalog }) {
+function buildFindings({ rowsByPeriod, selectedPeriod, priorPeriods, excludedAuditIds, activeRuleIds, catalog, timeZone = null }) {
   const findings = [];
   const selectedKey = `${selectedPeriod.period_start}__${selectedPeriod.period_end}`;
   const selectedRows = Array.isArray(rowsByPeriod[selectedKey]) ? rowsByPeriod[selectedKey] : [];
@@ -583,16 +619,16 @@ function buildFindings({ rowsByPeriod, selectedPeriod, priorPeriods, excludedAud
       const inDate = parseValidDate(row?.inDate);
       const outDate = parseValidDate(row?.outDate);
       if (!outDate) continue;
-      const outMinutes = outDate.getHours() * 60 + outDate.getMinutes();
+      const outMinutes = minutesInDay(outDate, timeZone);
       if (outMinutes <= 210 || outMinutes >= 720) continue;
       findings.push({
         employee_name: employeeNames.get(employeeId) || normalizeEmployeeName(row) || `Employee ${employeeId}`,
         toast_employee_id: employeeId,
         rule_id: 'LATECLOCKOUT',
         rule_name: rule?.rule_name || 'Clockout after 3:30 AM',
-        detail: `Clockout after 3:30 AM on ${formatDateYmd(outDate)}: in ${
-          inDate ? formatClockTime(inDate) : 'Unknown'
-        }, out ${formatClockTime(outDate)}`,
+        detail: `Clockout after 3:30 AM on ${formatDateYmd(outDate, timeZone)}: in ${
+          inDate ? formatClockTime(inDate, timeZone) : 'Unknown'
+        }, out ${formatClockTime(outDate, timeZone)}`,
       });
     }
   }
@@ -616,8 +652,9 @@ function buildFindings({ rowsByPeriod, selectedPeriod, priorPeriods, excludedAud
           rule_id: 'LONGSHIFT',
           rule_name: rule?.rule_name || 'Shift over X hours',
           detail: `Shift length ${rounded} hours exceeds threshold ${threshold} on ${formatDateYmd(
-            inDate
-          )}: in ${formatClockTime(inDate)}, out ${formatClockTime(outDate)}`,
+            inDate,
+            timeZone
+          )}: in ${formatClockTime(inDate, timeZone)}, out ${formatClockTime(outDate, timeZone)}`,
         });
       }
     }
@@ -650,9 +687,13 @@ function buildFindings({ rowsByPeriod, selectedPeriod, priorPeriods, excludedAud
             toast_employee_id: employeeId,
             rule_id: 'DUPTIME',
             rule_name: rule?.rule_name || 'Overlapping or duplicate time entries',
-            detail: `Overlapping time entries on ${formatDateYmd(a.inDate)}: ${formatClockTime(
-              a.inDate
-            )}-${formatClockTime(a.outDate)} overlaps ${formatClockTime(b.inDate)}-${formatClockTime(b.outDate)}`,
+            detail: `Overlapping time entries on ${formatDateYmd(a.inDate, timeZone)}: ${formatClockTime(
+              a.inDate,
+              timeZone
+            )}-${formatClockTime(a.outDate, timeZone)} overlaps ${formatClockTime(b.inDate, timeZone)}-${formatClockTime(
+              b.outDate,
+              timeZone
+            )}`,
           });
         }
       }
@@ -693,6 +734,9 @@ async function runValidation({
 
   const effectiveRuleCatalog = mergeCatalogWithActiveRuleConfigs(ruleCatalog, context?.active_rule_configs);
   const activeRuleIds = resolveActiveSupportedRules(context?.active_rule_ids, effectiveRuleCatalog);
+  const timeZone = sanitizeTimeZone(
+    context?.location_timezone || context?.timezone || run?.location_timezone || run?.timezone || run?.payload?.timezone
+  );
 
   const toast = context?.toast_rows_by_period
     ? { rowsByPeriod: context.toast_rows_by_period, sourceMeta: context?.toast_source_meta || [] }
@@ -708,6 +752,7 @@ async function runValidation({
     excludedAuditIds: exclusionDecisions.audit,
     activeRuleIds,
     catalog: effectiveRuleCatalog,
+    timeZone,
   });
 
   return {

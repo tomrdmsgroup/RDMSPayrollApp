@@ -682,6 +682,7 @@ function router(req, res) {
           context: {
             periodStart,
             periodEnd,
+            location_timezone: selector?.timezone || selector?.time_zone || null,
             active_rule_ids: activeRuleIds,
             active_rule_configs: activeRuleConfigs,
             comparison_periods: comparisonPeriods,
