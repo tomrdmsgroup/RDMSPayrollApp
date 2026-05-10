@@ -163,6 +163,17 @@ function isBarrioLocationName(locationName) {
   return normalizeMatchString(locationName).startsWith('barrio');
 }
 
+function buildLocationSlug(...candidates) {
+  for (const candidate of candidates) {
+    const raw = safeStr(candidate);
+    if (!raw) continue;
+
+    const slug = raw.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    if (slug) return slug;
+  }
+  return '';
+}
+
 async function resolveAnalyticsConfigForValidation({ vitalsRecord, locationName }) {
   const fallback = getToastConfigFromVitals(vitalsRecord, 'analytics');
   if (!isBarrioLocationName(locationName)) return fallback;
@@ -187,17 +198,19 @@ async function resolveAnalyticsConfigForValidation({ vitalsRecord, locationName 
 
 async function resolveStandardConfigForTimeEntries({ vitalsRecord, locationName }) {
   const fallback = getToastConfigFromVitals(vitalsRecord, 'standard');
-  if (!isBarrioLocationName(locationName)) return fallback;
-
   const apiFields = await fetchApiConfigFieldsForLocation(locationName);
   if (!apiFields) return fallback;
 
-  const clientId = safeStr(process.env.TOAST_STD_CLIENT_ID_BARRIO) || null;
-  const clientSecret = safeStr(process.env.TOAST_STD_CLIENT_SECRET_BARRIO) || null;
+  const locationSlug = buildLocationSlug(apiFields['Display Name'], apiFields['Client Name'], locationName);
+  const envSecretName = locationSlug ? `TOAST_STD_CLIENT_SECRET_${locationSlug}` : '';
+  let clientSecret = safeStr(envSecretName ? process.env[envSecretName] : '') || null;
+  if (!clientSecret && isBarrioLocationName(locationSlug)) {
+    clientSecret = safeStr(process.env.TOAST_STD_CLIENT_SECRET_BARRIO) || null;
+  }
 
   return {
     hostname: normalizeHostname(apiFields['Toast API Hostname'] || null),
-    clientId,
+    clientId: apiFields['Toast API Client ID - STANDARD'] || null,
     clientSecret,
     userAccessType: apiFields['Toast API User Access Type'] || null,
     restaurantGuid: apiFields['Toast API Restaurant GUID'] || apiFields['Toast API Restaurant External ID'] || null,
@@ -368,8 +381,12 @@ function sanitizeToastConfig(cfg) {
     restaurantGuid: cfg.restaurantGuid || null,
     locationId: cfg.locationId || null,
     mgmtGroupGuid: cfg.mgmtGroupGuid || null,
+    hasHostname: !!cfg.hostname,
     hasClientId: !!cfg.clientId,
     hasClientSecret: !!cfg.clientSecret,
+    hasUserAccessType: !!cfg.userAccessType,
+    hasRestaurantGuid: !!cfg.restaurantGuid,
+    hasOauthUrl: !!cfg.oauthUrl,
   };
 }
 
