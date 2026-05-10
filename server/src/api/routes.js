@@ -645,10 +645,12 @@ function router(req, res) {
         const activeExcluded = (Array.isArray(excluded) ? excluded : []).filter((x) => x && x.active);
 
         const { byRuleId, defaults } = await getRuleConfigsForLocation(locationName);
+        const activeRuleConfigs = {};
         const activeRuleIds = rulesCatalog
           .filter((rule) => {
             const cfg = byRuleId[rule.rule_id] || {};
             const isActive = typeof cfg.active === 'boolean' ? cfg.active : defaults.active;
+            if (isActive === true) activeRuleConfigs[rule.rule_id] = cfg;
             return isActive === true;
           })
           .map((rule) => rule.rule_id);
@@ -681,6 +683,7 @@ function router(req, res) {
             periodStart,
             periodEnd,
             active_rule_ids: activeRuleIds,
+            active_rule_configs: activeRuleConfigs,
             comparison_periods: comparisonPeriods,
           },
           exclusions: activeExcluded,
