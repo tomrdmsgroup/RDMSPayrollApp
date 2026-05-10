@@ -10,7 +10,7 @@ const {
 } = require('../providers/toastProvider');
 const { rulesCatalog } = require('./rulesCatalog');
 
-const SUPPORTED_RULE_IDS = new Set(['NEWEMP', 'NEWRATE', 'NEWDEPT']);
+const SUPPORTED_RULE_IDS = new Set(['NEWEMP', 'NEWRATE', 'NEWDEPT', 'MISSINGID', 'OTTHRESHOLD', 'MINWAGE']);
 
 function trimErrorText(value, maxLen = 1800) {
   const s = String(value || '');
@@ -208,6 +208,37 @@ function normalizeEmployeeName(row) {
 
 function formatRate(rate) {
   return Number(rate).toFixed(2);
+}
+
+
+function parseRuleParams(raw) {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+  if (typeof raw === 'string') {
+    const t = raw.trim();
+    if (!t) return null;
+    const asNum = Number(t);
+    if (Number.isFinite(asNum)) return asNum;
+    try {
+      return JSON.parse(t);
+    } catch (_err) {
+      return null;
+    }
+  }
+  if (typeof raw === 'object') return raw;
+  return null;
+}
+
+function extractNumericRuleThreshold(rule, keys = []) {
+  const parsed = parseRuleParams(rule?.params);
+  if (typeof parsed === 'number') return parsed;
+  if (parsed && typeof parsed === 'object') {
+    for (const key of keys) {
+      const n = toNum(parsed[key]);
+      if (n !== null) return n;
+    }
+  }
+  return null;
 }
 
 function ruleMap(catalog) {
@@ -428,6 +459,80 @@ function buildFindings({ rowsByPeriod, selectedPeriod, priorPeriods, excludedAud
         rule_name: rule?.rule_name || 'New Pay Rate',
         detail: `New rate ${info.rate} for ${info.deptName} not seen in prior 6 pay periods`,
       });
+    }
+  }
+
+  if (activeRuleIds.has('MISSINGID')) {
+    const seen = new Set();
+    for (const row of selectedRows) {
+      const employeeId = normalizeEmployeeId(row);
+      if (!employeeId || seen.has(employeeId) || excludedAuditIds.has(employeeId)) continue;
+      const payrollFileId = safeTrim(row?.payrollFileId);
+      if (payrollFileId) continue;
+      seen.add(employeeId);
+
+      const rule = catalogByRule.get('MISSINGID');
+      findings.push({
+        employee_name: employeeNames.get(employeeId) || `Employee ${employeeId}`,
+        toast_employee_id: employeeId,
+        rule_id: 'MISSINGID',
+        rule_name: rule?.rule_name || 'Missing Payroll File ID',
+        detail: 'Employee has hours in selected period but is missing Payroll File ID',
+      });
+    }
+  }
+
+  if (activeRuleIds.has('OTTHRESHOLD')) {
+    const rule = catalogByRule.get('OTTHRESHOLD');
+    const threshold = extractNumericRuleThreshold(rule, ['threshold', 'hours', 'value', 'maxHours', 'overtimeHours']);
+    if (threshold !== null) {
+      const overtimeByEmployee = new Map();
+      for (const row of selectedRows) {
+        const employeeId = normalizeEmployeeId(row);
+        if (!employeeId || excludedAuditIds.has(employeeId)) continue;
+        const overtime = toNum(row?.overtimeHours) ?? 0;
+        overtimeByEmployee.set(employeeId, (overtimeByEmployee.get(employeeId) || 0) + overtime);
+      }
+
+      for (const [employeeId, totalOvertime] of overtimeByEmployee.entries()) {
+        if (!(totalOvertime > threshold)) continue;
+        findings.push({
+          employee_name: employeeNames.get(employeeId) || `Employee ${employeeId}`,
+          toast_employee_id: employeeId,
+          rule_id: 'OTTHRESHOLD',
+          rule_name: rule?.rule_name || 'OT over X Hours',
+          detail: `Overtime hours ${totalOvertime} exceed threshold ${threshold}`,
+        });
+      }
+    }
+  }
+
+  if (activeRuleIds.has('MINWAGE')) {
+    const rule = catalogByRule.get('MINWAGE');
+    const minimumWage = extractNumericRuleThreshold(rule, ['minimumWage', 'minWage', 'threshold', 'rate', 'value']);
+    if (minimumWage !== null) {
+      const seen = new Set();
+      for (const row of selectedRows) {
+        const employeeId = normalizeEmployeeId(row);
+        if (!employeeId || excludedAuditIds.has(employeeId)) continue;
+
+        const rate = normalizeRateAmount(row);
+        if (rate === null || rate >= minimumWage) continue;
+
+        const deptName = normalizeDepartmentName(row);
+        const rateText = formatRate(rate);
+        const key = `${employeeId}::${deptName}::${rateText}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        findings.push({
+          employee_name: employeeNames.get(employeeId) || `Employee ${employeeId}`,
+          toast_employee_id: employeeId,
+          rule_id: 'MINWAGE',
+          rule_name: rule?.rule_name || 'Under Minimum Wage',
+          detail: `Rate ${rateText} for ${deptName} is below minimum wage ${minimumWage}`,
+        });
+      }
     }
   }
 
