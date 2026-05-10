@@ -187,15 +187,17 @@
         flex-wrap: wrap;
       }
       .tabs.submenu {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-        gap: 10px;
+        display: flex;
+        flex-wrap: nowrap;
+        align-items: stretch;
+        gap: 8px;
         margin-top: 2px;
-        padding: 8px;
+        padding: 6px 8px;
         border: 1px solid rgba(79, 70, 229, 0.26);
         background: linear-gradient(180deg, rgba(232, 240, 255, 0.92) 0%, rgba(242, 247, 255, 0.94) 100%);
         border-radius: 14px;
         box-shadow: 0 4px 12px rgba(79, 70, 229, 0.08);
+        overflow-x: auto;
       }
       .tabs.submenu.hidden {
         display: none;
@@ -211,7 +213,9 @@
         transition: box-shadow 0.16s ease, border-color 0.16s ease, transform 0.16s ease, background-color 0.16s ease;
       }
       .tabs.submenu .tab {
-        min-height: 78px;
+        min-height: 0;
+        flex: 0 0 188px;
+        padding: 6px 10px;
       }
       .tab:hover {
         border-color: rgba(79, 70, 229, 0.35);
@@ -288,9 +292,12 @@
       }
       .subTabHint {
         display: block;
-        margin-top: 2px;
+        margin-top: 1px;
         font-size: 11px;
         color: #6b7280;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .page {
         border: 1px solid var(--border);
