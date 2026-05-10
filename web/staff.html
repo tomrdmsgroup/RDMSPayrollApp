@@ -43,7 +43,7 @@
         z-index: 5;
         background: rgba(255, 255, 255, 0.9);
         border: 1px solid var(--border);
-        border-radius: 16px;
+        border-radius: 14px;
         padding: 12px 14px;
         box-shadow: var(--shadow);
         display: flex;
@@ -53,8 +53,10 @@
         backdrop-filter: blur(10px);
       }
       .brand {
-        font-weight: 700;
-        letter-spacing: 0.3px;
+        font-weight: 800;
+        font-size: 18px;
+        letter-spacing: 0.2px;
+        color: #0f172a;
       }
       .center {
         flex: 1;
@@ -64,9 +66,20 @@
       }
       .location {
         width: min(520px, 100%);
-        display: flex;
-        gap: 10px;
-        align-items: center;
+      }
+      .locationPicker {
+        width: min(520px, 100%);
+        display: grid;
+        gap: 7px;
+        border: 1px solid rgba(59, 130, 246, 0.28);
+        background: rgba(239, 246, 255, 0.8);
+        border-radius: 12px;
+        padding: 10px 12px;
+      }
+      .locationLabel {
+        font-size: 12px;
+        font-weight: 700;
+        color: #1e3a8a;
       }
       select {
         width: 100%;
@@ -126,20 +139,43 @@
         margin-top: 14px;
         display: grid;
         grid-template-columns: 250px minmax(0, 1fr);
-        gap: 14px;
+        gap: 18px;
+      }
+      .appShell.sidebar-collapsed {
+        grid-template-columns: 74px minmax(0, 1fr);
       }
       .leftNav {
         border: 1px solid var(--nav-border);
         background: var(--nav-bg);
-        border-radius: 16px;
-        box-shadow: var(--shadow);
-        padding: 10px;
+        border-radius: 14px;
+        box-shadow: 0 8px 20px rgba(2, 6, 23, 0.22);
+        padding: 12px 10px;
         display: grid;
-        gap: 8px;
+        gap: 6px;
         align-content: start;
         position: sticky;
         top: 90px;
-        height: fit-content;
+        min-height: calc(100vh - 116px);
+      }
+      .sidebarHeader {
+        display: flex;
+        justify-content: flex-end;
+        margin-bottom: 6px;
+      }
+      .sidebarToggle {
+        width: 28px;
+        height: 28px;
+        border-radius: 8px;
+        border: 1px solid rgba(148, 163, 184, 0.4);
+        background: rgba(30, 41, 59, 0.9);
+        color: rgba(226, 232, 240, 0.95);
+        cursor: pointer;
+        font-size: 14px;
+        line-height: 1;
+      }
+      .sidebarToggle:hover {
+        border-color: rgba(129, 140, 248, 0.65);
+        background: rgba(51, 65, 85, 0.95);
       }
       .tabs {
         display: flex;
@@ -150,7 +186,12 @@
         margin-top: 0;
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 10px;
+        gap: 12px;
+        margin-top: 2px;
+        padding: 10px;
+        border: 1px solid rgba(79, 70, 229, 0.2);
+        background: linear-gradient(180deg, rgba(238, 242, 255, 0.78) 0%, rgba(248, 250, 255, 0.84) 100%);
+        border-radius: 14px;
       }
       .tabs.submenu.hidden {
         display: none;
@@ -180,8 +221,15 @@
         width: 100%;
         color: rgba(226, 232, 240, 0.92);
         background: transparent;
-        border-color: transparent;
+        border-color: rgba(148, 163, 184, 0.08);
         font-weight: 600;
+        border-radius: 10px;
+        padding: 10px 10px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 38px;
+        box-shadow: none;
       }
       .leftNav .tab:hover {
         border-color: rgba(129, 140, 248, 0.5);
@@ -191,9 +239,35 @@
       }
       .leftNav .tab.active {
         color: #ffffff;
-        background: rgba(99, 102, 241, 0.28);
-        border-color: rgba(129, 140, 248, 0.75);
+        background: rgba(79, 70, 229, 0.32);
+        border-color: rgba(129, 140, 248, 0.68);
         box-shadow: inset 3px 0 0 #a5b4fc;
+      }
+      .navIcon {
+        width: 22px;
+        min-width: 22px;
+        text-align: center;
+        font-size: 12px;
+        color: rgba(165, 180, 252, 0.95);
+      }
+      .navLabel {
+        white-space: nowrap;
+      }
+      .appShell.sidebar-collapsed .leftNav .tab {
+        justify-content: center;
+      }
+      .appShell.sidebar-collapsed .navLabel {
+        display: none;
+      }
+      .appShell.sidebar-collapsed .leftNav {
+        padding: 12px 8px;
+      }
+      .appShell.sidebar-collapsed .sidebarToggle {
+        margin: 0 auto;
+      }
+      .mainPanel {
+        display: grid;
+        gap: 16px;
       }
       .subTabTitle {
         display: block;
@@ -213,6 +287,9 @@
         background: var(--card);
         box-shadow: var(--shadow);
         overflow: hidden;
+      }
+      .mainPanel .page {
+        margin-top: 4px;
       }
       .pagetitle {
         padding: 16px 18px;
@@ -687,10 +764,13 @@
         <div class="brand">RDMS Payroll Validation</div>
 
     <div class="center">
-      <div class="location">
-        <select id="locationSelect">
-          <option value="">Select a location...</option>
-        </select>
+      <div class="locationPicker">
+        <div class="locationLabel">Pick Location:</div>
+        <div class="location">
+          <select id="locationSelect">
+            <option value="">Select a location...</option>
+          </select>
+        </div>
       </div>
     </div>
 
@@ -700,8 +780,12 @@
     </div>
   </div>
 
-  <div class="appShell">
-    <div class="leftNav tabs" id="mainTabs"></div>
+  <div class="appShell" id="appShell">
+    <div class="leftNav tabs" id="mainTabs">
+      <div class="sidebarHeader">
+        <button class="sidebarToggle" id="sidebarToggle" type="button" aria-label="Collapse sidebar" title="Collapse sidebar">⟨</button>
+      </div>
+    </div>
     <div class="mainPanel">
       <div class="tabs submenu" id="subTabs"></div>
 
@@ -740,6 +824,7 @@
   }
 
   const state = {
+    sidebarCollapsed: false,
     tab: "dashboard",
     currentUserEmail: "",
     locations: [],
@@ -809,12 +894,12 @@
   let excludedSearchRequestSeq = 0;
 
   const NAV_CONFIG = [
-    { key: "dashboardMain", label: "Payroll Dashboard", tabs: [] },
-    { key: "setup", label: "Setup", tabs: ["excluded", "confirmations", "communicationSetup"] },
-    { key: "payrollValidation", label: "Payroll Validation", tabs: ["rules", "outcome", "clientValidationConfig"] },
-    { key: "earningsAuditMain", label: "Earnings Audit", tabs: ["toastOriginal", "earningsAudit", "earningsComparison", "earningsWipExport"] },
-    { key: "tipsAudit", label: "Tips Audit", tabs: ["tipImport"] },
-    { key: "reportsMain", label: "Reports", tabs: ["payrollRecapReport", "payrollExport", "reports"] },
+    { key: "dashboardMain", label: "Payroll Dashboard", icon: "⌂", tabs: [] },
+    { key: "setup", label: "Setup", icon: "⚙", tabs: ["excluded", "confirmations", "communicationSetup"] },
+    { key: "payrollValidation", label: "Payroll Validation", icon: "✓", tabs: ["rules", "outcome", "clientValidationConfig"] },
+    { key: "earningsAuditMain", label: "Earnings Audit", icon: "$", tabs: ["toastOriginal", "earningsAudit", "earningsComparison", "earningsWipExport"] },
+    { key: "tipsAudit", label: "Tips Audit", icon: "¤", tabs: ["tipImport"] },
+    { key: "reportsMain", label: "Reports", icon: "≡", tabs: ["payrollRecapReport", "payrollExport", "reports"] },
   ];
 
   const TAB_META = {
@@ -912,10 +997,12 @@
 
   function renderMainTabs(activeMain) {
     const mainTabsEl = document.getElementById("mainTabs");
-    mainTabsEl.innerHTML = NAV_CONFIG.map((item) => {
+    const headerHtml = `<div class="sidebarHeader"><button class="sidebarToggle" id="sidebarToggle" type="button" aria-label="${state.sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}" title="${state.sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}">${state.sidebarCollapsed ? "⟩" : "⟨"}</button></div>`;
+    const tabsHtml = NAV_CONFIG.map((item) => {
       const active = item.key === activeMain ? " active" : "";
-      return `<div class="tab${active}" data-main="${escapeAttr(item.key)}">${escapeHtml(item.label)}</div>`;
+      return `<div class="tab${active}" data-main="${escapeAttr(item.key)}" title="${escapeAttr(item.label)}"><span class="navIcon">${escapeHtml(item.icon || "•")}</span><span class="navLabel">${escapeHtml(item.label)}</span></div>`;
     }).join("");
+    mainTabsEl.innerHTML = `${headerHtml}${tabsHtml}`;
   }
 
   function renderSubTabs(activeMain, activeTab) {
@@ -4837,7 +4924,18 @@
       await loadToastOriginalSelectorForSelected();
   });
 
+  function setSidebarCollapsed(collapsed) {
+    state.sidebarCollapsed = !!collapsed;
+    document.getElementById("appShell").classList.toggle("sidebar-collapsed", state.sidebarCollapsed);
+    renderMainTabs((TAB_META[state.tab] || TAB_META.dashboard).main);
+  }
+
   document.getElementById("mainTabs").addEventListener("click", (event) => {
+    const toggle = event.target.closest("#sidebarToggle");
+    if (toggle) {
+      setSidebarCollapsed(!state.sidebarCollapsed);
+      return;
+    }
     const btn = event.target.closest("[data-main]");
     if (!btn) return;
     const mainKey = btn.dataset.main;
