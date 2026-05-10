@@ -52,12 +52,6 @@
         gap: 14px;
         backdrop-filter: blur(10px);
       }
-      .brand {
-        font-weight: 800;
-        font-size: 18px;
-        letter-spacing: 0.2px;
-        color: #0f172a;
-      }
       .center {
         flex: 1;
         display: flex;
@@ -138,7 +132,7 @@
       .appShell {
         margin-top: 14px;
         display: grid;
-        grid-template-columns: 250px minmax(0, 1fr);
+        grid-template-columns: 228px minmax(0, 1fr);
         gap: 18px;
       }
       .appShell.sidebar-collapsed {
@@ -147,11 +141,11 @@
       .leftNav {
         border: 1px solid var(--nav-border);
         background: var(--nav-bg);
-        border-radius: 14px;
-        box-shadow: 0 8px 20px rgba(2, 6, 23, 0.22);
-        padding: 12px 10px;
+        border-radius: 12px;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 10px 24px rgba(2, 6, 23, 0.24);
+        padding: 10px 8px 12px;
         display: grid;
-        gap: 6px;
+        gap: 2px;
         align-content: start;
         position: sticky;
         top: 90px;
@@ -159,12 +153,33 @@
       }
       .sidebarHeader {
         display: flex;
-        justify-content: flex-end;
-        margin-bottom: 6px;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 8px;
+        margin: 2px 4px 10px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+      }
+      .sidebarBrand {
+        color: #e2e8f0;
+      }
+      .sidebarBrandTop {
+        font-size: 15px;
+        font-weight: 800;
+        letter-spacing: 0.2px;
+        line-height: 1.15;
+      }
+      .sidebarBrandSub {
+        margin-top: 2px;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.9px;
+        color: #a5b4fc;
+        text-transform: uppercase;
       }
       .sidebarToggle {
-        width: 28px;
-        height: 28px;
+        width: 30px;
+        height: 30px;
         border-radius: 8px;
         border: 1px solid rgba(148, 163, 184, 0.4);
         background: rgba(30, 41, 59, 0.9);
@@ -187,11 +202,12 @@
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
         gap: 12px;
-        margin-top: 2px;
-        padding: 10px;
-        border: 1px solid rgba(79, 70, 229, 0.2);
-        background: linear-gradient(180deg, rgba(238, 242, 255, 0.78) 0%, rgba(248, 250, 255, 0.84) 100%);
+        margin-top: 4px;
+        padding: 12px;
+        border: 1px solid rgba(79, 70, 229, 0.26);
+        background: linear-gradient(180deg, rgba(232, 240, 255, 0.92) 0%, rgba(242, 247, 255, 0.94) 100%);
         border-radius: 14px;
+        box-shadow: 0 6px 14px rgba(79, 70, 229, 0.08);
       }
       .tabs.submenu.hidden {
         display: none;
@@ -199,12 +215,15 @@
       .tab {
         border: 1px solid var(--border);
         background: #ffffff;
-        padding: 11px 14px;
+        padding: 10px 12px;
         border-radius: 12px;
         cursor: pointer;
         font-size: 13px;
         color: var(--muted);
         transition: box-shadow 0.16s ease, border-color 0.16s ease, transform 0.16s ease, background-color 0.16s ease;
+      }
+      .tabs.submenu .tab {
+        min-height: 80px;
       }
       .tab:hover {
         border-color: rgba(79, 70, 229, 0.35);
@@ -221,27 +240,28 @@
         width: 100%;
         color: rgba(226, 232, 240, 0.92);
         background: transparent;
-        border-color: rgba(148, 163, 184, 0.08);
+        border: none;
+        border-left: 2px solid transparent;
         font-weight: 600;
-        border-radius: 10px;
-        padding: 10px 10px;
+        border-radius: 8px;
+        padding: 10px 10px 10px 12px;
         display: flex;
         align-items: center;
         gap: 10px;
-        min-height: 38px;
+        min-height: 40px;
         box-shadow: none;
       }
       .leftNav .tab:hover {
-        border-color: rgba(129, 140, 248, 0.5);
-        background: rgba(99, 102, 241, 0.16);
+        border-left-color: rgba(129, 140, 248, 0.62);
+        background: rgba(99, 102, 241, 0.14);
         box-shadow: none;
         transform: none;
       }
       .leftNav .tab.active {
         color: #ffffff;
-        background: rgba(79, 70, 229, 0.32);
-        border-color: rgba(129, 140, 248, 0.68);
-        box-shadow: inset 3px 0 0 #a5b4fc;
+        background: rgba(79, 70, 229, 0.28);
+        border-left-color: #a5b4fc;
+        box-shadow: inset 0 0 0 1px rgba(129, 140, 248, 0.38);
       }
       .navIcon {
         width: 22px;
@@ -255,19 +275,25 @@
       }
       .appShell.sidebar-collapsed .leftNav .tab {
         justify-content: center;
+        padding-left: 8px;
+        padding-right: 8px;
       }
       .appShell.sidebar-collapsed .navLabel {
         display: none;
       }
-      .appShell.sidebar-collapsed .leftNav {
-        padding: 12px 8px;
+      .appShell.sidebar-collapsed .sidebarBrand {
+        display: none;
       }
-      .appShell.sidebar-collapsed .sidebarToggle {
-        margin: 0 auto;
+      .appShell.sidebar-collapsed .leftNav {
+        padding: 10px 6px 12px;
+      }
+      .appShell.sidebar-collapsed .sidebarHeader {
+        justify-content: center;
+        padding-bottom: 8px;
       }
       .mainPanel {
         display: grid;
-        gap: 16px;
+        gap: 20px;
       }
       .subTabTitle {
         display: block;
@@ -277,7 +303,7 @@
       }
       .subTabHint {
         display: block;
-        margin-top: 4px;
+        margin-top: 3px;
         font-size: 12px;
         color: #6b7280;
       }
@@ -289,7 +315,7 @@
         overflow: hidden;
       }
       .mainPanel .page {
-        margin-top: 4px;
+        margin-top: 8px;
       }
       .pagetitle {
         padding: 16px 18px;
@@ -761,8 +787,6 @@
   <body>
     <div class="wrap">
       <div class="topbar">
-        <div class="brand">RDMS Payroll Validation</div>
-
     <div class="center">
       <div class="locationPicker">
         <div class="locationLabel">Pick Location:</div>
@@ -783,6 +807,10 @@
   <div class="appShell" id="appShell">
     <div class="leftNav tabs" id="mainTabs">
       <div class="sidebarHeader">
+        <div class="sidebarBrand">
+          <div class="sidebarBrandTop">RDMS Payroll</div>
+          <div class="sidebarBrandSub">Validation Console</div>
+        </div>
         <button class="sidebarToggle" id="sidebarToggle" type="button" aria-label="Collapse sidebar" title="Collapse sidebar">⟨</button>
       </div>
     </div>
@@ -997,7 +1025,7 @@
 
   function renderMainTabs(activeMain) {
     const mainTabsEl = document.getElementById("mainTabs");
-    const headerHtml = `<div class="sidebarHeader"><button class="sidebarToggle" id="sidebarToggle" type="button" aria-label="${state.sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}" title="${state.sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}">${state.sidebarCollapsed ? "⟩" : "⟨"}</button></div>`;
+    const headerHtml = `<div class="sidebarHeader"><div class="sidebarBrand"><div class="sidebarBrandTop">RDMS Payroll</div><div class="sidebarBrandSub">Validation Console</div></div><button class="sidebarToggle" id="sidebarToggle" type="button" aria-label="${state.sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}" title="${state.sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}">${state.sidebarCollapsed ? "⟩" : "⟨"}</button></div>`;
     const tabsHtml = NAV_CONFIG.map((item) => {
       const active = item.key === activeMain ? " active" : "";
       return `<div class="tab${active}" data-main="${escapeAttr(item.key)}" title="${escapeAttr(item.label)}"><span class="navIcon">${escapeHtml(item.icon || "•")}</span><span class="navLabel">${escapeHtml(item.label)}</span></div>`;
