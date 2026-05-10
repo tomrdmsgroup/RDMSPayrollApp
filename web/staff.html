@@ -190,14 +190,16 @@
         display: flex;
         flex-wrap: nowrap;
         align-items: stretch;
-        gap: 8px;
+        gap: 6px;
         margin-top: 2px;
-        padding: 6px 8px;
-        border: 1px solid rgba(79, 70, 229, 0.26);
-        background: linear-gradient(180deg, rgba(232, 240, 255, 0.92) 0%, rgba(242, 247, 255, 0.94) 100%);
-        border-radius: 14px;
-        box-shadow: 0 4px 12px rgba(79, 70, 229, 0.08);
+        padding: 4px;
+        border: 1px solid rgba(79, 70, 229, 0.2);
+        background: linear-gradient(180deg, rgba(238, 244, 255, 0.9) 0%, rgba(246, 249, 255, 0.92) 100%);
+        border-radius: 12px;
+        box-shadow: 0 2px 8px rgba(79, 70, 229, 0.06);
         overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: thin;
       }
       .tabs.submenu.hidden {
         display: none;
@@ -213,9 +215,15 @@
         transition: box-shadow 0.16s ease, border-color 0.16s ease, transform 0.16s ease, background-color 0.16s ease;
       }
       .tabs.submenu .tab {
-        min-height: 0;
-        flex: 0 0 188px;
-        padding: 6px 10px;
+        min-height: 72px;
+        flex: 1 1 210px;
+        max-width: 248px;
+        padding: 8px 10px;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-start;
+        gap: 4px;
+        overflow: hidden;
       }
       .tab:hover {
         border-color: rgba(79, 70, 229, 0.35);
@@ -286,18 +294,22 @@
       }
       .subTabTitle {
         display: block;
-        font-size: 13px;
+        font-size: 12px;
+        line-height: 1.3;
         font-weight: 700;
         color: #111827;
+        white-space: normal;
+        word-break: break-word;
       }
       .subTabHint {
         display: block;
-        margin-top: 1px;
-        font-size: 11px;
+        margin-top: 0;
+        font-size: 10.5px;
+        line-height: 1.3;
         color: #6b7280;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        word-break: break-word;
       }
       .page {
         border: 1px solid var(--border);
