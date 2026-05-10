@@ -10,7 +10,17 @@ const {
 } = require('../providers/toastProvider');
 const { rulesCatalog } = require('./rulesCatalog');
 
-const SUPPORTED_RULE_IDS = new Set(['NEWEMP', 'NEWRATE', 'NEWDEPT', 'MISSINGID', 'OTTHRESHOLD', 'MINWAGE']);
+const SUPPORTED_RULE_IDS = new Set([
+  'NEWEMP',
+  'NEWRATE',
+  'NEWDEPT',
+  'MISSINGID',
+  'OTTHRESHOLD',
+  'MINWAGE',
+  'LATECLOCKOUT',
+  'LONGSHIFT',
+  'DUPTIME',
+]);
 
 function trimErrorText(value, maxLen = 1800) {
   const s = String(value || '');
@@ -223,6 +233,22 @@ function formatRate(rate) {
   return Number(rate).toFixed(2);
 }
 
+function parseValidDate(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function formatClockTime(date) {
+  return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+}
+
+function formatDateYmd(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
 
 function parseRuleParams(raw) {
   if (raw === null || raw === undefined) return null;
@@ -545,6 +571,90 @@ function buildFindings({ rowsByPeriod, selectedPeriod, priorPeriods, excludedAud
           rule_name: rule?.rule_name || 'Under Minimum Wage',
           detail: `Rate ${rateText} for ${deptName} is below minimum wage ${minimumWage}`,
         });
+      }
+    }
+  }
+
+  if (activeRuleIds.has('LATECLOCKOUT')) {
+    const rule = catalogByRule.get('LATECLOCKOUT');
+    for (const row of selectedRows) {
+      const employeeId = normalizeEmployeeId(row);
+      if (!employeeId || excludedAuditIds.has(employeeId)) continue;
+      const inDate = parseValidDate(row?.inDate);
+      const outDate = parseValidDate(row?.outDate);
+      if (!outDate) continue;
+      const outMinutes = outDate.getHours() * 60 + outDate.getMinutes();
+      if (outMinutes <= 210) continue;
+      findings.push({
+        employee_name: employeeNames.get(employeeId) || normalizeEmployeeName(row) || `Employee ${employeeId}`,
+        toast_employee_id: employeeId,
+        rule_id: 'LATECLOCKOUT',
+        rule_name: rule?.rule_name || 'Clockout after 3:30 AM',
+        detail: `Clockout after 3:30 AM on ${formatDateYmd(outDate)}: in ${
+          inDate ? formatClockTime(inDate) : 'Unknown'
+        }, out ${formatClockTime(outDate)}`,
+      });
+    }
+  }
+
+  if (activeRuleIds.has('LONGSHIFT')) {
+    const rule = catalogByRule.get('LONGSHIFT');
+    const threshold = extractNumericRuleThreshold(rule, ['threshold', 'hours', 'value', 'maxHours', 'shiftHours']);
+    if (threshold !== null) {
+      for (const row of selectedRows) {
+        const employeeId = normalizeEmployeeId(row);
+        if (!employeeId || excludedAuditIds.has(employeeId)) continue;
+        const inDate = parseValidDate(row?.inDate);
+        const outDate = parseValidDate(row?.outDate);
+        if (!inDate || !outDate) continue;
+        const durationHours = (outDate.getTime() - inDate.getTime()) / 3600000;
+        if (!Number.isFinite(durationHours) || durationHours <= threshold) continue;
+        const rounded = Number(durationHours.toFixed(2));
+        findings.push({
+          employee_name: employeeNames.get(employeeId) || normalizeEmployeeName(row) || `Employee ${employeeId}`,
+          toast_employee_id: employeeId,
+          rule_id: 'LONGSHIFT',
+          rule_name: rule?.rule_name || 'Shift over X hours',
+          detail: `Shift length ${rounded} hours exceeds threshold ${threshold} on ${formatDateYmd(
+            inDate
+          )}: in ${formatClockTime(inDate)}, out ${formatClockTime(outDate)}`,
+        });
+      }
+    }
+  }
+
+  if (activeRuleIds.has('DUPTIME')) {
+    const rule = catalogByRule.get('DUPTIME');
+    const rowsByEmployee = new Map();
+    for (const row of selectedRows) {
+      const employeeId = normalizeEmployeeId(row);
+      if (!employeeId || excludedAuditIds.has(employeeId)) continue;
+      const inDate = parseValidDate(row?.inDate);
+      const outDate = parseValidDate(row?.outDate);
+      if (!inDate || !outDate) continue;
+      const range = { inDate, outDate };
+      if (!rowsByEmployee.has(employeeId)) rowsByEmployee.set(employeeId, []);
+      rowsByEmployee.get(employeeId).push(range);
+    }
+
+    for (const [employeeId, ranges] of rowsByEmployee.entries()) {
+      ranges.sort((a, b) => a.inDate.getTime() - b.inDate.getTime());
+      for (let i = 0; i < ranges.length; i += 1) {
+        for (let j = i + 1; j < ranges.length; j += 1) {
+          const a = ranges[i];
+          const b = ranges[j];
+          const overlaps = a.inDate < b.outDate && b.inDate < a.outDate;
+          if (!overlaps) continue;
+          findings.push({
+            employee_name: employeeNames.get(employeeId) || `Employee ${employeeId}`,
+            toast_employee_id: employeeId,
+            rule_id: 'DUPTIME',
+            rule_name: rule?.rule_name || 'Overlapping or duplicate time entries',
+            detail: `Overlapping time entries on ${formatDateYmd(a.inDate)}: ${formatClockTime(
+              a.inDate
+            )}-${formatClockTime(a.outDate)} overlaps ${formatClockTime(b.inDate)}-${formatClockTime(b.outDate)}`,
+          });
+        }
       }
     }
   }

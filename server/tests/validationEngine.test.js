@@ -375,6 +375,87 @@ async function testRunValidationMinWageUsesActiveRuleConfigParams() {
   assert.equal(result.findings[0].toast_employee_id, 'W1');
 }
 
+async function testRunValidationLateClockoutRule() {
+  const result = await runValidation({
+    run: { id: 111, client_location_id: 'Test Location', period_start: '2026-03-01', period_end: '2026-03-14' },
+    context: {
+      active_rule_ids: ['LATECLOCKOUT'],
+      comparison_periods: [],
+      toast_rows_by_period: {
+        '2026-03-01__2026-03-14': [
+          { employeeGuid: 'L1', employeeName: 'Late One', inDate: '2026-03-03T20:00:00', outDate: '2026-03-04T03:31:00' },
+          { employeeGuid: 'L2', employeeName: 'Edge Two', inDate: '2026-03-03T20:00:00', outDate: '2026-03-04T03:30:00' },
+          { employeeGuid: 'L3', employeeName: 'Early Three', inDate: '2026-03-03T20:00:00', outDate: '2026-03-04T03:29:00' },
+          { employeeGuid: 'LX', employeeName: 'Excluded Late', inDate: '2026-03-03T20:00:00', outDate: '2026-03-04T04:00:00' },
+        ],
+      },
+    },
+    exclusions: [{ toast_employee_id: 'LX', active: true, effective_from: '2026-01-01', effective_to: '2026-12-31' }],
+  });
+
+  assert.equal(result.findings.length, 1);
+  assert.equal(result.findings[0].rule_id, 'LATECLOCKOUT');
+  assert.equal(result.findings[0].toast_employee_id, 'L1');
+}
+
+async function testRunValidationLongShiftRuleAndConfigBehavior() {
+  const baseContext = {
+    active_rule_ids: ['LONGSHIFT'],
+    comparison_periods: [],
+    toast_rows_by_period: {
+      '2026-03-01__2026-03-14': [
+        { employeeGuid: 'S1', employeeName: 'Shift One', inDate: '2026-03-03T09:00:00', outDate: '2026-03-03T17:30:00' },
+        { employeeGuid: 'S2', employeeName: 'Shift Two', inDate: '2026-03-03T09:00:00', outDate: '2026-03-03T17:00:00' },
+        { employeeGuid: 'SX', employeeName: 'Excluded Shift', inDate: '2026-03-03T09:00:00', outDate: '2026-03-03T20:00:00' },
+      ],
+    },
+  };
+
+  const withActiveConfig = await runValidation({
+    run: { id: 112, client_location_id: 'Test Location', period_start: '2026-03-01', period_end: '2026-03-14' },
+    context: { ...baseContext, active_rule_configs: { LONGSHIFT: { params: JSON.stringify({ maxHours: 8 }) } } },
+    exclusions: [{ toast_employee_id: 'SX', active: true, effective_from: '2026-01-01', effective_to: '2026-12-31' }],
+    ruleCatalog: [{ rule_id: 'LONGSHIFT', params: { threshold: 12 } }],
+  });
+  assert.equal(withActiveConfig.findings.length, 1);
+  assert.equal(withActiveConfig.findings[0].toast_employee_id, 'S1');
+
+  const invalidConfig = await runValidation({
+    run: { id: 113, client_location_id: 'Test Location', period_start: '2026-03-01', period_end: '2026-03-14' },
+    context: baseContext,
+    exclusions: [],
+    ruleCatalog: [{ rule_id: 'LONGSHIFT', params: '{"foo":"bar"}' }],
+  });
+  assert.equal(invalidConfig.findings.length, 0);
+}
+
+async function testRunValidationDupTimeRule() {
+  const result = await runValidation({
+    run: { id: 114, client_location_id: 'Test Location', period_start: '2026-03-01', period_end: '2026-03-14' },
+    context: {
+      active_rule_ids: ['DUPTIME'],
+      comparison_periods: [],
+      toast_rows_by_period: {
+        '2026-03-01__2026-03-14': [
+          { employeeGuid: 'D1', employeeName: 'Dup One', inDate: '2026-03-05T09:00:00', outDate: '2026-03-05T12:00:00' },
+          { employeeGuid: 'D1', employeeName: 'Dup One', inDate: '2026-03-05T11:00:00', outDate: '2026-03-05T14:00:00' },
+          { employeeGuid: 'D1', employeeName: 'Dup One', inDate: '2026-03-06T10:00:00', outDate: '2026-03-06T12:00:00' },
+          { employeeGuid: 'D1', employeeName: 'Dup One', inDate: '2026-03-06T10:00:00', outDate: '2026-03-06T12:00:00' },
+          { employeeGuid: 'D1', employeeName: 'Dup One', inDate: '2026-03-07T09:00:00', outDate: '2026-03-07T10:00:00' },
+          { employeeGuid: 'D1', employeeName: 'Dup One', inDate: '2026-03-07T10:00:00', outDate: '2026-03-07T11:00:00' },
+          { employeeGuid: 'D2', employeeName: 'Other Two', inDate: '2026-03-05T09:30:00', outDate: '2026-03-05T10:30:00' },
+          { employeeGuid: 'DX', employeeName: 'Excluded Dup', inDate: '2026-03-05T09:00:00', outDate: '2026-03-05T12:00:00' },
+          { employeeGuid: 'DX', employeeName: 'Excluded Dup', inDate: '2026-03-05T10:00:00', outDate: '2026-03-05T11:00:00' },
+        ],
+      },
+    },
+    exclusions: [{ toast_employee_id: 'DX', active: true, effective_from: '2026-01-01', effective_to: '2026-12-31' }],
+  });
+
+  assert.equal(result.findings.length, 2);
+  assert.equal(result.findings.every((f) => f.toast_employee_id === 'D1'), true);
+}
+
 module.exports = {
   testRunValidationFindsNewEmpRateDept,
   testRunValidationHonorsExclusionsAndActiveRules,
@@ -390,4 +471,7 @@ module.exports = {
   testRunValidationMinWageInvalidConfigSkips,
   testRunValidationOtThresholdUsesActiveRuleConfigParams,
   testRunValidationMinWageUsesActiveRuleConfigParams,
+  testRunValidationLateClockoutRule,
+  testRunValidationLongShiftRuleAndConfigBehavior,
+  testRunValidationDupTimeRule,
 };
