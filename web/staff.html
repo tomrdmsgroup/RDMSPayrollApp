@@ -189,7 +189,7 @@
       .tabs.submenu {
         display: flex;
         flex-wrap: nowrap;
-        align-items: stretch;
+        align-items: flex-start;
         gap: 6px;
         margin-top: 2px;
         padding: 4px;
@@ -216,8 +216,9 @@
       }
       .tabs.submenu .tab {
         min-height: 72px;
-        flex: 1 1 210px;
+        flex: 0 0 clamp(190px, 22vw, 248px);
         max-width: 248px;
+        align-self: flex-start;
         padding: 8px 10px;
         display: flex;
         flex-direction: column;
