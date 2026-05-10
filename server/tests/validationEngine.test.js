@@ -326,6 +326,55 @@ async function testRunValidationMinWageInvalidConfigSkips() {
   assert.equal(result.findings.length, 0);
 }
 
+
+async function testRunValidationOtThresholdUsesActiveRuleConfigParams() {
+  const result = await runValidation({
+    run: { id: 109, client_location_id: 'Test Location', period_start: '2026-03-01', period_end: '2026-03-14' },
+    context: {
+      active_rule_ids: ['OTTHRESHOLD'],
+      active_rule_configs: {
+        OTTHRESHOLD: { params: { threshold: 4 } },
+      },
+      comparison_periods: [],
+      toast_rows_by_period: {
+        '2026-03-01__2026-03-14': [
+          { employeeGuid: 'O1', employeeName: 'Over One', overtimeHours: 4.5 },
+        ],
+      },
+    },
+    exclusions: [],
+    ruleCatalog: [{ rule_id: 'OTTHRESHOLD', rule_name: 'OT over X Hours', params: { threshold: 40 } }],
+  });
+
+  assert.equal(result.findings.length, 1);
+  assert.equal(result.findings[0].rule_id, 'OTTHRESHOLD');
+  assert.equal(result.findings[0].toast_employee_id, 'O1');
+}
+
+async function testRunValidationMinWageUsesActiveRuleConfigParams() {
+  const result = await runValidation({
+    run: { id: 110, client_location_id: 'Test Location', period_start: '2026-03-01', period_end: '2026-03-14' },
+    context: {
+      active_rule_ids: ['MINWAGE'],
+      active_rule_configs: {
+        MINWAGE: { params: JSON.stringify({ minimumWage: 15 }) },
+      },
+      comparison_periods: [],
+      toast_rows_by_period: {
+        '2026-03-01__2026-03-14': [
+          { employeeGuid: 'W1', employeeName: 'Wage One', payRate: 14 },
+        ],
+      },
+    },
+    exclusions: [],
+    ruleCatalog: [{ rule_id: 'MINWAGE', rule_name: 'Under Minimum Wage', params: { minimumWage: 7.25 } }],
+  });
+
+  assert.equal(result.findings.length, 1);
+  assert.equal(result.findings[0].rule_id, 'MINWAGE');
+  assert.equal(result.findings[0].toast_employee_id, 'W1');
+}
+
 module.exports = {
   testRunValidationFindsNewEmpRateDept,
   testRunValidationHonorsExclusionsAndActiveRules,
@@ -339,4 +388,6 @@ module.exports = {
   testRunValidationOtThresholdInvalidConfigSkips,
   testRunValidationMinWageRule,
   testRunValidationMinWageInvalidConfigSkips,
+  testRunValidationOtThresholdUsesActiveRuleConfigParams,
+  testRunValidationMinWageUsesActiveRuleConfigParams,
 };

@@ -64,6 +64,19 @@ function getRuleCatalog() {
   return rulesCatalog;
 }
 
+
+function mergeCatalogWithActiveRuleConfigs(ruleCatalog, activeRuleConfigs) {
+  const catalog = Array.isArray(ruleCatalog) ? ruleCatalog : [];
+  const activeConfigsByRuleId = activeRuleConfigs && typeof activeRuleConfigs === 'object' ? activeRuleConfigs : null;
+  if (!activeConfigsByRuleId) return catalog;
+
+  return catalog.map((rule) => {
+    const config = activeConfigsByRuleId[rule?.rule_id];
+    if (!config || config.params === undefined) return rule;
+    return { ...rule, params: config.params };
+  });
+}
+
 function toNum(v) {
   if (v === null || v === undefined || v === '') return null;
   const n = Number(v);
@@ -568,7 +581,8 @@ async function runValidation({
   const priorPeriods = Array.isArray(context?.comparison_periods) ? context.comparison_periods.slice(0, 6) : [];
   const periodsToLoad = [selectedPeriod, ...priorPeriods];
 
-  const activeRuleIds = resolveActiveSupportedRules(context?.active_rule_ids, ruleCatalog);
+  const effectiveRuleCatalog = mergeCatalogWithActiveRuleConfigs(ruleCatalog, context?.active_rule_configs);
+  const activeRuleIds = resolveActiveSupportedRules(context?.active_rule_ids, effectiveRuleCatalog);
 
   const toast = context?.toast_rows_by_period
     ? { rowsByPeriod: context.toast_rows_by_period, sourceMeta: context?.toast_source_meta || [] }
@@ -583,7 +597,7 @@ async function runValidation({
     priorPeriods,
     excludedAuditIds: exclusionDecisions.audit,
     activeRuleIds,
-    catalog: ruleCatalog,
+    catalog: effectiveRuleCatalog,
   });
 
   return {
