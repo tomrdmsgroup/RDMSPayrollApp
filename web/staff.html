@@ -18,6 +18,10 @@
         --bad: rgba(231, 76, 60, 0.18);
         --focus-ring: rgba(75, 85, 99, 0.45);
         --shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
+        --nav-bg: #111827;
+        --nav-border: rgba(148, 163, 184, 0.18);
+        --accent: #4f46e5;
+        --accent-soft: rgba(79, 70, 229, 0.1);
       }
       * {
         box-sizing: border-box;
@@ -84,23 +88,30 @@
         font-size: 13px;
       }
       .btn {
-        padding: 10px 12px;
-        border-radius: 10px;
+        min-height: 38px;
+        padding: 9px 14px;
+        border-radius: 11px;
         border: 1px solid var(--border);
         background: #ffffff;
         color: var(--text);
         cursor: pointer;
+        font-weight: 600;
+        transition: box-shadow 0.16s ease, border-color 0.16s ease, background-color 0.16s ease, transform 0.16s ease;
       }
       .btn:hover {
-        background: #f3f4f6;
+        background: #f8fafc;
+        border-color: rgba(79, 70, 229, 0.28);
+        box-shadow: 0 3px 10px rgba(15, 23, 42, 0.08);
+        transform: translateY(-1px);
       }
       .btn.primary {
-        background: #111111;
-        border-color: #111111;
+        background: #1f2937;
+        border-color: #1f2937;
         color: #ffffff;
       }
       .btn.primary:hover {
-        background: #1f2937;
+        background: #111827;
+        border-color: #111827;
       }
       .btn.danger {
         background: #dc2626;
@@ -109,35 +120,94 @@
       }
       .btn.danger:hover {
         background: #b91c1c;
+        border-color: #b91c1c;
+      }
+      .appShell {
+        margin-top: 14px;
+        display: grid;
+        grid-template-columns: 250px minmax(0, 1fr);
+        gap: 14px;
+      }
+      .leftNav {
+        border: 1px solid var(--nav-border);
+        background: var(--nav-bg);
+        border-radius: 16px;
+        box-shadow: var(--shadow);
+        padding: 10px;
+        display: grid;
+        gap: 8px;
+        align-content: start;
+        position: sticky;
+        top: 90px;
+        height: fit-content;
       }
       .tabs {
-        margin-top: 14px;
         display: flex;
         gap: 8px;
         flex-wrap: wrap;
       }
       .tabs.submenu {
-        margin-top: 8px;
+        margin-top: 0;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 10px;
       }
       .tabs.submenu.hidden {
         display: none;
       }
       .tab {
         border: 1px solid var(--border);
-        background: #f9fafb;
-        padding: 10px 12px;
+        background: #ffffff;
+        padding: 11px 14px;
         border-radius: 12px;
         cursor: pointer;
         font-size: 13px;
         color: var(--muted);
+        transition: box-shadow 0.16s ease, border-color 0.16s ease, transform 0.16s ease, background-color 0.16s ease;
+      }
+      .tab:hover {
+        border-color: rgba(79, 70, 229, 0.35);
+        box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+        transform: translateY(-1px);
       }
       .tab.active {
-        background: #111111;
-        border-color: #111111;
+        border-color: var(--accent);
+        background: var(--accent-soft);
+        box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.28), 0 8px 16px rgba(79, 70, 229, 0.12);
+        color: #1e1b4b;
+      }
+      .leftNav .tab {
+        width: 100%;
+        color: rgba(226, 232, 240, 0.92);
+        background: transparent;
+        border-color: transparent;
+        font-weight: 600;
+      }
+      .leftNav .tab:hover {
+        border-color: rgba(129, 140, 248, 0.5);
+        background: rgba(99, 102, 241, 0.16);
+        box-shadow: none;
+        transform: none;
+      }
+      .leftNav .tab.active {
         color: #ffffff;
+        background: rgba(99, 102, 241, 0.28);
+        border-color: rgba(129, 140, 248, 0.75);
+        box-shadow: inset 3px 0 0 #a5b4fc;
+      }
+      .subTabTitle {
+        display: block;
+        font-size: 14px;
+        font-weight: 700;
+        color: #111827;
+      }
+      .subTabHint {
+        display: block;
+        margin-top: 4px;
+        font-size: 12px;
+        color: #6b7280;
       }
       .page {
-        margin-top: 14px;
         border: 1px solid var(--border);
         border-radius: 16px;
         background: var(--card);
@@ -256,6 +326,22 @@
       .saveBtnCompact {
         padding: 8px 10px;
         min-width: 68px;
+        min-height: 32px;
+      }
+      @media (max-width: 1100px) {
+        .appShell {
+          grid-template-columns: 1fr;
+        }
+        .leftNav {
+          position: static;
+          display: flex;
+          overflow-x: auto;
+          white-space: nowrap;
+        }
+        .leftNav .tab {
+          width: auto;
+          min-width: 190px;
+        }
       }
       .late {
         margin-top: 12px;
@@ -600,7 +686,6 @@
       <div class="topbar">
         <div class="brand">RDMS Payroll Validation</div>
 
-```
     <div class="center">
       <div class="location">
         <select id="locationSelect">
@@ -615,10 +700,12 @@
     </div>
   </div>
 
-  <div class="tabs" id="mainTabs"></div>
-  <div class="tabs submenu" id="subTabs"></div>
+  <div class="appShell">
+    <div class="leftNav tabs" id="mainTabs"></div>
+    <div class="mainPanel">
+      <div class="tabs submenu" id="subTabs"></div>
 
-  <div class="page" id="page">
+      <div class="page" id="page">
     <div class="pagetitle">
       <div>
         <h1 id="pageTitle">Payroll Dashboard</h1>
@@ -628,6 +715,10 @@
 
     <div class="content" id="content">
       <div class="loading">Select a location to load data.</div>
+    </div>
+  </div>
+
+      </div>
     </div>
   </div>
 
@@ -843,7 +934,7 @@
       .map((tabKey) => {
         const active = tabKey === activeTab ? " active" : "";
         const meta = TAB_META[tabKey];
-        return `<div class="tab${active}" data-tab="${escapeAttr(tabKey)}">${escapeHtml(meta.label)}</div>`;
+        return `<div class="tab${active}" data-tab="${escapeAttr(tabKey)}"><span class="subTabTitle">${escapeHtml(meta.label)}</span><span class="subTabHint">${escapeHtml(meta.subtitle || "")}</span></div>`;
       })
       .join("");
   }
@@ -4773,7 +4864,6 @@
     setActiveTab("dashboard");
   })();
 </script>
-```
 
   </body>
 </html>
