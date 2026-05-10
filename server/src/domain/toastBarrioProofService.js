@@ -13,6 +13,7 @@ const TOAST_AIRTABLE_FIELDS = {
   locationId: 'Toast Location ID',
   managementGroupGuid: 'Toast Management Group GUID',
   analyticsScope: 'Toast Analytics Scope',
+  standardClientId: 'Toast API Client ID - STANDARD',
 };
 
 function safeStr(v) {
@@ -65,22 +66,33 @@ function getAirtableApiConfig() {
   };
 }
 
-function getBarrioToastSecrets() {
-  const standardClientId = safeStr(process.env.TOAST_STD_CLIENT_ID_BARRIO);
-  const standardClientSecret = safeStr(process.env.TOAST_STD_CLIENT_SECRET_BARRIO);
-  const analyticsClientId = safeStr(process.env.TOAST_AN_CLIENT_ID_BARRIO);
-  const analyticsClientSecret = safeStr(process.env.TOAST_AN_CLIENT_SECRET_BARRIO);
+function toLocationSlug(value) {
+  return safeStr(value)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function resolveStandardToastSecrets({ fields, locationName }) {
+  const standardClientId = safeStr(fields?.[TOAST_AIRTABLE_FIELDS.standardClientId]);
+  const slugSource = safeStr(fields?.[TOAST_AIRTABLE_FIELDS.displayName]) || safeStr(fields?.[TOAST_AIRTABLE_FIELDS.clientName]) || safeStr(locationName);
+  const locationSlug = toLocationSlug(slugSource);
+  const standardClientSecretFromSlug = locationSlug ? safeStr(process.env[`TOAST_STD_CLIENT_SECRET_${locationSlug}`]) : '';
+  const standardClientSecretBarrioFallback = safeStr(process.env.TOAST_STD_CLIENT_SECRET_BARRIO);
+  const shouldUseBarrioFallback = !standardClientSecretFromSlug && /^BARRIO($|_)/.test(locationSlug);
+  const standardClientSecret = standardClientSecretFromSlug || (shouldUseBarrioFallback ? standardClientSecretBarrioFallback : '');
 
   return {
     standardClientId,
     standardClientSecret,
-    analyticsClientId,
-    analyticsClientSecret,
+    locationSlug: locationSlug || null,
+    usedBarrioFallback: shouldUseBarrioFallback && !!standardClientSecretBarrioFallback,
     summary: {
-      hasToastStdClientIdBarrio: !!standardClientId,
-      hasToastStdClientSecretBarrio: !!standardClientSecret,
-      hasToastAnClientIdBarrio: !!analyticsClientId,
-      hasToastAnClientSecretBarrio: !!analyticsClientSecret,
+      hasToastStdClientIdFromAirtable: !!standardClientId,
+      locationSlug: locationSlug || null,
+      hasToastStdClientSecretForSlug: !!standardClientSecretFromSlug,
+      usedBarrioSecretFallback: shouldUseBarrioFallback && !!standardClientSecretBarrioFallback,
+      hasToastStdClientSecretResolved: !!standardClientSecret,
     },
   };
 }
@@ -96,6 +108,7 @@ function buildNonSecretToastConfig(fields) {
   const locationId = safeStr(fields[TOAST_AIRTABLE_FIELDS.locationId]) || null;
   const managementGroupGuid = safeStr(fields[TOAST_AIRTABLE_FIELDS.managementGroupGuid]) || null;
   const analyticsScope = safeStr(fields[TOAST_AIRTABLE_FIELDS.analyticsScope]) || null;
+  const standardClientId = safeStr(fields[TOAST_AIRTABLE_FIELDS.standardClientId]) || null;
 
   return {
     clientName,
@@ -108,6 +121,7 @@ function buildNonSecretToastConfig(fields) {
     locationId,
     managementGroupGuid,
     analyticsScope,
+    standardClientId,
   };
 }
 
@@ -234,9 +248,11 @@ async function fetchToastEmployees({ hostname, token, restaurantGuid }) {
 
   const urls = [new URL('/labor/v1/employees', baseUrl), new URL('/hr/v1/employees', baseUrl)];
 
+  const attempts = [];
   for (const url of urls) {
     const response = await fetch(url.toString(), { method: 'GET', headers });
     const body = await safeJson(response);
+    attempts.push({ endpoint: url.pathname, status: response.status });
     if (!response.ok) continue;
 
     const rows = Array.isArray(body)
@@ -258,6 +274,7 @@ async function fetchToastEmployees({ hostname, token, restaurantGuid }) {
   return {
     ok: false,
     error: 'toast_employees_failed',
+    attempts,
   };
 }
 
@@ -304,7 +321,7 @@ async function searchToastEmployeesForLocation(locationName, query, limit = 10) 
   }
 
   const nonSecretConfig = buildNonSecretToastConfig(apiConfig.fields);
-  const secrets = getBarrioToastSecrets();
+  const secrets = resolveStandardToastSecrets({ fields: apiConfig.fields, locationName: cleanedLocationName });
   if (
     !nonSecretConfig.hostname ||
     !nonSecretConfig.oauthUrl ||
@@ -324,14 +341,14 @@ async function searchToastEmployeesForLocation(locationName, query, limit = 10) 
     clientId: secrets.standardClientId,
     clientSecret: secrets.standardClientSecret,
   });
-  if (!auth.ok) return { ok: false, error: auth.error || 'toast_auth_failed' };
+  if (!auth.ok) return { ok: false, error: auth.error || 'toast_auth_failed', authStatus: auth.status || null };
 
   const employees = await fetchToastEmployees({
     hostname: nonSecretConfig.hostname,
     token: auth.token,
     restaurantGuid: nonSecretConfig.restaurantGuid || nonSecretConfig.restaurantExternalId,
   });
-  if (!employees.ok) return { ok: false, error: employees.error || 'toast_employees_failed' };
+  if (!employees.ok) return { ok: false, error: employees.error || 'toast_employees_failed', employeeAttempts: employees.attempts || [] };
 
   const results = [];
   for (const row of employees.rows) {
@@ -377,10 +394,8 @@ async function runBarrioToastProof(locationName) {
       'AIRTABLE_API_CONFIG_TABLE',
       'AIRTABLE_API_CONFIG_CLIENT_NAME_FIELD',
       'AIRTABLE_API_CONFIG_DISPLAY_NAME_FIELD',
-      'TOAST_STD_CLIENT_ID_BARRIO',
-      'TOAST_STD_CLIENT_SECRET_BARRIO',
-      'TOAST_AN_CLIENT_ID_BARRIO',
-      'TOAST_AN_CLIENT_SECRET_BARRIO',
+      'TOAST_STD_CLIENT_SECRET_<LOCATION_SLUG>',
+      'TOAST_STD_CLIENT_SECRET_BARRIO (Barrio fallback only)',
     ],
   };
 
@@ -406,9 +421,10 @@ async function runBarrioToastProof(locationName) {
       hasLocationId: !!nonSecretConfig.locationId,
       hasManagementGroupGuid: !!nonSecretConfig.managementGroupGuid,
       hasAnalyticsScope: !!nonSecretConfig.analyticsScope,
+      hasStandardClientId: !!nonSecretConfig.standardClientId,
     };
 
-    const secrets = getBarrioToastSecrets();
+    const secrets = resolveStandardToastSecrets({ fields: apiConfig.fields, locationName: cleanedLocationName });
     result.secretConfig = secrets.summary;
 
     if (
@@ -448,6 +464,7 @@ async function runBarrioToastProof(locationName) {
 
     if (!employees.ok) {
       result.failureReason = employees.error || 'toast_employees_failed';
+      result.employeeAttempts = employees.attempts || [];
       return result;
     }
 

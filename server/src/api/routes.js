@@ -744,7 +744,11 @@ function router(req, res) {
         if (!result.ok) {
           const code = String(result.error || '');
           if (code === 'locationName_required') return json(res, 400, { error: code });
-          return json(res, 422, { error: code || 'toast_search_failed' });
+          return json(res, 422, {
+            error: code || 'toast_search_failed',
+            employeeAttempts: Array.isArray(result.employeeAttempts) ? result.employeeAttempts : [],
+            authStatus: result.authStatus || null,
+          });
         }
         return json(res, 200, {
           employees: result.results,
