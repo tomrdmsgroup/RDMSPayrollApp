@@ -458,6 +458,30 @@ async function testRunValidationDupTimeRule() {
   assert.equal(result.findings.every((f) => f.toast_employee_id === 'D1'), true);
 }
 
+
+async function testRunValidationLateClockoutUsesLocationTimezoneFromContext() {
+  const result = await runValidation({
+    run: { id: 116, client_location_id: 'Sushi Ran', period_start: '2026-04-01', period_end: '2026-04-30' },
+    context: {
+      active_rule_ids: ['LATECLOCKOUT'],
+      location_timezone: 'America/Los_Angeles',
+      comparison_periods: [],
+      toast_rows_by_period: {
+        '2026-04-01__2026-04-30': [
+          // 10:03 PM PT (05:03 AM UTC next day) should not be flagged
+          { employeeGuid: 'TZ1', employeeName: 'Pacific PM', inDate: '2026-04-18T22:55:00.000Z', outDate: '2026-04-19T05:03:00.000Z' },
+          // 5:03 AM PT should be flagged
+          { employeeGuid: 'TZ2', employeeName: 'Pacific AM', inDate: '2026-04-19T07:55:00.000Z', outDate: '2026-04-19T12:03:00.000Z' },
+        ],
+      },
+    },
+    exclusions: [],
+  });
+
+  const lateIds = result.findings.filter((f) => f.rule_id === 'LATECLOCKOUT').map((f) => f.toast_employee_id);
+  assert.deepEqual(lateIds, ['TZ2']);
+}
+
 async function testRunValidationShiftRulesUseLocationTimezoneForEvaluationAndDetail() {
   const result = await runValidation({
     run: { id: 115, client_location_id: 'Sushi Ran', period_start: '2026-04-01', period_end: '2026-04-30' },
@@ -516,5 +540,6 @@ module.exports = {
   testRunValidationLateClockoutRule,
   testRunValidationLongShiftRuleAndConfigBehavior,
   testRunValidationDupTimeRule,
+  testRunValidationLateClockoutUsesLocationTimezoneFromContext,
   testRunValidationShiftRulesUseLocationTimezoneForEvaluationAndDetail,
 };

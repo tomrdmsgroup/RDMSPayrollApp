@@ -1125,9 +1125,13 @@ async function getPayPeriodSelectorForLocationName(locationName) {
   const todayYmd = toYmd(new Date().toISOString());
   const selector = buildPayPeriodSelectorFromSortedRows(rows, todayYmd);
 
+  const timeZone = (vitals['Time Zone'] || '').toString().trim() || null;
+
   return {
     location_name: name,
     payroll_calendar: calendarName,
+    time_zone: timeZone,
+    timezone: timeZone,
     current_pay_period: selector.current_pay_period,
     next_pay_period: selector.next_pay_period,
     prior_pay_periods: selector.prior_pay_periods,
