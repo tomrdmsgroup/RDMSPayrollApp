@@ -209,6 +209,20 @@ function normalizeRateAmount(row) {
   return derived;
 }
 
+function normalizeWorkedHours(row) {
+  const totalWorked =
+    toNum(row?.workedHours) ??
+    toNum(row?.totalWorkedHours) ??
+    toNum(row?.total_hours_worked) ??
+    toNum(row?.hoursWorked);
+  if (totalWorked !== null) return totalWorked;
+
+  const regularHours = toNum(row?.regularHours) ?? toNum(row?.hoursRegular);
+  const overtimeHours = toNum(row?.overtimeHours) ?? toNum(row?.hoursOvertime);
+  if (regularHours === null && overtimeHours === null) return null;
+  return (regularHours ?? 0) + (overtimeHours ?? 0);
+}
+
 function normalizeDepartmentName(row) {
   return (
     pickString(row, ['jobName', 'jobTitle', 'job', 'departmentName', 'department', 'laborDepartmentName']) ||
@@ -653,7 +667,8 @@ function buildFindings({ rowsByPeriod, selectedPeriod, priorPeriods, excludedAud
         const inDate = parseValidDate(row?.inDate);
         const outDate = parseValidDate(row?.outDate);
         if (!inDate || !outDate) continue;
-        const durationHours = (outDate.getTime() - inDate.getTime()) / 3600000;
+        const workedHours = normalizeWorkedHours(row);
+        const durationHours = workedHours ?? (outDate.getTime() - inDate.getTime()) / 3600000;
         if (!Number.isFinite(durationHours) || durationHours <= threshold) continue;
         const rounded = Number(durationHours.toFixed(2));
         findings.push({
@@ -661,7 +676,7 @@ function buildFindings({ rowsByPeriod, selectedPeriod, priorPeriods, excludedAud
           toast_employee_id: employeeId,
           rule_id: 'LONGSHIFT',
           rule_name: rule?.rule_name || 'Shift over X hours',
-          detail: `Shift length ${rounded} hours exceeds threshold ${threshold} on ${formatDateYmd(
+          detail: `Shift length ${rounded} worked hours exceeds threshold ${threshold} on ${formatDateYmd(
             inDate,
             timeZone
           )}: in ${formatClockTime(inDate, timeZone)}, out ${formatClockTime(outDate, timeZone)}`,
