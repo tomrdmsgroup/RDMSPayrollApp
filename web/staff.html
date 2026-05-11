@@ -976,7 +976,7 @@
       existing: true,
     },
     toastOriginal: {
-      label: "Step 1: POS Import",
+      label: "Earnings Audit Step 1: POS Import",
       main: "earningsAuditMain",
       subtitle: "Confirm pay period, upload POS payroll CSV, and review normalized uploaded rows.",
       existing: true,
@@ -4349,8 +4349,10 @@
               </select>
             </label>
           </div>
+        </div>
 
-          <div class="sectionTitle">POS payroll CSV upload</div>
+        <div class="panel toastOriginalControlsPanel">
+          <div class="sectionTitle" style="margin-top:0;">POS Payroll CSV Upload</div>
           <p class="sectionHelp">Upload the POS payroll export CSV for the selected pay period.</p>
           <div class="row" style="margin-top:8px;align-items:flex-end;">
             <label style="min-width:320px;flex:1;">
@@ -4380,6 +4382,10 @@
                 </div>`
               : ""
           }
+        </div>
+
+        <div class="panel toastOriginalControlsPanel">
+          <div class="sectionTitle" style="margin-top:0;">Uploaded Payroll Review</div>
           ${renderUploadReviewSection(state.toastOriginalCsvBaseline)}
           <div class="sectionTitle">Normalized uploaded CSV rows</div>
           <p class="sectionHelp">Read-only normalized view of the uploaded CSV file.</p>
