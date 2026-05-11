@@ -431,6 +431,65 @@ async function testRunValidationLongShiftRuleAndConfigBehavior() {
   assert.equal(invalidConfig.findings.length, 0);
 }
 
+async function testRunValidationLongShiftUsesWorkedHoursBeforeElapsedSpan() {
+  const result = await runValidation({
+    run: { id: 121, client_location_id: 'Test Location', period_start: '2026-04-01', period_end: '2026-04-30' },
+    context: {
+      active_rule_ids: ['LONGSHIFT'],
+      comparison_periods: [],
+      active_rule_configs: { LONGSHIFT: { params: JSON.stringify({ maxHours: 9 }) } },
+      toast_rows_by_period: {
+        '2026-04-01__2026-04-30': [
+          {
+            employeeGuid: 'W1',
+            employeeName: 'Worked One',
+            inDate: '2026-04-17T09:47:00',
+            outDate: '2026-04-17T20:28:00',
+            regularHours: 8,
+            overtimeHours: 1.21,
+          },
+          {
+            employeeGuid: 'W2',
+            employeeName: 'Worked Two',
+            inDate: '2026-04-17T09:00:00',
+            outDate: '2026-04-17T20:15:00',
+            regularHours: 8,
+            overtimeHours: 0.5,
+          },
+          {
+            employeeGuid: 'W3',
+            employeeName: 'Elapsed Three',
+            inDate: '2026-04-17T09:00:00',
+            outDate: '2026-04-17T19:00:00',
+          },
+          {
+            employeeGuid: 'WX',
+            employeeName: 'Excluded Worked',
+            inDate: '2026-04-17T09:00:00',
+            outDate: '2026-04-17T20:00:00',
+            regularHours: 8,
+            overtimeHours: 2,
+          },
+        ],
+      },
+    },
+    exclusions: [{ toast_employee_id: ' WX ', active: true, effective_from: '2026-01-01', effective_to: '2026-12-31' }],
+  });
+
+  const longFindings = result.findings.filter((f) => f.rule_id === 'LONGSHIFT');
+  const ids = longFindings.map((f) => f.toast_employee_id).sort();
+  assert.deepEqual(ids, ['W1', 'W3']);
+
+  const workedDetail = longFindings.find((f) => f.toast_employee_id === 'W1')?.detail || '';
+  assert.equal(workedDetail.includes('Shift length 9.21 worked hours exceeds threshold 9'), true);
+  assert.equal(workedDetail.includes('in 9:47 AM, out 8:28 PM'), true);
+
+  assert.equal(longFindings.some((f) => f.toast_employee_id === 'W2'), false);
+
+  const fallbackDetail = longFindings.find((f) => f.toast_employee_id === 'W3')?.detail || '';
+  assert.equal(fallbackDetail.includes('Shift length 10 worked hours exceeds threshold 9'), true);
+}
+
 async function testRunValidationDupTimeRule() {
   const result = await runValidation({
     run: { id: 114, client_location_id: 'Test Location', period_start: '2026-03-01', period_end: '2026-03-14' },
@@ -658,6 +717,7 @@ module.exports = {
   testRunValidationMinWageUsesActiveRuleConfigParams,
   testRunValidationLateClockoutRule,
   testRunValidationLongShiftRuleAndConfigBehavior,
+  testRunValidationLongShiftUsesWorkedHoursBeforeElapsedSpan,
   testRunValidationDupTimeRule,
   testRunValidationLateClockoutUsesLocationTimezoneFromContext,
   testRunValidationShiftRulesUseLocationTimezoneForEvaluationAndDetail,
