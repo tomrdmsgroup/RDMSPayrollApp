@@ -600,7 +600,7 @@ function buildFindings({ rowsByPeriod, selectedPeriod, priorPeriods, excludedAud
           toast_employee_id: employeeId,
           rule_id: 'OTTHRESHOLD',
           rule_name: rule?.rule_name || 'OT over X Hours',
-          detail: `Overtime hours ${totalOvertime} exceed threshold ${threshold}`,
+          detail: `Overtime hours ${totalOvertime.toFixed(3)} exceed threshold ${threshold}`,
         });
       }
     }

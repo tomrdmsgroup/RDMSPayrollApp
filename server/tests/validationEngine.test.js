@@ -250,8 +250,8 @@ async function testRunValidationOtThresholdRule() {
       comparison_periods: [],
       toast_rows_by_period: {
         '2026-03-01__2026-03-14': [
-          { employeeGuid: 'O1', employeeName: 'Over One', overtimeHours: 3 },
-          { employeeGuid: 'O1', employeeName: 'Over One', overtimeHours: 3 },
+          { employeeGuid: 'O1', employeeName: 'Over One', overtimeHours: 10.1234 },
+          { employeeGuid: 'O1', employeeName: 'Over One', overtimeHours: 4.574335555555557 },
           { employeeGuid: 'O2', employeeName: 'Equal Two', overtimeHours: 5 },
           { employeeGuid: 'OX', employeeName: 'Excluded OT', overtimeHours: 6 },
         ],
@@ -264,7 +264,7 @@ async function testRunValidationOtThresholdRule() {
   assert.equal(result.findings.length, 1);
   assert.equal(result.findings[0].rule_id, 'OTTHRESHOLD');
   assert.equal(result.findings[0].toast_employee_id, 'O1');
-  assert.equal(result.findings[0].detail.includes('6'), true);
+  assert.equal(result.findings[0].detail, 'Overtime hours 14.698 exceed threshold 5');
 }
 
 async function testRunValidationOtThresholdInvalidConfigSkips() {
