@@ -522,6 +522,125 @@ async function testRunValidationShiftRulesUseLocationTimezoneForEvaluationAndDet
   assert.equal(dupDetail.includes('9:00 AM-12:00 PM overlaps 11:00 AM-2:00 PM'), true);
 }
 
+async function testRunValidation7DaysFixedBlockBehavior() {
+  const result = await runValidation({
+    run: { id: 117, client_location_id: 'Test Location', period_start: '2026-03-01', period_end: '2026-03-14' },
+    context: {
+      active_rule_ids: ['7DAYS'],
+      comparison_periods: [],
+      toast_rows_by_period: {
+        '2026-03-01__2026-03-14': [
+          ...['2026-03-01', '2026-03-02', '2026-03-03', '2026-03-04', '2026-03-05', '2026-03-06', '2026-03-07'].map((d) => ({
+            employeeGuid: 'B1',
+            employeeName: 'Block One',
+            businessDate: d,
+          })),
+          ...['2026-03-08', '2026-03-09', '2026-03-10', '2026-03-11', '2026-03-12', '2026-03-13', '2026-03-14'].map((d) => ({
+            employeeGuid: 'B2',
+            employeeName: 'Block Two',
+            businessDate: d,
+          })),
+          ...['2026-03-04', '2026-03-05', '2026-03-06', '2026-03-07', '2026-03-08', '2026-03-09', '2026-03-10'].map((d) => ({
+            employeeGuid: 'X1',
+            employeeName: 'Cross Boundary',
+            businessDate: d,
+          })),
+          { employeeGuid: 'B1', employeeName: 'Block One', businessDate: '2026-03-03' },
+          { employeeGuid: 'EX7', employeeName: 'Excluded Seven', businessDate: '2026-03-01' },
+          { employeeGuid: 'EX7', employeeName: 'Excluded Seven', businessDate: '2026-03-02' },
+          { employeeGuid: 'EX7', employeeName: 'Excluded Seven', businessDate: '2026-03-03' },
+          { employeeGuid: 'EX7', employeeName: 'Excluded Seven', businessDate: '2026-03-04' },
+          { employeeGuid: 'EX7', employeeName: 'Excluded Seven', businessDate: '2026-03-05' },
+          { employeeGuid: 'EX7', employeeName: 'Excluded Seven', businessDate: '2026-03-06' },
+          { employeeGuid: 'EX7', employeeName: 'Excluded Seven', businessDate: '2026-03-07' },
+        ],
+      },
+    },
+    exclusions: [{ toast_employee_id: 'EX7', active: true, effective_from: '2026-01-01', effective_to: '2026-12-31' }],
+  });
+
+  const seven = result.findings.filter((f) => f.rule_id === '7DAYS');
+  assert.deepEqual(seven.map((f) => f.toast_employee_id).sort(), ['B1', 'B2']);
+  assert.equal(seven.filter((f) => f.toast_employee_id === 'B1').length, 1);
+  assert.equal(seven.some((f) => f.toast_employee_id === 'X1'), false);
+}
+
+async function testRunValidation7DaysInactiveDoesNotEmit() {
+  const result = await runValidation({
+    run: { id: 118, client_location_id: 'Test Location', period_start: '2026-03-01', period_end: '2026-03-14' },
+    context: {
+      active_rule_ids: ['NEWEMP'],
+      comparison_periods: [],
+      toast_rows_by_period: {
+        '2026-03-01__2026-03-14': [
+          { employeeGuid: 'I7', employeeName: 'Inactive Seven', inDate: '2026-03-01T09:00:00Z' },
+          { employeeGuid: 'I7', employeeName: 'Inactive Seven', inDate: '2026-03-02T09:00:00Z' },
+          { employeeGuid: 'I7', employeeName: 'Inactive Seven', inDate: '2026-03-03T09:00:00Z' },
+          { employeeGuid: 'I7', employeeName: 'Inactive Seven', inDate: '2026-03-04T09:00:00Z' },
+          { employeeGuid: 'I7', employeeName: 'Inactive Seven', inDate: '2026-03-05T09:00:00Z' },
+          { employeeGuid: 'I7', employeeName: 'Inactive Seven', inDate: '2026-03-06T09:00:00Z' },
+          { employeeGuid: 'I7', employeeName: 'Inactive Seven', inDate: '2026-03-07T09:00:00Z' },
+        ],
+      },
+    },
+    exclusions: [],
+  });
+  assert.equal(result.findings.some((f) => f.rule_id === '7DAYS'), false);
+}
+
+async function testRunValidationMissingEmpRuleBehavior() {
+  const result = await runValidation({
+    run: { id: 119, client_location_id: 'Test Location', period_start: '2026-03-01', period_end: '2026-03-14' },
+    context: {
+      active_rule_ids: ['MISSINGEMP'],
+      comparison_periods: [
+        { period_start: '2026-02-15', period_end: '2026-02-28' },
+        { period_start: '2026-02-01', period_end: '2026-02-14' },
+        { period_start: '2026-01-15', period_end: '2026-01-31' },
+      ],
+      toast_rows_by_period: {
+        '2026-03-01__2026-03-14': [{ employeeGuid: 'S1', employeeName: 'Selected One', regularHours: 4 }],
+        '2026-02-15__2026-02-28': [
+          { employeeGuid: 'M1', employeeName: 'Missing One', regularHours: 3 },
+          { employeeGuid: 'S1', employeeName: 'Selected One', regularHours: 3 },
+          { employeeGuid: 'P1', employeeName: 'Prior One Only', regularHours: 3 },
+          { employeeGuid: 'EXM', employeeName: 'Excluded Missing', regularHours: 3 },
+        ],
+        '2026-02-01__2026-02-14': [
+          { employeeGuid: 'M1', employeeName: 'Missing One', inDate: '2026-02-05T12:00:00Z' },
+          { employeeGuid: 'S1', employeeName: 'Selected One', regularHours: 5 },
+          { employeeGuid: 'EXM', employeeName: 'Excluded Missing', regularHours: 5 },
+        ],
+        '2026-01-15__2026-01-31': [{ employeeGuid: 'N6', employeeName: 'Old Six', regularHours: 8 }],
+      },
+    },
+    exclusions: [{ toast_employee_id: 'EXM', active: true, effective_from: '2026-01-01', effective_to: '2026-12-31' }],
+  });
+
+  const missing = result.findings.filter((f) => f.rule_id === 'MISSINGEMP').map((f) => f.toast_employee_id);
+  assert.deepEqual(missing, ['M1']);
+}
+
+async function testRunValidationMissingEmpInactiveDoesNotEmit() {
+  const result = await runValidation({
+    run: { id: 120, client_location_id: 'Test Location', period_start: '2026-03-01', period_end: '2026-03-14' },
+    context: {
+      active_rule_ids: ['NEWEMP'],
+      comparison_periods: [
+        { period_start: '2026-02-15', period_end: '2026-02-28' },
+        { period_start: '2026-02-01', period_end: '2026-02-14' },
+      ],
+      toast_rows_by_period: {
+        '2026-03-01__2026-03-14': [],
+        '2026-02-15__2026-02-28': [{ employeeGuid: 'M1', employeeName: 'Missing One', regularHours: 2 }],
+        '2026-02-01__2026-02-14': [{ employeeGuid: 'M1', employeeName: 'Missing One', regularHours: 2 }],
+      },
+    },
+    exclusions: [],
+  });
+  assert.equal(result.findings.some((f) => f.rule_id === 'MISSINGEMP'), false);
+}
+
 module.exports = {
   testRunValidationFindsNewEmpRateDept,
   testRunValidationHonorsExclusionsAndActiveRules,
@@ -542,4 +661,8 @@ module.exports = {
   testRunValidationDupTimeRule,
   testRunValidationLateClockoutUsesLocationTimezoneFromContext,
   testRunValidationShiftRulesUseLocationTimezoneForEvaluationAndDetail,
+  testRunValidation7DaysFixedBlockBehavior,
+  testRunValidation7DaysInactiveDoesNotEmit,
+  testRunValidationMissingEmpRuleBehavior,
+  testRunValidationMissingEmpInactiveDoesNotEmit,
 };

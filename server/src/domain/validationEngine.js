@@ -20,6 +20,8 @@ const SUPPORTED_RULE_IDS = new Set([
   'LATECLOCKOUT',
   'LONGSHIFT',
   'DUPTIME',
+  '7DAYS',
+  'MISSINGEMP',
 ]);
 
 function trimErrorText(value, maxLen = 1800) {
@@ -237,6 +239,14 @@ function parseValidDate(value) {
   if (!value) return null;
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function deriveWorkedDateYmd(row, timeZone = null) {
+  const businessDate = safeTrim(row?.businessDate);
+  if (businessDate) return businessDate;
+  const inDate = parseValidDate(row?.inDate);
+  if (!inDate) return null;
+  return formatDateYmd(inDate, timeZone);
 }
 
 function sanitizeTimeZone(timeZone) {
@@ -697,6 +707,94 @@ function buildFindings({ rowsByPeriod, selectedPeriod, priorPeriods, excludedAud
           });
         }
       }
+    }
+  }
+
+  if (activeRuleIds.has('7DAYS')) {
+    const rule = catalogByRule.get('7DAYS');
+    const blockStarts = [];
+    const selectedStart = parseValidDate(`${selectedPeriod?.period_start}T00:00:00`);
+    if (selectedStart) {
+      for (let offset = 0; offset <= 13; offset += 7) {
+        const start = new Date(selectedStart.getTime() + offset * 86400000);
+        const end = new Date(start.getTime() + 6 * 86400000);
+        blockStarts.push({ start, end });
+      }
+    }
+
+    const workedDatesByEmployee = new Map();
+    for (const row of selectedRows) {
+      const employeeId = normalizeEmployeeId(row);
+      if (!employeeId || excludedAuditIds.has(employeeId)) continue;
+      const workedDate = deriveWorkedDateYmd(row, timeZone);
+      if (!workedDate) continue;
+      if (!workedDatesByEmployee.has(employeeId)) workedDatesByEmployee.set(employeeId, new Set());
+      workedDatesByEmployee.get(employeeId).add(workedDate);
+    }
+
+    for (const [employeeId, workedDates] of workedDatesByEmployee.entries()) {
+      for (const block of blockStarts) {
+        const allDaysWorked = Array.from({ length: 7 }).every((_, i) => {
+          const day = new Date(block.start.getTime() + i * 86400000);
+          return workedDates.has(formatDateYmd(day, timeZone));
+        });
+        if (!allDaysWorked) continue;
+        findings.push({
+          employee_name: employeeNames.get(employeeId) || `Employee ${employeeId}`,
+          toast_employee_id: employeeId,
+          rule_id: '7DAYS',
+          rule_name: rule?.rule_name || '7 consecutive days',
+          detail: `Employee worked all 7 days in workweek ${formatDateYmd(block.start, timeZone)} to ${formatDateYmd(
+            block.end,
+            timeZone
+          )}`,
+        });
+      }
+    }
+  }
+
+  if (activeRuleIds.has('MISSINGEMP')) {
+    const rule = catalogByRule.get('MISSINGEMP');
+    const prior2Keys = priorPeriods.slice(0, 2).map((p) => `${p.period_start}__${p.period_end}`);
+    const presenceByPeriod = prior2Keys.map(() => new Set());
+    const selectedPresence = new Set();
+    const hasValidTime = (row) =>
+      (toNum(row?.regularHours) ?? toNum(row?.hoursRegular) ?? toNum(row?.hours) ?? toNum(row?.totalHours) ?? 0) > 0 ||
+      !!safeTrim(row?.businessDate) ||
+      parseValidDate(row?.inDate) !== null ||
+      parseValidDate(row?.outDate) !== null;
+
+    for (const row of selectedRows) {
+      const employeeId = normalizeEmployeeId(row);
+      if (!employeeId || excludedAuditIds.has(employeeId) || !hasValidTime(row)) continue;
+      selectedPresence.add(employeeId);
+    }
+    prior2Keys.forEach((key, idx) => {
+      const rows = Array.isArray(rowsByPeriod[key]) ? rowsByPeriod[key] : [];
+      for (const row of rows) {
+        const employeeId = normalizeEmployeeId(row);
+        if (!employeeId || excludedAuditIds.has(employeeId) || !hasValidTime(row)) continue;
+        presenceByPeriod[idx].add(employeeId);
+        touchName(employeeId, normalizeEmployeeName(row));
+      }
+    });
+
+    const priorIntersection = new Set();
+    if (presenceByPeriod.length >= 2) {
+      for (const employeeId of presenceByPeriod[0]) {
+        if (presenceByPeriod[1].has(employeeId)) priorIntersection.add(employeeId);
+      }
+    }
+
+    for (const employeeId of priorIntersection) {
+      if (selectedPresence.has(employeeId)) continue;
+      findings.push({
+        employee_name: employeeNames.get(employeeId) || `Employee ${employeeId}`,
+        toast_employee_id: employeeId,
+        rule_id: 'MISSINGEMP',
+        rule_name: rule?.rule_name || 'Employee missing this period',
+        detail: 'Employee had hours in the prior 2 pay periods but has no hours in the selected period',
+      });
     }
   }
 
